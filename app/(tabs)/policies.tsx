@@ -1,13 +1,15 @@
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/empty-state';
+import { LoadingState } from '@/components/loading-state';
 import { PolicyCard } from '@/components/policy-card';
 import { ScreenContainer } from '@/components/screen-container';
 import { SectionHeader } from '@/components/section-header';
 import { theme } from '@/constants/theme';
-import { mockPolicies } from '@/data/mock-policies';
+import { usePolicies } from '@/context/policies-context';
 import { PolicyStatus } from '@/types/policy';
 
 type FilterValue = 'All' | PolicyStatus;
@@ -15,15 +17,41 @@ type FilterValue = 'All' | PolicyStatus;
 const filters: FilterValue[] = ['All', 'Active', 'Pending', 'Lapsed'];
 
 export default function PoliciesScreen() {
+  const insets = useSafeAreaInsets();
   const [selectedFilter, setSelectedFilter] = useState<FilterValue>('All');
+  const { policies, isLoadingPolicies, policiesError, refreshPolicies } = usePolicies();
 
   const filteredPolicies = useMemo(() => {
-    if (selectedFilter === 'All') return mockPolicies;
-    return mockPolicies.filter((policy) => policy.status === selectedFilter);
-  }, [selectedFilter]);
+    if (selectedFilter === 'All') return policies;
+    return policies.filter((policy) => policy.status === selectedFilter);
+  }, [policies, selectedFilter]);
+
+  if (isLoadingPolicies) {
+    return (
+      <ScreenContainer>
+        <LoadingState />
+      </ScreenContainer>
+    );
+  }
+
+  if (policiesError) {
+    return (
+      <ScreenContainer>
+        <EmptyState
+          icon="warning-outline"
+          title="Unable to load policies"
+          description={policiesError}
+          actionLabel="Retry"
+          onAction={() => {
+            void refreshPolicies();
+          }}
+        />
+      </ScreenContainer>
+    );
+  }
 
   return (
-    <ScreenContainer>
+    <ScreenContainer contentContainerStyle={{ paddingBottom: insets.bottom + 116 }}>
       <SectionHeader
         title="Policies"
         subtitle="Manage coverage details and policy documents"

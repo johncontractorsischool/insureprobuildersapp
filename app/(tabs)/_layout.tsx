@@ -1,5 +1,4 @@
-import { router, Tabs } from 'expo-router';
-import { useEffect } from 'react';
+import { Redirect, Tabs } from 'expo-router';
 import { StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -9,20 +8,18 @@ import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 
 export default function TabLayout() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoadingAuth } = useAuth();
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      router.replace('/(auth)/login');
-    }
-  }, [isAuthenticated]);
-
-  if (!isAuthenticated) {
+  if (isLoadingAuth) {
     return (
       <ScreenContainer scroll={false}>
         <LoadingState title="Securing your session" description="Redirecting to login..." />
       </ScreenContainer>
     );
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/(auth)/login" />;
   }
 
   return (

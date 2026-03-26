@@ -24,6 +24,7 @@ export type Policy = {
   productName: string;
   status: PolicyStatus;
   policyNumber: string;
+  carrierName: string;
   premiumMonthly: number;
   effectiveDate: string;
   renewalDate: string;

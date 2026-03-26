@@ -1,14 +1,14 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Switch, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
-import { BrandMark } from '@/components/brand-mark';
 import { ScreenContainer } from '@/components/screen-container';
 import { SectionHeader } from '@/components/section-header';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { getNameFromEmail } from '@/utils/format';
+import { getNameFromCustomer } from '@/utils/format';
 
 function PreferenceRow({
   label,
@@ -38,26 +38,29 @@ function PreferenceRow({
 }
 
 export default function ProfileScreen() {
-  const { userEmail, signOut } = useAuth();
+  const insets = useSafeAreaInsets();
+  const { customer, userEmail, signOut } = useAuth();
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [smsAlerts, setSmsAlerts] = useState(false);
   const [paperless, setPaperless] = useState(true);
 
-  const handleLogout = () => {
-    signOut();
-    router.replace('/');
+  const handleContactUs = () => {
+    router.push({
+      pathname: '/forms/[slug]',
+      params: { slug: 'contact' },
+    });
+  };
+
+  const handleLogout = async () => {
+    await signOut();
   };
 
   return (
-    <ScreenContainer>
-      <View style={styles.top}>
-        <BrandMark />
-      </View>
-
+    <ScreenContainer contentContainerStyle={{ paddingBottom: insets.bottom + 116 }}>
       <View style={styles.accountCard}>
         <Text style={styles.label}>Account holder</Text>
-        <Text style={styles.name}>{getNameFromEmail(userEmail)}</Text>
-        <Text style={styles.email}>{userEmail ?? 'member@email.com'}</Text>
+        <Text style={styles.name}>{getNameFromCustomer(customer, userEmail)}</Text>
+        <Text style={styles.email}>{customer?.email ?? userEmail ?? 'member@email.com'}</Text>
       </View>
 
       <SectionHeader title="Contact preferences" subtitle="How we communicate policy updates" />
@@ -83,10 +86,15 @@ export default function ProfileScreen() {
         />
       </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerCopy}>
-          Preference toggles are saved locally in this front-end skeleton.
+      <View style={styles.contactCard}>
+        <Text style={styles.contactTitle}>Need help with your account?</Text>
+        <Text style={styles.contactDetail}>
+          Reach our team through the Contact Us form and we will follow up shortly.
         </Text>
+        <AppButton label="Contact Us" variant="secondary" onPress={handleContactUs} />
+      </View>
+
+      <View style={styles.footer}>
         <AppButton label="Log out" variant="danger" onPress={handleLogout} />
       </View>
     </ScreenContainer>
@@ -94,9 +102,6 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  top: {
-    marginTop: theme.spacing.sm,
-  },
   accountCard: {
     borderRadius: theme.radius.lg,
     borderWidth: 1,
@@ -127,6 +132,23 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     ...theme.shadows.surface,
   },
+  contactCard: {
+    borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.lg,
+    gap: theme.spacing.sm,
+    ...theme.shadows.surface,
+  },
+  contactTitle: {
+    ...theme.typography.title,
+    color: theme.colors.textStrong,
+  },
+  contactDetail: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textMuted,
+  },
   preferenceRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -153,10 +175,5 @@ const styles = StyleSheet.create({
   footer: {
     marginTop: theme.spacing.xs,
     gap: theme.spacing.sm,
-  },
-  footerCopy: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.textMuted,
-    textAlign: 'center',
   },
 });

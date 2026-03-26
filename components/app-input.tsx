@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { ComponentProps, useState } from 'react';
-import { StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
+import { ComponentProps, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
 
 import { theme } from '@/constants/theme';
 
@@ -24,19 +24,26 @@ export function AppInput({
   ...props
 }: AppInputProps) {
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef<TextInput>(null);
 
   return (
     <View style={styles.wrapper}>
       <Text style={styles.label}>{label}</Text>
-      <View
+      <Pressable
+        onPress={() => inputRef.current?.focus()}
         style={[
           styles.inputWrap,
           focused ? styles.focused : null,
           errorText ? styles.errorWrap : null,
         ]}>
-        {leftIcon ? <Ionicons name={leftIcon} size={18} color={theme.colors.textSubtle} /> : null}
+        {leftIcon ? (
+          <View pointerEvents="none">
+            <Ionicons name={leftIcon} size={18} color={theme.colors.textSubtle} />
+          </View>
+        ) : null}
         <TextInput
           {...props}
+          ref={inputRef}
           style={[styles.input, style]}
           placeholderTextColor={theme.colors.textSubtle}
           onFocus={(event) => {
@@ -48,7 +55,7 @@ export function AppInput({
             onBlur?.(event);
           }}
         />
-      </View>
+      </Pressable>
       {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
       {!errorText && helperText ? <Text style={styles.helperText}>{helperText}</Text> : null}
     </View>
@@ -84,11 +91,7 @@ const styles = StyleSheet.create({
   },
   focused: {
     borderColor: theme.colors.primaryAccent,
-    shadowColor: theme.colors.primaryAccent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.22,
-    shadowRadius: 8,
-    elevation: 2,
+    backgroundColor: theme.colors.surfaceTint,
   },
   errorWrap: {
     borderColor: theme.colors.danger,

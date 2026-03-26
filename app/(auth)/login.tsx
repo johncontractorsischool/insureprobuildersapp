@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { AppButton } from '@/components/app-button';
 import { AppInput } from '@/components/app-input';
@@ -8,35 +9,79 @@ import { BrandMark } from '@/components/brand-mark';
 import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { fetchCustomersByEmail } from '@/services/customer-api';
+import { isOtpRateLimitError, sendEmailSignInCode, toUserFacingError } from '@/services/auth-flow';
 
 function isEmailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 export default function LoginScreen() {
-  const { setPendingEmail } = useAuth();
+  const { setPendingEmail, setCustomer } = useAuth();
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const handleContinue = () => {
-    if (!isEmailValid(email)) {
+  const handleContinue = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!isEmailValid(normalizedEmail)) {
       setError('Enter a valid email address to continue.');
       return;
     }
 
+    if (submitting) return;
+
     setSubmitting(true);
     setError('');
-    setPendingEmail(email);
 
-    setTimeout(() => {
-      setSubmitting(false);
+    try {
+      const customers = await fetchCustomersByEmail(normalizedEmail);
+
+      if (customers.length === 0) {
+        setError('No account was found for that email address.');
+        return;
+      }
+
+      await sendEmailSignInCode(normalizedEmail);
+
+      setPendingEmail(normalizedEmail);
+      setCustomer(null);
       router.push('/(auth)/verify');
-    }, 450);
+    } catch (caughtError) {
+      if (isOtpRateLimitError(caughtError)) {
+        setPendingEmail(normalizedEmail);
+        setCustomer(null);
+        router.push({ pathname: '/(auth)/verify', params: { hint: 'rate-limited' } });
+        return;
+      }
+
+      setError(
+        toUserFacingError(
+          caughtError,
+          'We could not start secure sign in. Please try again in a moment.'
+        )
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/');
   };
 
   return (
     <ScreenContainer scroll={false}>
+      <Pressable onPress={handleBack} style={styles.backButton} accessibilityRole="button">
+        <Ionicons name="chevron-back" size={18} color={theme.colors.primary} />
+        <Text style={styles.backButtonText}>Back</Text>
+      </Pressable>
+
       <View style={styles.header}>
         <BrandMark />
       </View>
@@ -74,7 +119,20 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   header: {
-    marginTop: theme.spacing.sm,
+    marginTop: theme.spacing.xs,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingRight: 8,
+  },
+  backButtonText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.primary,
+    fontWeight: '700',
   },
   card: {
     marginTop: theme.spacing.md,

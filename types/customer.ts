@@ -1,0 +1,39 @@
+export type Customer = {
+  databaseId?: string | null;
+  commercialName?: string | null;
+  fullName?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  cellPhone?: string | null;
+  customerId?: string | null;
+  insuredId?: string | null;
+  active?: boolean;
+};
+
+export type CustomerLookupRecord = {
+  databaseId: string;
+  commercialName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  type: number | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  stateNameOrAbbreviation: string | null;
+  city: string | null;
+  zipCode: string | null;
+  eMail: string | null;
+  eMail2: string | null;
+  eMail3: string | null;
+  fax: string | null;
+  phone: string | null;
+  cellPhone: string | null;
+  smsPhone: string | null;
+  description: string | null;
+  active: boolean;
+  website: string | null;
+  fein: string | null;
+  customerId: string | null;
+  insuredId: string | null;
+};

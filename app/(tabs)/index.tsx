@@ -1,125 +1,471 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BrandMark } from '@/components/brand-mark';
-import { EmptyState } from '@/components/empty-state';
-import { LoadingState } from '@/components/loading-state';
-import { PolicyCard } from '@/components/policy-card';
 import { ScreenContainer } from '@/components/screen-container';
 import { SectionHeader } from '@/components/section-header';
-import { SummaryCard } from '@/components/summary-card';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { mockPolicies } from '@/data/mock-policies';
-import { formatCurrency, formatDate, getNameFromEmail } from '@/utils/format';
+import { useCompanyProfile } from '@/hooks/use-company-profile';
+import type { CompanyStatusChip } from '@/hooks/use-company-profile';
+import { fetchInsuredAgentsByInsuredDatabaseId, InsuredAgentRecord } from '@/services/agent-api';
+import { getPortalConfig } from '@/services/portal-config';
+import { getNameFromCustomer } from '@/utils/format';
+import {
+  buildEmailLink,
+  buildPhoneLink,
+  buildSmsLink,
+  openInAppBrowser,
+  openExternalLink,
+} from '@/utils/external-actions';
 
-const quickActions = [
-  { id: 'claims', title: 'Start a claim', icon: 'document-text-outline' as const },
-  { id: 'idcard', title: 'Digital ID cards', icon: 'card-outline' as const },
-  { id: 'billing', title: 'Billing settings', icon: 'wallet-outline' as const },
-];
+const AGENT_AVATARS: Record<string, number> = {
+  ariesapcar: require('../../assets/images/ariesapcar.jpg'),
+  cindycardenas: require('../../assets/images/cindycardenas.jpg'),
+  markflorea: require('../../assets/images/markflorea.jpg'),
+  patricianegrete: require('../../assets/images/patricianegrete.jpg'),
+};
+
+const AGENT_SCHEDULE_URLS: Record<string, string> = {
+  markflorea:
+    'https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ1jwBkqzWMh8KNkeYgXs66QqJzwag1hzqJ5KO_boJ9lah8vHC1LZ3Fp41C_eZsvPeA-WOLBOE3r',
+  cindycardenas:
+    'https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ1oK1hjqYp_WkUOBm-58aPNYhpFwwQg1F_iOOP7bA--257yuIJTuoWT28ulDbt3knIav0xOnro8',
+  ariesapcar:
+    'https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ3UivKqDecpg4qEVEQ5S7mbzBK1nLV6ER9eLHO40CptAYmZJyuhnXlhCI62H5o1tRqPLN687awC',
+  patricianegrete:
+    'https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ3Pew7a9naojBMlv07Dp8WaUnR_TEvCFmj-QCKHtKjNumC6rVdOxxjvpqbaj4et5UeeUGaIhprL',
+};
+
+const AGENT_AVATAR_IMAGE_ADJUSTMENTS: Record<string, { scale: number; translateY: number }> = {
+  ariesapcar: { scale: 1.14, translateY: 3 },
+};
+
+const DASHBOARD_SKELETON_MIN_MS = 3000;
+
+const COMPANY_STATUS_CHIP_STYLES: Record<
+  CompanyStatusChip,
+  { backgroundColor: string; textColor: string }
+> = {
+  Active: {
+    backgroundColor: '#EBF9F1',
+    textColor: theme.colors.success,
+  },
+  Current: {
+    backgroundColor: '#E9F2FF',
+    textColor: '#295E9C',
+  },
+  Inactive: {
+    backgroundColor: theme.colors.dangerSoft,
+    textColor: theme.colors.danger,
+  },
+};
+
+function getInitials(value: string) {
+  const parts = value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  if (parts.length === 0) return 'AG';
+  return parts.map((part) => part.charAt(0).toUpperCase()).join('');
+}
+
+function normalizeText(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function toAvatarKey(value: string) {
+  return value.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+}
+
+function DashboardSkeleton({ dashboardBottomPadding }: { dashboardBottomPadding: number }) {
+  return (
+    <ScreenContainer contentContainerStyle={{ paddingBottom: dashboardBottomPadding }}>
+      <View style={styles.header}>
+        <View style={styles.headerCopy}>
+          <BrandMark />
+          <View style={styles.accountCard}>
+            <View style={[styles.skeletonBlock, styles.skeletonLabel]} />
+            <View style={[styles.skeletonBlock, styles.skeletonHeadline]} />
+            <View style={[styles.skeletonBlock, styles.skeletonLineWide]} />
+          </View>
+        </View>
+      </View>
+
+      <SectionHeader title="Your Agent" />
+      <View style={styles.card}>
+        <View style={styles.agentTopRow}>
+          <View style={styles.skeletonAvatar} />
+          <View style={styles.agentCopy}>
+            <View style={[styles.skeletonBlock, styles.skeletonLineMedium]} />
+            <View style={[styles.skeletonBlock, styles.skeletonLineWide]} />
+            <View style={[styles.skeletonBlock, styles.skeletonLineWide]} />
+          </View>
+        </View>
+        <View style={styles.actionGrid}>
+          {Array.from({ length: 4 }).map((_, index) => (
+            <View key={index} style={[styles.actionCard, styles.skeletonCard]}>
+              <View style={[styles.skeletonBlock, styles.skeletonIcon]} />
+              <View style={[styles.skeletonBlock, styles.skeletonLineMedium]} />
+              <View style={[styles.skeletonBlock, styles.skeletonLineShort]} />
+            </View>
+          ))}
+        </View>
+      </View>
+
+      <SectionHeader title="Company info" subtitle="License snapshot and compliance status" />
+      <View style={styles.card}>
+        {Array.from({ length: 3 }).map((_, index) => (
+          <View key={index} style={styles.infoRow}>
+            <View style={[styles.skeletonBlock, styles.skeletonLineShort]} />
+            <View style={[styles.skeletonBlock, styles.skeletonLineMedium]} />
+          </View>
+        ))}
+        <View style={styles.companyActions}>
+          <View style={[styles.skeletonButton, styles.skeletonButtonPrimary]} />
+          <View style={styles.skeletonButton} />
+        </View>
+      </View>
+
+      <SectionHeader title="Actions" />
+      <View style={styles.card}>
+        <View style={[styles.skeletonButton, styles.skeletonButtonPrimary]} />
+        <View style={styles.skeletonButton} />
+      </View>
+    </ScreenContainer>
+  );
+}
 
 export default function DashboardScreen() {
-  const { userEmail } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const insets = useSafeAreaInsets();
+  const { customer, userEmail } = useAuth();
+  const portalConfig = useMemo(() => getPortalConfig(), []);
+  const [agent, setAgent] = useState<InsuredAgentRecord | null>(null);
+  const [isLoadingAgent, setIsLoadingAgent] = useState(false);
+  const [agentLookupNotice, setAgentLookupNotice] = useState<string | null>(null);
+  const [isMinimumSkeletonVisible, setIsMinimumSkeletonVisible] = useState(true);
+  const { isLoadingCompany, companyLookupNotice, cslbLink, summaryRows, statusChips, statusFallbackText } =
+    useCompanyProfile();
+  // `/insuredAgents?insuredId=` expects the insured *database* id (UUID from `databaseId`).
+  const insuredLookupId = useMemo(() => {
+    const insuredDatabaseId = customer?.databaseId?.trim();
+    if (insuredDatabaseId) return insuredDatabaseId;
+    return customer?.insuredId?.trim() || '';
+  }, [customer?.databaseId, customer?.insuredId]);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 700);
-    return () => clearTimeout(timer);
+    let isMounted = true;
+
+    const hydrateAgent = async () => {
+      if (!insuredLookupId) {
+        setAgent(null);
+        setAgentLookupNotice(null);
+        setIsLoadingAgent(false);
+        return;
+      }
+
+      setIsLoadingAgent(true);
+      setAgentLookupNotice(null);
+      try {
+        const agents = await fetchInsuredAgentsByInsuredDatabaseId(insuredLookupId);
+        if (!isMounted) return;
+
+        const primaryAgent = agents[0] ?? null;
+        setAgent(primaryAgent);
+        if (!primaryAgent) {
+          setAgentLookupNotice('No assigned agent found from API. Showing configured fallback.');
+        }
+      } catch {
+        if (!isMounted) return;
+        setAgent(null);
+        setAgentLookupNotice('Unable to load agent from API. Showing configured fallback.');
+      } finally {
+        if (isMounted) {
+          setIsLoadingAgent(false);
+        }
+      }
+    };
+
+    void hydrateAgent();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [insuredLookupId]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setIsMinimumSkeletonVisible(false);
+    }, DASHBOARD_SKELETON_MIN_MS);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
   }, []);
 
-  const activePolicies = useMemo(
-    () => mockPolicies.filter((policy) => policy.status === 'Active'),
-    []
-  );
-  const monthlyTotal = useMemo(
-    () => activePolicies.reduce((sum, policy) => sum + policy.premiumMonthly, 0),
-    [activePolicies]
-  );
-  const nextRenewal = useMemo(() => {
-    const sorted = [...activePolicies].sort((a, b) =>
-      a.renewalDate.localeCompare(b.renewalDate)
-    );
-    return sorted[0];
-  }, [activePolicies]);
+  const resolvedAgent = useMemo(() => {
+    const fullName = [normalizeText(agent?.firstName), normalizeText(agent?.lastName)]
+      .filter((entry): entry is string => Boolean(entry))
+      .join(' ');
 
-  if (loading) {
-    return (
-      <ScreenContainer>
-        <LoadingState />
-      </ScreenContainer>
-    );
+    return {
+      name: fullName || portalConfig.agent.name,
+      phone:
+        normalizeText(agent?.phone) ??
+        normalizeText(agent?.cellPhone) ??
+        normalizeText(portalConfig.agent.phone),
+      email: normalizeText(agent?.email) ?? normalizeText(portalConfig.agent.email),
+      smsPhone:
+        normalizeText(agent?.cellPhone) ??
+        normalizeText(agent?.phone) ??
+        normalizeText(portalConfig.agent.smsPhone),
+    };
+  }, [
+    agent?.cellPhone,
+    agent?.email,
+    agent?.firstName,
+    agent?.lastName,
+    agent?.phone,
+    portalConfig.agent.email,
+    portalConfig.agent.name,
+    portalConfig.agent.phone,
+    portalConfig.agent.smsPhone,
+  ]);
+  const avatarSource = useMemo(
+    () => AGENT_AVATARS[toAvatarKey(resolvedAgent.name)] ?? null,
+    [resolvedAgent.name]
+  );
+  const avatarImageAdjustment = useMemo(
+    () => AGENT_AVATAR_IMAGE_ADJUSTMENTS[toAvatarKey(resolvedAgent.name)] ?? null,
+    [resolvedAgent.name]
+  );
+  const resolvedScheduleUrl = useMemo(
+    () => AGENT_SCHEDULE_URLS[toAvatarKey(resolvedAgent.name)] ?? portalConfig.agent.scheduleUrl,
+    [portalConfig.agent.scheduleUrl, resolvedAgent.name]
+  );
+
+  const agentActions = useMemo(
+    () => [
+      {
+        id: 'contact',
+        label: 'Contact Agent',
+        meta: 'Phone',
+        icon: 'call-outline' as const,
+        target: buildPhoneLink(resolvedAgent.phone),
+        unavailableMessage: 'Agent phone number is not configured yet.',
+      },
+      {
+        id: 'schedule',
+        label: 'Schedule',
+        meta: 'Calendar',
+        icon: 'calendar-outline' as const,
+        target: resolvedScheduleUrl,
+        unavailableMessage: 'Scheduling link is not configured yet.',
+      },
+      {
+        id: 'email',
+        label: 'Email',
+        meta: 'Google',
+        icon: 'mail-outline' as const,
+        target: buildEmailLink(resolvedAgent.email),
+        unavailableMessage: 'Agent email is not configured yet.',
+      },
+      {
+        id: 'sms',
+        label: 'SMS',
+        meta: 'Text',
+        icon: 'chatbubble-ellipses-outline' as const,
+        target: buildSmsLink(resolvedAgent.smsPhone),
+        unavailableMessage: 'Agent SMS number is not configured yet.',
+      },
+    ],
+    [
+      resolvedAgent.email,
+      resolvedAgent.phone,
+      resolvedAgent.smsPhone,
+      resolvedScheduleUrl,
+    ]
+  );
+
+  const openAction = async (target: string | null, unavailableMessage: string) => {
+    const result = await openExternalLink(target, unavailableMessage);
+    if (!result.ok) {
+      Alert.alert('Action unavailable', result.message ?? unavailableMessage);
+    }
+  };
+  const openInAppAction = async (target: string | null, unavailableMessage: string) => {
+    const result = await openInAppBrowser(target, unavailableMessage);
+    if (!result.ok) {
+      Alert.alert('Action unavailable', result.message ?? unavailableMessage);
+    }
+  };
+  const dashboardBottomPadding = useMemo(() => insets.bottom + 116, [insets.bottom]);
+  const showDashboardSkeleton = isMinimumSkeletonVisible || isLoadingAgent || isLoadingCompany;
+
+  if (showDashboardSkeleton) {
+    return <DashboardSkeleton dashboardBottomPadding={dashboardBottomPadding} />;
   }
 
   return (
-    <ScreenContainer>
+    <ScreenContainer contentContainerStyle={{ paddingBottom: dashboardBottomPadding }}>
       <View style={styles.header}>
         <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>Welcome back</Text>
-          <Text style={styles.name}>{getNameFromEmail(userEmail)}</Text>
+          <BrandMark />
+          <View style={styles.accountCard}>
+            <Text style={styles.accountLabel}>Account holder</Text>
+            <Text style={styles.accountName}>{getNameFromCustomer(customer, userEmail)}</Text>
+            <Text style={styles.accountEmail}>{customer?.email ?? userEmail ?? 'member@email.com'}</Text>
+          </View>
         </View>
-        <BrandMark size={46} withWordmark={false} />
       </View>
 
-      <View style={styles.summaryRow}>
-        <SummaryCard label="Active policies" value={`${activePolicies.length}`} highlight="green" />
-        <SummaryCard label="Monthly total" value={formatCurrency(monthlyTotal)} highlight="neutral" />
+      <SectionHeader title="Your Agent" />
+      <View style={styles.card}>
+        <View style={styles.agentTopRow}>
+          <View style={styles.avatar}>
+            {avatarSource ? (
+              <Image
+                source={avatarSource}
+                style={[
+                  styles.avatarImage,
+                  avatarImageAdjustment
+                    ? {
+                        transform: [
+                          { scale: avatarImageAdjustment.scale },
+                          { translateY: avatarImageAdjustment.translateY },
+                        ],
+                      }
+                    : null,
+                ]}
+                resizeMode="cover"
+              />
+            ) : (
+              <Text style={styles.avatarText}>{getInitials(resolvedAgent.name)}</Text>
+            )}
+          </View>
+          <View style={styles.agentCopy}>
+            <Text style={styles.agentName}>{resolvedAgent.name}</Text>
+            <Text style={styles.agentMeta}>Phone: {resolvedAgent.phone ?? 'Not available'}</Text>
+            <Text style={styles.agentMeta}>Email: {resolvedAgent.email ?? 'Not available'}</Text>
+          </View>
+        </View>
+        {isLoadingAgent ? <Text style={styles.agentHint}>Loading assigned agent...</Text> : null}
+        {agentLookupNotice ? <Text style={styles.agentHint}>{agentLookupNotice}</Text> : null}
+
+        <View style={styles.actionGrid}>
+          {agentActions.map((action) => {
+            const disabled = !action.target;
+            return (
+              <Pressable
+                key={action.id}
+                onPress={() => {
+                  if (action.id === 'schedule') {
+                    void openInAppAction(action.target, action.unavailableMessage);
+                    return;
+                  }
+                  void openAction(action.target, action.unavailableMessage);
+                }}
+                disabled={disabled}
+                style={({ pressed }) => [
+                  styles.actionCard,
+                  disabled ? styles.actionCardDisabled : null,
+                  pressed && !disabled ? styles.pressed : null,
+                ]}>
+                <Ionicons name={action.icon} size={18} color={theme.colors.primary} />
+                <Text style={styles.actionTitle}>{action.label}</Text>
+                <Text style={styles.actionMeta}>{action.meta}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
-      <SummaryCard
-        label="Next renewal"
-        value={nextRenewal ? `${nextRenewal.productName}  ${formatDate(nextRenewal.renewalDate)}` : 'N/A'}
-        highlight="red"
-      />
 
-      <SectionHeader
-        title="Active policies"
-        subtitle="Core protections currently in force"
-        actionLabel="View all"
-        onActionPress={() => router.push('/(tabs)/policies')}
-      />
-
-      {activePolicies.length > 0 ? (
-        activePolicies.slice(0, 2).map((policy) => (
-          <PolicyCard
-            key={policy.id}
-            policy={policy}
-            onPress={() =>
-              router.push({
-                pathname: '/policy/[id]',
-                params: { id: policy.id },
-              })
-            }
-          />
-        ))
-      ) : (
-        <EmptyState
-          title="No active policies yet"
-          description="Once policies are activated, they will appear here for quick access."
-        />
-      )}
-
-      <SectionHeader
-        title="Quick actions"
-        subtitle="Frequently used self-service tools"
-      />
-      <View style={styles.quickGrid}>
-        {quickActions.map((action) => (
-          <Pressable key={action.id} style={styles.quickCard}>
-            <Ionicons name={action.icon} size={20} color={theme.colors.primary} />
-            <Text style={styles.quickTitle}>{action.title}</Text>
-            <Text style={styles.quickMeta}>Coming soon</Text>
+      <SectionHeader title="Company info" subtitle="License snapshot and compliance status" />
+      <View style={styles.card}>
+        {summaryRows.length > 0 ? (
+          summaryRows.map((row) => (
+            <View key={row.label} style={styles.infoRow}>
+              <Text style={styles.infoLabel}>{row.label}</Text>
+              {row.label === 'Status' ? (
+                statusChips.length > 0 ? (
+                  <View style={styles.statusChipRow}>
+                    {statusChips.map((chip) => {
+                      const chipStyle = COMPANY_STATUS_CHIP_STYLES[chip];
+                      return (
+                        <View
+                          key={chip}
+                          style={[styles.statusChip, { backgroundColor: chipStyle.backgroundColor }]}>
+                          <Text style={[styles.statusChipText, { color: chipStyle.textColor }]}>{chip}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <Text style={styles.infoValue}>{statusFallbackText}</Text>
+                )
+              ) : (
+                <Text style={styles.infoValue}>{row.value}</Text>
+              )}
+            </View>
+          ))
+        ) : (
+          <Text style={styles.agentHint}>Company summary is not available yet.</Text>
+        )}
+        {isLoadingCompany ? <Text style={styles.agentHint}>Loading CSLB details...</Text> : null}
+        {companyLookupNotice ? <Text style={styles.agentHint}>{companyLookupNotice}</Text> : null}
+        <View style={styles.companyActions}>
+          <Pressable
+            onPress={() => {
+              router.push('/company');
+            }}
+            style={({ pressed }) => [styles.detailLinkButton, pressed ? styles.pressed : null]}>
+            <Text style={styles.detailLinkButtonText}>View details</Text>
           </Pressable>
-        ))}
+          <Pressable
+            onPress={() => {
+              void openInAppAction(cslbLink, 'CSLB link is not available yet.');
+            }}
+            disabled={!cslbLink}
+            style={({ pressed }) => [
+              styles.linkButton,
+              !cslbLink ? styles.actionCardDisabled : null,
+              pressed && cslbLink ? styles.pressed : null,
+            ]}>
+            <Text style={styles.linkButtonText}>View on CSLB</Text>
+          </Pressable>
+        </View>
       </View>
 
-      <View style={styles.placeholder}>
-        <Text style={styles.placeholderTitle}>API integration placeholder</Text>
-        <Text style={styles.placeholderCopy}>
-          Dashboard metrics are using mock policy data. Live policy, claims, and billing APIs can be
-          connected without changing this layout layer.
-        </Text>
+      <SectionHeader title="Actions" />
+      <View style={styles.card}>
+        <Pressable
+          onPress={() => {
+            router.push('/forms');
+          }}
+          style={({ pressed }) => [
+            styles.primaryAction,
+            pressed ? styles.pressed : null,
+          ]}>
+          <Text style={styles.primaryActionText}>All Intake Forms</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => {
+            void openAction(portalConfig.actions.issueCoiUrl, 'Issue COI link is not configured yet.');
+          }}
+          disabled={!portalConfig.actions.issueCoiUrl}
+          style={({ pressed }) => [
+            styles.secondaryAction,
+            !portalConfig.actions.issueCoiUrl ? styles.actionCardDisabled : null,
+            pressed && portalConfig.actions.issueCoiUrl ? styles.pressed : null,
+          ]}>
+          <Text style={styles.secondaryActionText}>Issue COI</Text>
+        </Pressable>
       </View>
     </ScreenContainer>
   );
@@ -127,70 +473,261 @@ export default function DashboardScreen() {
 
 const styles = StyleSheet.create({
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    width: '100%',
   },
   headerCopy: {
-    gap: 4,
+    gap: theme.spacing.sm,
+    width: '100%',
   },
-  eyebrow: {
+  accountCard: {
+    width: '100%',
+    borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.lg,
+    gap: 4,
+    ...theme.shadows.surface,
+  },
+  accountLabel: {
     ...theme.typography.caption,
     color: theme.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.35,
   },
-  name: {
+  accountName: {
     ...theme.typography.h1,
     color: theme.colors.textStrong,
   },
-  summaryRow: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
+  accountEmail: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textMuted,
   },
-  quickGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: theme.spacing.sm,
-  },
-  quickCard: {
-    flexBasis: '31%',
-    flexGrow: 1,
-    minHeight: 110,
+  card: {
     borderRadius: theme.radius.lg,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
-    padding: theme.spacing.sm,
-    gap: theme.spacing.xs,
+    padding: theme.spacing.md,
+    gap: theme.spacing.sm,
     ...theme.shadows.surface,
   },
-  quickTitle: {
+  agentTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.md,
+  },
+  avatar: {
+    width: 54,
+    height: 54,
+    borderRadius: theme.radius.pill,
+    overflow: 'hidden',
+    backgroundColor: theme.colors.surfaceTint,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarText: {
+    ...theme.typography.body,
+    color: theme.colors.primaryDeep,
+    fontWeight: '700',
+  },
+  agentCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  agentName: {
+    ...theme.typography.title,
+    color: theme.colors.textStrong,
+  },
+  agentMeta: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textMuted,
+  },
+  agentHint: {
+    ...theme.typography.caption,
+    color: theme.colors.textSubtle,
+  },
+  actionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.sm,
+    marginTop: 2,
+  },
+  actionCard: {
+    flexBasis: '47%',
+    flexGrow: 1,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceTint,
+    paddingVertical: 12,
+    paddingHorizontal: theme.spacing.sm,
+    gap: 2,
+  },
+  actionCardDisabled: {
+    opacity: 0.5,
+  },
+  actionTitle: {
     ...theme.typography.bodySmall,
     color: theme.colors.textStrong,
     fontWeight: '700',
   },
-  quickMeta: {
+  actionMeta: {
     ...theme.typography.caption,
     color: theme.colors.textSubtle,
-    marginTop: 'auto',
   },
-  placeholder: {
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: theme.colors.borderStrong,
-    backgroundColor: theme.colors.surfaceTint,
-    padding: theme.spacing.md,
-    marginTop: theme.spacing.xs,
-    gap: 6,
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: theme.spacing.sm,
   },
-  placeholderTitle: {
-    ...theme.typography.title,
-    color: theme.colors.textStrong,
-  },
-  placeholderCopy: {
+  infoLabel: {
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
+    flex: 1,
+  },
+  infoValue: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: '700',
+    flex: 1,
+    textAlign: 'right',
+  },
+  statusChipRow: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: theme.spacing.xs,
+  },
+  statusChip: {
+    borderRadius: theme.radius.pill,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  statusChipText: {
+    ...theme.typography.caption,
+    fontWeight: '700',
+  },
+  companyActions: {
+    marginTop: theme.spacing.xs,
+    gap: theme.spacing.sm,
+  },
+  detailLinkButton: {
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primary,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.sm,
+  },
+  detailLinkButtonText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.white,
+    fontWeight: '700',
+  },
+  linkButton: {
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.borderStrong,
+    backgroundColor: theme.colors.surfaceTint,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.sm,
+  },
+  linkButtonText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.primary,
+    fontWeight: '700',
+  },
+  primaryAction: {
+    minHeight: 46,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.md,
+  },
+  primaryActionText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.white,
+    fontWeight: '700',
+  },
+  secondaryAction: {
+    minHeight: 46,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.borderStrong,
+    backgroundColor: theme.colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.md,
+  },
+  secondaryActionText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: '700',
+  },
+  skeletonBlock: {
+    borderRadius: theme.radius.pill,
+    backgroundColor: '#DFE8E3',
+    height: 11,
+  },
+  skeletonLabel: {
+    width: '26%',
+    height: 9,
+  },
+  skeletonHeadline: {
+    width: '62%',
+    height: 24,
+  },
+  skeletonLineWide: {
+    width: '88%',
+  },
+  skeletonLineMedium: {
+    width: '62%',
+  },
+  skeletonLineShort: {
+    width: '38%',
+  },
+  skeletonAvatar: {
+    width: 54,
+    height: 54,
+    borderRadius: theme.radius.pill,
+    backgroundColor: '#DFE8E3',
+  },
+  skeletonCard: {
+    justifyContent: 'center',
+  },
+  skeletonIcon: {
+    width: 18,
+    height: 18,
+  },
+  skeletonButton: {
+    minHeight: 44,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.borderStrong,
+    backgroundColor: '#DFE8E3',
+  },
+  skeletonButtonPrimary: {
+    backgroundColor: '#C4D5CC',
+  },
+  pressed: {
+    transform: [{ scale: 0.992 }],
+    opacity: 0.94,
   },
 });

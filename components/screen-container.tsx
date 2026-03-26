@@ -9,6 +9,7 @@ type ScreenContainerProps = PropsWithChildren<{
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
   backgroundTone?: 'default' | 'soft';
+  includeTopInset?: boolean;
 }>;
 
 export function ScreenContainer({
@@ -17,6 +18,7 @@ export function ScreenContainer({
   style,
   contentContainerStyle,
   backgroundTone = 'default',
+  includeTopInset = true,
 }: ScreenContainerProps) {
   const content = (
     <View style={[styles.inner, style, contentContainerStyle]}>
@@ -30,9 +32,9 @@ export function ScreenContainer({
         styles.safe,
         backgroundTone === 'soft' ? styles.softBackground : styles.defaultBackground,
       ]}
-      edges={['top', 'left', 'right']}>
-      <View style={styles.glowPrimary} />
-      <View style={styles.glowSecondary} />
+      edges={includeTopInset ? ['top', 'left', 'right'] : ['left', 'right']}>
+      <View pointerEvents="none" style={styles.glowPrimary} />
+      <View pointerEvents="none" style={styles.glowSecondary} />
       {scroll ? (
         <ScrollView
           contentContainerStyle={styles.scrollContent}

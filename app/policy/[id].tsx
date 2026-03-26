@@ -1,23 +1,123 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '@/components/app-button';
 import { EmptyState } from '@/components/empty-state';
+import { LoadingState } from '@/components/loading-state';
 import { SectionHeader } from '@/components/section-header';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { mockPolicies } from '@/data/mock-policies';
-import { formatCurrency, formatDate } from '@/utils/format';
+import { usePolicies } from '@/context/policies-context';
+import { fetchPolicyFilesListByInsuredId } from '@/services/policy-files-api';
+import { PolicyFileEntry } from '@/types/policy-file';
+import { formatCurrency, formatDate, formatIsoDateTime } from '@/utils/format';
+
+function toUserFacingError(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  return 'Unable to load policy files right now.';
+}
 
 export default function PolicyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { isAuthenticated } = useAuth();
-  const policy = mockPolicies.find((item) => item.id === id);
+  const { isAuthenticated, customer } = useAuth();
+  const { policies, isLoadingPolicies, policiesError, refreshPolicies } = usePolicies();
+  const policy = policies.find((item) => item.id === id);
+  const policyFilesInsuredId = customer?.databaseId?.trim() || customer?.insuredId?.trim() || '';
+  const [policyFiles, setPolicyFiles] = useState<PolicyFileEntry[]>([]);
+  const [isLoadingPolicyFiles, setIsLoadingPolicyFiles] = useState(false);
+  const [policyFilesError, setPolicyFilesError] = useState<string | null>(null);
+
+  const filteredPolicyFiles = useMemo(() => {
+    if (!policy) return [];
+    const selectedPolicyId = policy.id.trim();
+    const selectedPolicyNumber = policy.policyNumber.trim();
+
+    const filtered = policyFiles.filter((entry) => {
+      const entryPolicyId = entry.policyId?.trim() || '';
+      const entryPolicyNumber = entry.policyNumber?.trim() || '';
+
+      if (selectedPolicyId && entryPolicyId) {
+        return entryPolicyId === selectedPolicyId;
+      }
+
+      if (selectedPolicyNumber && entryPolicyNumber) {
+        return entryPolicyNumber === selectedPolicyNumber;
+      }
+
+      return false;
+    });
+
+    return filtered.sort((left, right) => {
+      const leftDate = left.changeDate ?? left.createDate ?? '';
+      const rightDate = right.changeDate ?? right.createDate ?? '';
+      return rightDate.localeCompare(leftDate);
+    });
+  }, [policy, policyFiles]);
 
   useEffect(() => {
     if (!isAuthenticated) router.replace('/(auth)/login');
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydratePolicyFiles = async () => {
+      if (!policy || !policyFilesInsuredId) {
+        setPolicyFiles([]);
+        setPolicyFilesError(null);
+        setIsLoadingPolicyFiles(false);
+        return;
+      }
+
+      setIsLoadingPolicyFiles(true);
+      setPolicyFilesError(null);
+      try {
+        const response = await fetchPolicyFilesListByInsuredId(policyFilesInsuredId);
+        if (!isMounted) return;
+        setPolicyFiles(response.data);
+      } catch (error) {
+        if (!isMounted) return;
+        setPolicyFiles([]);
+        setPolicyFilesError(toUserFacingError(error));
+      } finally {
+        if (isMounted) {
+          setIsLoadingPolicyFiles(false);
+        }
+      }
+    };
+
+    void hydratePolicyFiles();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [policy, policyFilesInsuredId]);
+
+  if (isLoadingPolicies) {
+    return (
+      <View style={styles.emptyWrap}>
+        <LoadingState />
+      </View>
+    );
+  }
+
+  if (policiesError) {
+    return (
+      <View style={styles.emptyWrap}>
+        <EmptyState
+          icon="warning-outline"
+          title="Unable to load policy"
+          description={policiesError}
+          actionLabel="Retry"
+          onAction={() => {
+            void refreshPolicies();
+          }}
+        />
+      </View>
+    );
+  }
 
   if (!policy) {
     return (
@@ -25,7 +125,7 @@ export default function PolicyDetailScreen() {
         <EmptyState
           icon="warning-outline"
           title="Policy not found"
-          description="The selected policy could not be located in mock data."
+          description="The selected policy could not be located for this profile."
           actionLabel="Back to policies"
           onAction={() => router.replace('/(tabs)/policies')}
         />
@@ -84,23 +184,56 @@ export default function PolicyDetailScreen() {
         </View>
       </View>
 
-      <SectionHeader title="Documents" subtitle="Placeholder for future document APIs" />
+      <SectionHeader title="Documents" subtitle="Policy file folders and files" />
       <View style={styles.card}>
-        {policy.documents.map((document) => (
-          <View key={document.id} style={styles.lineItem}>
-            <Text style={styles.lineValue}>{document.name}</Text>
-            <Text style={styles.lineLabel}>Updated {formatDate(document.updatedAt)}</Text>
+        {isLoadingPolicyFiles ? (
+          <View style={styles.filesSkeleton}>
+            <View style={[styles.filesSkeletonLine, styles.filesSkeletonWide]} />
+            <View style={[styles.filesSkeletonLine, styles.filesSkeletonMid]} />
+            <View style={[styles.filesSkeletonLine, styles.filesSkeletonNarrow]} />
           </View>
-        ))}
-      </View>
-
-      <SectionHeader title="Claims" subtitle="Placeholder for claims integration" />
-      <View style={styles.card}>
-        <Text style={styles.lineValue}>{policy.claimsPlaceholder}</Text>
+        ) : filteredPolicyFiles.length > 0 ? (
+          filteredPolicyFiles.slice(0, 8).map((entry) => (
+            <View key={entry.databaseId} style={styles.fileRow}>
+              <View style={styles.fileIconWrap}>
+                <Ionicons
+                  name={entry.fileOrFolder === 'Folder' ? 'folder-open-outline' : 'document-text-outline'}
+                  size={16}
+                  color={theme.colors.primary}
+                />
+              </View>
+              <View style={styles.fileCopy}>
+                <Text style={styles.fileName}>{entry.name}</Text>
+                <Text style={styles.fileMeta}>
+                  {entry.fileOrFolder} • {entry.creatorName ?? 'Unknown'}
+                </Text>
+                <Text style={styles.fileMeta}>Created: {formatIsoDateTime(entry.createDate)}</Text>
+              </View>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.lineLabel}>No policy documents are available for this policy yet.</Text>
+        )}
+        {policyFilesError ? <Text style={styles.fileError}>{policyFilesError}</Text> : null}
         <View style={styles.claimButton}>
-          <AppButton label="Start claim (coming soon)" variant="secondary" onPress={() => {}} />
+          <AppButton
+            label="Browse policy files"
+            variant="secondary"
+            onPress={() => {
+              router.push({
+                pathname: '/policy-files',
+                params: {
+                  insuredId: policyFilesInsuredId,
+                  policyId: policy.id,
+                  policyNumber: policy.policyNumber,
+                },
+              });
+            }}
+            disabled={!policyFilesInsuredId}
+          />
         </View>
       </View>
+
     </ScrollView>
   );
 }
@@ -169,6 +302,65 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     flex: 1,
     textAlign: 'right',
+  },
+  filesSkeleton: {
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceTint,
+    padding: theme.spacing.sm,
+    gap: theme.spacing.xs,
+  },
+  filesSkeletonLine: {
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: '#DCE6E1',
+  },
+  filesSkeletonWide: {
+    width: '85%',
+  },
+  filesSkeletonMid: {
+    width: '72%',
+  },
+  filesSkeletonNarrow: {
+    width: '58%',
+  },
+  fileRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: theme.spacing.sm,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceTint,
+    padding: theme.spacing.sm,
+  },
+  fileIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: theme.radius.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fileCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  fileName: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: '700',
+  },
+  fileMeta: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+  },
+  fileError: {
+    ...theme.typography.caption,
+    color: theme.colors.danger,
   },
   divider: {
     height: 1,
