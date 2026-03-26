@@ -1,8 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-const DIAGNOSTICS_STORAGE_KEY = 'pbia-webview-diagnostics-v1';
-const ACTIVE_SESSION_STORAGE_KEY = 'pbia-webview-active-session-v1';
 const MAX_DIAGNOSTIC_ENTRIES = 120;
 const MAX_DETAIL_LENGTH = 420;
 
@@ -35,6 +32,8 @@ type AppendDiagnosticOptions = {
 };
 
 let writeQueue: Promise<void> = Promise.resolve();
+let diagnostics: PbiaWebViewDiagnosticEntry[] = [];
+let activeSession: PbiaWebViewActiveSession | null = null;
 
 function queueWrite(task: () => Promise<void>) {
   writeQueue = writeQueue.then(task).catch(() => undefined);
@@ -61,58 +60,8 @@ function toDetailString(details: unknown) {
   return `${compact.slice(0, MAX_DETAIL_LENGTH)}...`;
 }
 
-function safeParseDiagnostics(raw: string | null) {
-  if (!raw) return [] as PbiaWebViewDiagnosticEntry[];
-
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [] as PbiaWebViewDiagnosticEntry[];
-
-    return parsed.filter((entry): entry is PbiaWebViewDiagnosticEntry => {
-      if (!entry || typeof entry !== 'object') return false;
-      const candidate = entry as Partial<PbiaWebViewDiagnosticEntry>;
-      return (
-        typeof candidate.id === 'string' &&
-        typeof candidate.timestamp === 'string' &&
-        typeof candidate.event === 'string' &&
-        typeof candidate.level === 'string'
-      );
-    });
-  } catch {
-    return [] as PbiaWebViewDiagnosticEntry[];
-  }
-}
-
-function safeParseActiveSession(raw: string | null): PbiaWebViewActiveSession | null {
-  if (!raw) return null;
-
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const candidate = parsed as Partial<PbiaWebViewActiveSession>;
-    if (
-      typeof candidate.sessionId !== 'string' ||
-      typeof candidate.startedAt !== 'string' ||
-      typeof candidate.formSlug !== 'string' ||
-      typeof candidate.initialUrl !== 'string'
-    ) {
-      return null;
-    }
-
-    return {
-      sessionId: candidate.sessionId,
-      startedAt: candidate.startedAt,
-      formSlug: candidate.formSlug,
-      initialUrl: candidate.initialUrl,
-    };
-  } catch {
-    return null;
-  }
-}
-
 async function readDiagnostics() {
-  const raw = await AsyncStorage.getItem(DIAGNOSTICS_STORAGE_KEY);
-  return safeParseDiagnostics(raw);
+  return diagnostics;
 }
 
 export async function appendPbiaWebViewDiagnostic({
@@ -143,10 +92,7 @@ export async function appendPbiaWebViewDiagnostic({
   }
 
   await queueWrite(async () => {
-    const diagnostics = await readDiagnostics();
-    diagnostics.push(entry);
-    const nextDiagnostics = diagnostics.slice(-MAX_DIAGNOSTIC_ENTRIES);
-    await AsyncStorage.setItem(DIAGNOSTICS_STORAGE_KEY, JSON.stringify(nextDiagnostics));
+    diagnostics = [...diagnostics, entry].slice(-MAX_DIAGNOSTIC_ENTRIES);
   });
 
   return entry;
@@ -154,13 +100,13 @@ export async function appendPbiaWebViewDiagnostic({
 
 export async function listPbiaWebViewDiagnostics(limit = 25) {
   await writeQueue;
-  const diagnostics = await readDiagnostics();
-  return diagnostics.slice(-limit).reverse();
+  const items = await readDiagnostics();
+  return items.slice(-limit).reverse();
 }
 
 export async function clearPbiaWebViewDiagnostics() {
   await queueWrite(async () => {
-    await AsyncStorage.removeItem(DIAGNOSTICS_STORAGE_KEY);
+    diagnostics = [];
   });
 }
 
@@ -173,7 +119,7 @@ export async function startPbiaWebViewSession(formSlug: string, initialUrl: stri
   };
 
   await queueWrite(async () => {
-    await AsyncStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(session));
+    activeSession = session;
   });
 
   await appendPbiaWebViewDiagnostic({
@@ -188,10 +134,8 @@ export async function startPbiaWebViewSession(formSlug: string, initialUrl: stri
 
 export async function endPbiaWebViewSession(sessionId: string, reason: string) {
   await queueWrite(async () => {
-    const activeRaw = await AsyncStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
-    const activeSession = safeParseActiveSession(activeRaw);
     if (activeSession?.sessionId === sessionId) {
-      await AsyncStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+      activeSession = null;
     }
   });
 
@@ -203,28 +147,22 @@ export async function endPbiaWebViewSession(sessionId: string, reason: string) {
 }
 
 export async function recoverPbiaWebViewSessionAfterRestart() {
-  let recoveredSession: PbiaWebViewActiveSession | null = null;
+  await writeQueue;
+  const session = activeSession;
+  activeSession = null;
 
-  await queueWrite(async () => {
-    const activeRaw = await AsyncStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
-    recoveredSession = safeParseActiveSession(activeRaw);
-    if (recoveredSession) {
-      await AsyncStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
-    }
-  });
-
-  if (recoveredSession) {
+  if (session) {
     await appendPbiaWebViewDiagnostic({
       event: 'previous-embedded-session-recovered-after-app-restart',
       level: 'error',
-      formSlug: recoveredSession.formSlug,
-      sessionId: recoveredSession.sessionId,
+      formSlug: session.formSlug,
+      sessionId: session.sessionId,
       details: {
-        startedAt: recoveredSession.startedAt,
-        initialUrl: recoveredSession.initialUrl,
+        startedAt: session.startedAt,
+        initialUrl: session.initialUrl,
       },
     });
   }
 
-  return recoveredSession;
+  return session;
 }

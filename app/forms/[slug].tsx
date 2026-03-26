@@ -86,8 +86,8 @@ export default function PbiaFormDetailScreen() {
             icon="warning-outline"
             title="Form not found"
             description="The selected PBIA form could not be located."
-            actionLabel="Back to forms"
-            onAction={() => router.replace('/forms')}
+            actionLabel="Back to home"
+            onAction={() => router.replace('/')}
           />
         </ScreenContainer>
       </>
@@ -124,10 +124,7 @@ export default function PbiaFormDetailScreen() {
   return (
     <>
       <Stack.Screen options={{ headerTitle }} />
-      <ScreenContainer
-        scroll={shouldUseBrowserFallback}
-        includeTopInset={false}
-        style={styles.screen}>
+      <ScreenContainer scroll={shouldUseBrowserFallback} style={styles.screen}>
         {shouldUseBrowserFallback ? (
           <View style={styles.fallbackCard}>
             <Text style={styles.fallbackTitle}>Open form in secure browser</Text>
