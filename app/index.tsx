@@ -67,6 +67,13 @@ export default function LandingScreen() {
           label="Access Your Account"
           onPress={() => (isAuthenticated ? router.replace('/(tabs)') : router.push('/(auth)/login'))}
         />
+        {!isAuthenticated ? (
+          <AppButton
+            label="Sign Up"
+            variant="secondary"
+            onPress={() => router.push({ pathname: '/(auth)/login', params: { mode: 'signup' } })}
+          />
+        ) : null}
         <Text style={styles.caption}>One-time verification helps protect your account.</Text>
       </View>
     </ScreenContainer>
