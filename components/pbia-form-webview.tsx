@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import type {
   WebViewErrorEvent,
@@ -22,6 +22,7 @@ import {
   appendPbiaWebViewDiagnostic,
   endPbiaWebViewSession,
   startPbiaWebViewSession,
+  touchPbiaWebViewSessionHeartbeat,
 } from '@/services/pbia-webview-diagnostics';
 
 const INJECTED_BRIDGE_SCRIPT = `
@@ -188,6 +189,32 @@ export function PbiaFormWebView({
       }
     };
   }, [form.slug, initialUrl, logDiagnostic, shouldUseMessageBridge]);
+
+  useEffect(() => {
+    const heartbeat = setInterval(() => {
+      const activeSessionId = sessionIdRef.current;
+      if (!activeSessionId) return;
+      void touchPbiaWebViewSessionHeartbeat(activeSessionId);
+    }, 2000);
+
+    return () => {
+      clearInterval(heartbeat);
+    };
+  }, []);
+
+  useEffect(() => {
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      logDiagnostic('embedded-app-state-change', { nextState });
+    });
+    const memoryWarningSubscription = AppState.addEventListener('memoryWarning', () => {
+      logDiagnostic('embedded-memory-warning', undefined, 'warn');
+    });
+
+    return () => {
+      appStateSubscription.remove();
+      memoryWarningSubscription.remove();
+    };
+  }, [logDiagnostic]);
 
   const handleLoadStart = useCallback(
     (event: WebViewNavigationEvent) => {

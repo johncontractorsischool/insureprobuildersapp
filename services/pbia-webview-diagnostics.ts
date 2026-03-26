@@ -24,6 +24,7 @@ export type PbiaWebViewActiveSession = {
   startedAt: string;
   formSlug: string;
   initialUrl: string;
+  lastHeartbeatAt: string;
 };
 
 type AppendDiagnosticOptions = {
@@ -104,6 +105,10 @@ function safeParseActiveSession(raw: string | null): PbiaWebViewActiveSession | 
       startedAt: candidate.startedAt,
       formSlug: candidate.formSlug,
       initialUrl: candidate.initialUrl,
+      lastHeartbeatAt:
+        typeof candidate.lastHeartbeatAt === 'string'
+          ? candidate.lastHeartbeatAt
+          : candidate.startedAt,
     };
   } catch {
     return null;
@@ -165,11 +170,13 @@ export async function clearPbiaWebViewDiagnostics() {
 }
 
 export async function startPbiaWebViewSession(formSlug: string, initialUrl: string) {
+  const now = new Date().toISOString();
   const session: PbiaWebViewActiveSession = {
     sessionId: `pbia-wv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    startedAt: new Date().toISOString(),
+    startedAt: now,
     formSlug,
     initialUrl,
+    lastHeartbeatAt: now,
   };
 
   await queueWrite(async () => {
@@ -184,6 +191,20 @@ export async function startPbiaWebViewSession(formSlug: string, initialUrl: stri
   });
 
   return session;
+}
+
+export async function touchPbiaWebViewSessionHeartbeat(sessionId: string) {
+  await queueWrite(async () => {
+    const activeRaw = await AsyncStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+    const activeSession = safeParseActiveSession(activeRaw);
+    if (!activeSession || activeSession.sessionId !== sessionId) return;
+
+    const nextSession: PbiaWebViewActiveSession = {
+      ...activeSession,
+      lastHeartbeatAt: new Date().toISOString(),
+    };
+    await AsyncStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(nextSession));
+  });
 }
 
 export async function endPbiaWebViewSession(sessionId: string, reason: string) {
@@ -221,10 +242,51 @@ export async function recoverPbiaWebViewSessionAfterRestart() {
       sessionId: recoveredSession.sessionId,
       details: {
         startedAt: recoveredSession.startedAt,
+        lastHeartbeatAt: recoveredSession.lastHeartbeatAt,
         initialUrl: recoveredSession.initialUrl,
       },
     });
   }
 
   return recoveredSession;
+}
+
+type GlobalHandler = (error: unknown, isFatal?: boolean) => void;
+type ErrorUtilsLike = {
+  getGlobalHandler?: () => GlobalHandler;
+  setGlobalHandler?: (handler: GlobalHandler) => void;
+};
+
+let isGlobalHandlerInstalled = false;
+
+export function installPbiaGlobalErrorDiagnostics() {
+  if (isGlobalHandlerInstalled) return;
+
+  const errorUtils = (global as { ErrorUtils?: ErrorUtilsLike }).ErrorUtils;
+  const getGlobalHandler = errorUtils?.getGlobalHandler;
+  const setGlobalHandler = errorUtils?.setGlobalHandler;
+
+  if (typeof getGlobalHandler !== 'function' || typeof setGlobalHandler !== 'function') {
+    return;
+  }
+
+  const previousHandler = getGlobalHandler();
+
+  setGlobalHandler((error, isFatal) => {
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+
+    void appendPbiaWebViewDiagnostic({
+      event: isFatal ? 'global-js-fatal-error' : 'global-js-error',
+      level: 'error',
+      details: {
+        message,
+        stack,
+      },
+    });
+
+    previousHandler(error, isFatal);
+  });
+
+  isGlobalHandlerInstalled = true;
 }
