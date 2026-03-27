@@ -15,6 +15,7 @@ import {
 import { upsertSignupAccount } from '@/services/signup-account';
 
 const AGENT_NAME_STORAGE_KEY = 'cslb-momentum-sync-agent-name-v1';
+export type SignupIdentifierType = 'license' | 'appFee';
 
 export type CslbMomentumSyncForm = {
   firstName: string;
@@ -96,6 +97,7 @@ export function buildCslbMomentumSyncRequest(form: CslbMomentumSyncForm): CslbMo
 }
 
 export function useCslbMomentumSync() {
+  const [identifierType, setIdentifierType] = useState<SignupIdentifierType>('license');
   const [savedAgentName, setSavedAgentName] = useState('');
   const [form, setForm] = useState<CslbMomentumSyncForm>(CSLB_MOMENTUM_SYNC_DEFAULT_FORM);
   const [errors, setErrors] = useState<CslbMomentumSyncValidationErrors>({});
@@ -159,6 +161,69 @@ export function useCslbMomentumSync() {
       return next;
     });
   }, []);
+
+  const setIdentifierValue = useCallback(
+    (value: string) => {
+      if (identifierType === 'license') {
+        setForm((previous) => ({
+          ...previous,
+          licenseNumber: value,
+          appFeeNumber: '',
+        }));
+        setErrors((previous) => {
+          const next = { ...previous };
+          delete next.licenseNumber;
+          delete next.appFeeNumber;
+          return next;
+        });
+        return;
+      }
+
+      setForm((previous) => ({
+        ...previous,
+        appFeeNumber: value,
+        licenseNumber: '',
+      }));
+      setErrors((previous) => {
+        const next = { ...previous };
+        delete next.licenseNumber;
+        delete next.appFeeNumber;
+        return next;
+      });
+    },
+    [identifierType]
+  );
+
+  const setSelectedIdentifierType = useCallback((nextType: SignupIdentifierType) => {
+    setIdentifierType(nextType);
+    setForm((previous) => ({
+      ...previous,
+      licenseNumber: nextType === 'license' ? previous.licenseNumber : '',
+      appFeeNumber: nextType === 'appFee' ? previous.appFeeNumber : '',
+    }));
+  }, []);
+
+  const validateIdentifierField = useCallback(() => {
+    const normalizedForm = normalizeCslbMomentumSyncForm(form);
+    const validationErrors = validateCslbMomentumSyncForm(normalizedForm);
+
+    setErrors((previous) => {
+      const next = { ...previous };
+      const nextIdentifierError =
+        identifierType === 'license'
+          ? validationErrors.licenseNumber
+          : validationErrors.appFeeNumber;
+
+      if (nextIdentifierError) {
+        next.licenseNumber = nextIdentifierError;
+        next.appFeeNumber = nextIdentifierError;
+      } else {
+        delete next.licenseNumber;
+        delete next.appFeeNumber;
+      }
+      return next;
+    });
+  }, [form, identifierType]);
 
   const validateField = useCallback(
     (field: CslbMomentumSyncFormField) => {
@@ -292,6 +357,7 @@ export function useCslbMomentumSync() {
 
   return {
     form,
+    identifierType,
     errors,
     uiState,
     isSubmitting,
@@ -299,6 +365,9 @@ export function useCslbMomentumSync() {
     response,
     lastRequest,
     updateField,
+    setIdentifierValue,
+    setSelectedIdentifierType,
+    validateIdentifierField,
     validateField,
     submit,
     reset,

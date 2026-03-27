@@ -140,7 +140,7 @@ export default function LoginScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
-              placeholder="you@company.com"
+              placeholder="You@Company.com"
               returnKeyType="done"
               onSubmitEditing={handleContinue}
               errorText={error}

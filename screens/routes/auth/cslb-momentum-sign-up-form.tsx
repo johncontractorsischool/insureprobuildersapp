@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '@/components/app-button';
 import { AppInput } from '@/components/app-input';
@@ -11,14 +11,21 @@ export function CslbMomentumSignUpForm() {
   const { setPendingEmail, setCustomer } = useAuth();
   const {
     form,
+    identifierType,
     errors,
     uiState,
     isSubmitting,
     errorMessage,
     updateField,
+    setIdentifierValue,
+    setSelectedIdentifierType,
+    validateIdentifierField,
     validateField,
     submit,
   } = useCslbMomentumSync();
+
+  const identifierValue = identifierType === 'appFee' ? form.appFeeNumber : form.licenseNumber;
+  const identifierError = errors.licenseNumber ?? errors.appFeeNumber;
 
   const handleCreateAccount = async () => {
     const result = await submit();
@@ -38,9 +45,6 @@ export function CslbMomentumSignUpForm() {
   return (
     <View style={styles.root}>
       <Text style={styles.title}>Create your account</Text>
-      <Text style={styles.subtitle}>
-        We will sync your CSLB + Momentum data using your submitted details.
-      </Text>
 
       <AppInput
         label="First Name"
@@ -50,7 +54,7 @@ export function CslbMomentumSignUpForm() {
         onBlur={() => validateField('firstName')}
         autoCapitalize="words"
         autoCorrect={false}
-        placeholder="First name"
+        placeholder="First Name"
         errorText={errors.firstName}
       />
 
@@ -62,7 +66,7 @@ export function CslbMomentumSignUpForm() {
         onBlur={() => validateField('lastName')}
         autoCapitalize="words"
         autoCorrect={false}
-        placeholder="Last name"
+        placeholder="Last Name"
         errorText={errors.lastName}
       />
 
@@ -75,33 +79,56 @@ export function CslbMomentumSignUpForm() {
         keyboardType="email-address"
         autoCapitalize="none"
         autoCorrect={false}
-        placeholder="you@company.com"
+        placeholder="You@Company.com"
         errorText={errors.email}
       />
 
-      <AppInput
-        label="License Number"
-        leftIcon="document-text-outline"
-        value={form.licenseNumber}
-        onChangeText={(value) => updateField('licenseNumber', value)}
-        onBlur={() => validateField('licenseNumber')}
-        autoCapitalize="characters"
-        autoCorrect={false}
-        placeholder="CSLB license number"
-        errorText={errors.licenseNumber}
-      />
+      <View style={styles.identifierToggleWrap}>
+        <Text style={styles.identifierToggleLabel}>Identifier Type</Text>
+        <View style={styles.identifierToggle}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setSelectedIdentifierType('license')}
+            style={[
+              styles.identifierToggleButton,
+              identifierType === 'license' ? styles.identifierToggleButtonActive : null,
+            ]}>
+            <Text
+              style={[
+                styles.identifierToggleText,
+                identifierType === 'license' ? styles.identifierToggleTextActive : null,
+              ]}>
+              License Number
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setSelectedIdentifierType('appFee')}
+            style={[
+              styles.identifierToggleButton,
+              identifierType === 'appFee' ? styles.identifierToggleButtonActive : null,
+            ]}>
+            <Text
+              style={[
+                styles.identifierToggleText,
+                identifierType === 'appFee' ? styles.identifierToggleTextActive : null,
+              ]}>
+              App Fee Number
+            </Text>
+          </Pressable>
+        </View>
+      </View>
 
       <AppInput
-        label="App Fee Number"
-        leftIcon="document-attach-outline"
-        value={form.appFeeNumber}
-        onChangeText={(value) => updateField('appFeeNumber', value)}
-        onBlur={() => validateField('appFeeNumber')}
+        label={identifierType === 'appFee' ? 'App Fee Number' : 'License Number'}
+        leftIcon={identifierType === 'appFee' ? 'document-attach-outline' : 'document-text-outline'}
+        value={identifierValue}
+        onChangeText={setIdentifierValue}
+        onBlur={validateIdentifierField}
         autoCapitalize="characters"
         autoCorrect={false}
-        placeholder="App fee number"
-        errorText={errors.appFeeNumber}
-        helperText="If both values are entered, App Fee Number is used for sync priority."
+        placeholder={identifierType === 'appFee' ? 'App Fee Number' : 'CSLB License Number'}
+        errorText={identifierError}
       />
 
       <View style={styles.actionsRow}>
@@ -135,13 +162,47 @@ const styles = StyleSheet.create({
   root: {
     gap: theme.spacing.md,
   },
+  identifierToggleWrap: {
+    gap: theme.spacing.xs,
+  },
+  identifierToggleLabel: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
+  },
+  identifierToggle: {
+    flexDirection: 'row',
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.backgroundSoft,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    padding: 4,
+    gap: 4,
+  },
+  identifierToggleButton: {
+    flex: 1,
+    borderRadius: theme.radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  identifierToggleButtonActive: {
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.borderStrong,
+  },
+  identifierToggleText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textMuted,
+    fontWeight: '700',
+  },
+  identifierToggleTextActive: {
+    color: theme.colors.primary,
+  },
   title: {
     ...theme.typography.h1,
     color: theme.colors.textStrong,
-  },
-  subtitle: {
-    ...theme.typography.body,
-    color: theme.colors.textMuted,
   },
   actionsRow: {
     gap: theme.spacing.sm,
