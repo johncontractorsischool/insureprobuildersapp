@@ -1,8 +1,29 @@
-import { PropsWithChildren } from 'react';
+import { createContext, PropsWithChildren, useContext } from 'react';
 import { ScrollView, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { theme } from '@/constants/theme';
+
+type ScreenContainerSettings = {
+  maxContentWidth?: number;
+};
+
+const ScreenContainerSettingsContext = createContext<ScreenContainerSettings>({});
+
+type ScreenContainerSettingsProviderProps = PropsWithChildren<{
+  maxContentWidth?: number;
+}>;
+
+export function ScreenContainerSettingsProvider({
+  children,
+  maxContentWidth,
+}: ScreenContainerSettingsProviderProps) {
+  return (
+    <ScreenContainerSettingsContext.Provider value={{ maxContentWidth }}>
+      {children}
+    </ScreenContainerSettingsContext.Provider>
+  );
+}
 
 type ScreenContainerProps = PropsWithChildren<{
   scroll?: boolean;
@@ -10,6 +31,7 @@ type ScreenContainerProps = PropsWithChildren<{
   contentContainerStyle?: StyleProp<ViewStyle>;
   backgroundTone?: 'default' | 'soft';
   includeTopInset?: boolean;
+  maxContentWidth?: number;
 }>;
 
 export function ScreenContainer({
@@ -19,9 +41,14 @@ export function ScreenContainer({
   contentContainerStyle,
   backgroundTone = 'default',
   includeTopInset = true,
+  maxContentWidth,
 }: ScreenContainerProps) {
+  const containerSettings = useContext(ScreenContainerSettingsContext);
+  const resolvedMaxContentWidth =
+    maxContentWidth ?? containerSettings.maxContentWidth ?? theme.layout.maxContentWidth;
+
   const content = (
-    <View style={[styles.inner, style, contentContainerStyle]}>
+    <View style={[styles.inner, { maxWidth: resolvedMaxContentWidth }, style, contentContainerStyle]}>
       {children}
     </View>
   );
@@ -88,7 +115,6 @@ const styles = StyleSheet.create({
   inner: {
     flex: 1,
     width: '100%',
-    maxWidth: theme.layout.maxContentWidth,
     alignSelf: 'center',
     paddingHorizontal: theme.layout.screenHorizontal,
     paddingTop: 14,
