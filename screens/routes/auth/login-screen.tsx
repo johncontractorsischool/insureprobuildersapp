@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -9,6 +9,7 @@ import { BrandMark } from '@/components/brand-mark';
 import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { CslbMomentumSignUpForm } from '@/screens/routes/auth/cslb-momentum-sign-up-form';
 import { fetchCustomersByEmail } from '@/services/customer-api';
 import { isOtpRateLimitError, sendEmailSignInCode, toUserFacingError } from '@/services/auth-flow';
 
@@ -16,29 +17,7 @@ function isEmailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-function isPhoneValid(value: string) {
-  return value.replace(/\D/g, '').length >= 10;
-}
-
 type AuthMode = 'signin' | 'signup';
-
-type SignUpForm = {
-  licenseOrAppFeeNumber: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phoneNumber: string;
-};
-
-type SignUpErrors = Partial<Record<keyof SignUpForm, string>>;
-
-const SIGN_UP_DEFAULT_FORM: SignUpForm = {
-  licenseOrAppFeeNumber: '',
-  firstName: '',
-  lastName: '',
-  email: '',
-  phoneNumber: '',
-};
 
 function getAuthModeFromParam(value: string | string[] | undefined): AuthMode {
   const token = Array.isArray(value) ? value[0] : value;
@@ -52,15 +31,10 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [signUpForm, setSignUpForm] = useState<SignUpForm>(SIGN_UP_DEFAULT_FORM);
-  const [signUpErrors, setSignUpErrors] = useState<SignUpErrors>({});
-  const [signUpNotice, setSignUpNotice] = useState('');
 
   useEffect(() => {
     setMode(getAuthModeFromParam(params.mode));
   }, [params.mode]);
-
-  const hasSignUpErrors = useMemo(() => Object.keys(signUpErrors).length > 0, [signUpErrors]);
 
   const handleContinue = async () => {
     const normalizedEmail = email.trim().toLowerCase();
@@ -107,64 +81,9 @@ export default function LoginScreen() {
     }
   };
 
-  const updateSignUpField = (field: keyof SignUpForm, value: string) => {
-    setSignUpForm((previous) => ({ ...previous, [field]: value }));
-    setSignUpNotice('');
-    setSignUpErrors((previous) => {
-      if (!previous[field]) return previous;
-      const next = { ...previous };
-      delete next[field];
-      return next;
-    });
-  };
-
-  const handleSignUp = () => {
-    const normalizedForm: SignUpForm = {
-      licenseOrAppFeeNumber: signUpForm.licenseOrAppFeeNumber.trim(),
-      firstName: signUpForm.firstName.trim(),
-      lastName: signUpForm.lastName.trim(),
-      email: signUpForm.email.trim().toLowerCase(),
-      phoneNumber: signUpForm.phoneNumber.trim(),
-    };
-
-    const nextErrors: SignUpErrors = {};
-
-    if (!normalizedForm.licenseOrAppFeeNumber) {
-      nextErrors.licenseOrAppFeeNumber = 'Enter your license number or app fee number.';
-    }
-    if (!normalizedForm.firstName) {
-      nextErrors.firstName = 'First name is required.';
-    }
-    if (!normalizedForm.lastName) {
-      nextErrors.lastName = 'Last name is required.';
-    }
-    if (!isEmailValid(normalizedForm.email)) {
-      nextErrors.email = 'Enter a valid email address.';
-    }
-    if (!normalizedForm.phoneNumber) {
-      nextErrors.phoneNumber = 'Phone number is required.';
-    } else if (!isPhoneValid(normalizedForm.phoneNumber)) {
-      nextErrors.phoneNumber = 'Enter a valid phone number.';
-    }
-
-    setSignUpErrors(nextErrors);
-
-    if (Object.keys(nextErrors).length > 0) {
-      setSignUpNotice('');
-      return;
-    }
-
-    setSignUpForm(normalizedForm);
-    setSignUpNotice('Sign-up details look good. We will connect this form to the backend endpoint next.');
-  };
-
   const handleModeChange = (nextMode: AuthMode) => {
     setMode(nextMode);
-    if (nextMode === 'signin') {
-      setSignUpNotice('');
-      return;
-    }
-    setError('');
+    if (nextMode === 'signup') setError('');
   };
 
   const handleBack = () => {
@@ -235,76 +154,7 @@ export default function LoginScreen() {
             </Text>
           </>
         ) : (
-          <>
-            <Text style={styles.title}>Create your account</Text>
-            <Text style={styles.subtitle}>
-              Complete all required fields below. License Number or App Fee Number is mandatory.
-            </Text>
-
-            <AppInput
-              label="License Number or App Fee Number"
-              leftIcon="document-text-outline"
-              value={signUpForm.licenseOrAppFeeNumber}
-              onChangeText={(value) => updateSignUpField('licenseOrAppFeeNumber', value)}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              placeholder="License # or App Fee #"
-              errorText={signUpErrors.licenseOrAppFeeNumber}
-            />
-
-            <AppInput
-              label="First Name"
-              leftIcon="person-outline"
-              value={signUpForm.firstName}
-              onChangeText={(value) => updateSignUpField('firstName', value)}
-              autoCapitalize="words"
-              autoCorrect={false}
-              placeholder="First name"
-              errorText={signUpErrors.firstName}
-            />
-
-            <AppInput
-              label="Last Name"
-              leftIcon="person-outline"
-              value={signUpForm.lastName}
-              onChangeText={(value) => updateSignUpField('lastName', value)}
-              autoCapitalize="words"
-              autoCorrect={false}
-              placeholder="Last name"
-              errorText={signUpErrors.lastName}
-            />
-
-            <AppInput
-              label="Email"
-              leftIcon="mail-outline"
-              value={signUpForm.email}
-              onChangeText={(value) => updateSignUpField('email', value)}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="you@company.com"
-              errorText={signUpErrors.email}
-            />
-
-            <AppInput
-              label="Phone Number"
-              leftIcon="call-outline"
-              value={signUpForm.phoneNumber}
-              onChangeText={(value) => updateSignUpField('phoneNumber', value)}
-              keyboardType="phone-pad"
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="(555) 555-5555"
-              errorText={signUpErrors.phoneNumber}
-            />
-
-            <AppButton label="Submit Sign Up" onPress={handleSignUp} />
-
-            {signUpNotice ? <Text style={styles.noticeText}>{signUpNotice}</Text> : null}
-            {!signUpNotice && hasSignUpErrors ? (
-              <Text style={styles.errorSummary}>Please fix the required fields and try again.</Text>
-            ) : null}
-          </>
+          <CslbMomentumSignUpForm />
         )}
       </View>
     </ScreenContainer>
@@ -378,16 +228,6 @@ const styles = StyleSheet.create({
   disclaimer: {
     ...theme.typography.bodySmall,
     color: theme.colors.textSubtle,
-    textAlign: 'center',
-  },
-  noticeText: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.success,
-    textAlign: 'center',
-  },
-  errorSummary: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.danger,
     textAlign: 'center',
   },
 });
