@@ -5,9 +5,14 @@ import { theme } from '@/constants/theme';
 type BrandMarkProps = {
   size?: number;
   withWordmark?: boolean;
+  compactWordmark?: boolean;
 };
 
-export function BrandMark({ size = 58, withWordmark = true }: BrandMarkProps) {
+export function BrandMark({
+  size = 58,
+  withWordmark = true,
+  compactWordmark = false,
+}: BrandMarkProps) {
   return (
     <View style={styles.row}>
       <View style={[styles.logoWrap, { width: size, height: size }]}>
@@ -15,7 +20,9 @@ export function BrandMark({ size = 58, withWordmark = true }: BrandMarkProps) {
       </View>
       {withWordmark ? (
         <View>
-          <Text style={styles.wordmarkTop}>Insure Probuilders</Text>
+          <Text style={[styles.wordmarkTop, compactWordmark ? styles.wordmarkTopCompact : null]}>
+            Insure Probuilders
+          </Text>
           <Text style={styles.wordmarkBottom}>Customer Portal</Text>
         </View>
       ) : null}
@@ -41,6 +48,10 @@ const styles = StyleSheet.create({
   wordmarkTop: {
     ...theme.typography.title,
     color: theme.colors.textStrong,
+  },
+  wordmarkTopCompact: {
+    fontSize: 17,
+    lineHeight: 22,
   },
   wordmarkBottom: {
     ...theme.typography.caption,

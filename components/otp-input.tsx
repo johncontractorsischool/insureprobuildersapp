@@ -10,7 +10,7 @@ type OTPInputProps = {
 };
 
 export function OTPInput({ value, onChange, length = 6 }: OTPInputProps) {
-  const refs = useRef<Array<TextInput | null>>([]);
+  const refs = useRef<(TextInput | null)[]>([]);
   const digits = useMemo(
     () => Array.from({ length }, (_, index) => value[index] ?? ''),
     [length, value]
@@ -75,6 +75,8 @@ const styles = StyleSheet.create({
   },
   cell: {
     flex: 1,
+    minWidth: 0,
+    maxWidth: 64,
     minHeight: 58,
     borderRadius: theme.radius.md,
     borderWidth: 1,
