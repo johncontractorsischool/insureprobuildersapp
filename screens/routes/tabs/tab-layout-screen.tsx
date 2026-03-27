@@ -7,7 +7,11 @@ import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 
-export default function TabLayout() {
+type TabLayoutProps = {
+  hideTabBar?: boolean;
+};
+
+export default function TabLayout({ hideTabBar = false }: TabLayoutProps) {
   const { isAuthenticated, isLoadingAuth } = useAuth();
 
   if (isLoadingAuth) {
@@ -29,7 +33,7 @@ export default function TabLayout() {
         tabBarInactiveTintColor: theme.colors.tabInactive,
         headerShown: false,
         tabBarLabelStyle: styles.tabLabel,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: [styles.tabBar, hideTabBar ? styles.tabBarHidden : null],
       }}>
       <Tabs.Screen
         name="index"
@@ -69,6 +73,9 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8,
     ...theme.shadows.nav,
+  },
+  tabBarHidden: {
+    display: 'none',
   },
   tabLabel: {
     ...theme.typography.caption,
