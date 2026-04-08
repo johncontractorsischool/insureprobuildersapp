@@ -19,16 +19,19 @@ function mockResponse({
 describe('syncCslbMomentum', () => {
   const originalFetch = global.fetch;
   const originalBaseUrl = process.env.EXPO_PUBLIC_CSLB_MOMENTUM_API_BASE_URL;
+  const originalApiKey = process.env.EXPO_PUBLIC_X_API_KEY;
 
   beforeEach(() => {
     jest.resetAllMocks();
     process.env.EXPO_PUBLIC_CSLB_MOMENTUM_API_BASE_URL = 'http://localhost:3500';
+    process.env.EXPO_PUBLIC_X_API_KEY = 'test-x-api-key';
     global.fetch = jest.fn();
   });
 
   afterAll(() => {
     global.fetch = originalFetch;
     process.env.EXPO_PUBLIC_CSLB_MOMENTUM_API_BASE_URL = originalBaseUrl;
+    process.env.EXPO_PUBLIC_X_API_KEY = originalApiKey;
   });
 
   it('returns parsed sync result on success', async () => {
@@ -64,6 +67,11 @@ describe('syncCslbMomentum', () => {
       'http://localhost:3500/api/cslb-momentum/sync',
       expect.objectContaining({
         method: 'POST',
+        headers: expect.objectContaining({
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'x-api-key': 'test-x-api-key',
+        }),
       })
     );
   });

@@ -1,3 +1,5 @@
+import { withApiKeyHeader } from '@/services/api-request-headers';
+
 const DEFAULT_AGENT_API_BASE_URL = 'http://localhost:3000';
 
 export type InsuredAgentRecord = {
@@ -39,7 +41,7 @@ export async function fetchInsuredAgentsByInsuredDatabaseId(
   const url = `${getAgentApiBaseUrl()}/insuredAgents?insuredId=${encodeURIComponent(trimmedId)}`;
   const response = await fetch(url, {
     method: 'GET',
-    headers: { Accept: 'application/json' },
+    headers: withApiKeyHeader({ Accept: 'application/json' }),
   });
 
   if (!response.ok) {

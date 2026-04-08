@@ -1,4 +1,5 @@
 import { CustomerLookupRecord } from '@/types/customer';
+import { withApiKeyHeader } from '@/services/api-request-headers';
 
 const DEFAULT_CUSTOMER_API_BASE_URL = 'http://localhost:3000';
 
@@ -10,11 +11,19 @@ export async function fetchCustomersByEmail(email: string): Promise<CustomerLook
   const url = `${getCustomerApiBaseUrl()}/getCustomer?Email=${encodeURIComponent(email)}`;
   const response = await fetch(url, {
     method: 'GET',
-    headers: { Accept: 'application/json' },
+    headers: withApiKeyHeader({ Accept: 'application/json' }),
   });
 
   if (!response.ok) {
-    throw new Error(`Customer lookup failed (${response.status}).`);
+    if (response.status === 404) {
+      return [];
+    }
+
+    if (response.status >= 500) {
+      throw new Error('We are having trouble finding your account right now. Please try again shortly.');
+    }
+
+    throw new Error('We could not verify that email right now. Please try again.');
   }
 
   const payload: unknown = await response.json();

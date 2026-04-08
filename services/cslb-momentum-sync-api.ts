@@ -1,3 +1,5 @@
+import { withApiKeyHeader } from '@/services/api-request-headers';
+
 const DEFAULT_CSLB_MOMENTUM_API_BASE_URL = 'http://localhost:3000';
 
 export type CslbMomentumSyncRequest = {
@@ -112,10 +114,10 @@ export async function syncCslbMomentum(
   try {
     response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
+      headers: withApiKeyHeader({
         Accept: 'application/json',
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify(request),
     });
   } catch {

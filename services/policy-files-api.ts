@@ -1,4 +1,5 @@
 import { PolicyFileEntry, PolicyFileOrFolder, PolicyFilesListResponse } from '@/types/policy-file';
+import { withApiKeyHeader } from '@/services/api-request-headers';
 
 const DEFAULT_POLICY_FILES_API_BASE_URL = 'http://localhost:3000';
 
@@ -122,7 +123,7 @@ async function requestPolicyFiles(path: string): Promise<PolicyFilesListResponse
   const url = `${getPolicyFilesApiBaseUrl()}${path}`;
   const response = await fetch(url, {
     method: 'GET',
-    headers: { Accept: 'application/json' },
+    headers: withApiKeyHeader({ Accept: 'application/json' }),
   });
 
   if (!response.ok) {

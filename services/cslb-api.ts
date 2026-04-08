@@ -1,3 +1,5 @@
+import { withApiKeyHeader } from '@/services/api-request-headers';
+
 const DEFAULT_CSLB_API_BASE_URL = 'http://localhost:3000';
 const CSLB_LICENSE_SITE_BASE_URL = 'https://www.cslb.ca.gov';
 
@@ -185,7 +187,7 @@ export async function fetchCslbLicenseByInsuredId(insuredId: string): Promise<Cs
   const url = `${getCslbApiBaseUrl()}/cslb/${encodeURIComponent(trimmedId)}`;
   const response = await fetch(url, {
     method: 'GET',
-    headers: { Accept: 'application/json' },
+    headers: withApiKeyHeader({ Accept: 'application/json' }),
   });
 
   if (!response.ok) {

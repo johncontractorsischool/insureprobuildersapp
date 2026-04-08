@@ -1,4 +1,5 @@
 import { Policy, PolicyStatus } from '@/types/policy';
+import { withApiKeyHeader } from '@/services/api-request-headers';
 
 const DEFAULT_POLICY_API_BASE_URL = 'http://localhost:3000';
 
@@ -150,7 +151,7 @@ export async function fetchPoliciesByInsuredDatabaseId(insuredDatabaseId: string
   const url = `${getPolicyApiBaseUrl()}/getPolicy?IId=${encodeURIComponent(trimmedId)}`;
   const response = await fetch(url, {
     method: 'GET',
-    headers: { Accept: 'application/json' },
+    headers: withApiKeyHeader({ Accept: 'application/json' }),
   });
 
   if (!response.ok) {
