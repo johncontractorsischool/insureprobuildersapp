@@ -27,7 +27,7 @@ export type Policy = {
   carrierName: string;
   premiumMonthly: number;
   effectiveDate: string;
-  renewalDate: string;
+  expirationDate: string;
   insuredName: string;
   insuredItem: string;
   coverageSummary: CoverageLineItem[];

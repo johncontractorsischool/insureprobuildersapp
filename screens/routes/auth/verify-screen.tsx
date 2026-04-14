@@ -124,7 +124,7 @@ export default function VerifyScreen() {
             </View>
 
             <View style={[styles.card, isDesktop ? styles.cardDesktop : null]}>
-              <Text style={styles.title}>Enter verification code</Text>
+              <Text style={styles.title}>Enter Verification Code</Text>
               <Text style={styles.subtitle}>
                 We sent a 6-digit code to {maskedEmail || 'your email address'}.
               </Text>
@@ -137,11 +137,11 @@ export default function VerifyScreen() {
                   disabled={secondsRemaining > 0}
                   style={styles.inlineAction}>
                   <Text style={[styles.link, secondsRemaining > 0 ? styles.linkDisabled : null]}>
-                    {secondsRemaining > 0 ? `Resend in ${secondsRemaining}s` : 'Resend code'}
+                    {secondsRemaining > 0 ? `Resend in ${secondsRemaining}s` : 'Resend Code'}
                   </Text>
                 </Pressable>
                 <Pressable onPress={() => router.replace('/(auth)/login')} style={styles.inlineAction}>
-                  <Text style={styles.link}>Change email</Text>
+                  <Text style={styles.link}>Change Email</Text>
                 </Pressable>
               </View>
 

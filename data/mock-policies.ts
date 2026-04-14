@@ -9,7 +9,7 @@ export const mockPolicies: Policy[] = [
     carrierName: 'Golden State Mutual',
     premiumMonthly: 248.35,
     effectiveDate: '2025-09-01',
-    renewalDate: '2026-09-01',
+    expirationDate: '2026-09-01',
     insuredName: 'Alex Morgan',
     insuredItem: 'Primary Residence - 482 Seacliff Drive, San Diego, CA',
     coverageSummary: [
@@ -39,7 +39,7 @@ export const mockPolicies: Policy[] = [
     carrierName: 'Pacific Horizon Insurance',
     premiumMonthly: 186.9,
     effectiveDate: '2024-11-15',
-    renewalDate: '2026-11-15',
+    expirationDate: '2026-11-15',
     insuredName: 'Alex Morgan',
     insuredItem: '2024 Lexus RX 350',
     coverageSummary: [
@@ -70,7 +70,7 @@ export const mockPolicies: Policy[] = [
     carrierName: 'Coastal Life Assurance',
     premiumMonthly: 121.5,
     effectiveDate: '2026-04-01',
-    renewalDate: '2027-04-01',
+    expirationDate: '2027-04-01',
     insuredName: 'Alex Morgan',
     insuredItem: 'Term Life Insurance - 20 Year',
     coverageSummary: [

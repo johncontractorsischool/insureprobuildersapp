@@ -1,14 +1,13 @@
-import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { theme } from '@/constants/theme';
 import { Policy } from '@/types/policy';
-import { formatCurrency, formatDate } from '@/utils/format';
+import { formatDate } from '@/utils/format';
 
 type PolicyCardProps = {
   policy: Policy;
   onPress?: () => void;
-  titleOverride?: string;
+  onRequestQuote?: () => void;
 };
 
 const statusStyles = {
@@ -26,44 +25,54 @@ const statusStyles = {
   },
 } as const;
 
-export function PolicyCard({ policy, onPress, titleOverride }: PolicyCardProps) {
+export function PolicyCard({ policy, onPress, onRequestQuote }: PolicyCardProps) {
   const status = statusStyles[policy.status];
-  const title = titleOverride?.trim() || policy.productName;
+  const showQuoteAction = policy.status === 'Lapsed' && Boolean(onRequestQuote);
 
   return (
-    <Pressable
-      onPress={onPress}
-      disabled={!onPress}
-      style={({ pressed }) => [styles.card, pressed && onPress ? styles.pressed : null]}>
+    <View style={styles.card}>
       <View style={styles.header}>
         <View style={styles.titleWrap}>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.policyNumber}>Policy {policy.policyNumber}</Text>
+          <Text style={styles.policyNumber}>Policy Number: {policy.policyNumber}</Text>
+          <Text style={styles.carrierText}>Carrier: {policy.carrierName}</Text>
         </View>
         <View style={[styles.statusBadge, { backgroundColor: status.backgroundColor }]}>
           <Text style={[styles.statusText, { color: status.textColor }]}>{policy.status}</Text>
         </View>
       </View>
 
-      <View style={styles.metricsRow}>
+      <View style={styles.datesRow}>
         <View style={styles.metric}>
-          <Text style={styles.metricLabel}>Monthly premium</Text>
-          <Text style={styles.metricValue}>{formatCurrency(policy.premiumMonthly)}</Text>
+          <Text style={styles.metricLabel}>Effective Date</Text>
+          <Text style={styles.metricValue}>{formatDate(policy.effectiveDate)}</Text>
         </View>
         <View style={styles.metric}>
-          <Text style={styles.metricLabel}>Effective date</Text>
-          <Text style={styles.metricValue}>{formatDate(policy.effectiveDate)}</Text>
+          <Text style={styles.metricLabel}>Expiration Date</Text>
+          <Text style={styles.metricValue}>{formatDate(policy.expirationDate)}</Text>
         </View>
       </View>
 
-      <View style={styles.footer}>
-        <Ionicons name="shield-checkmark-outline" size={16} color={theme.colors.primary} />
-        <Text style={styles.footerText}>{policy.insuredItem}</Text>
-        {onPress ? (
-          <Ionicons name="chevron-forward" size={17} color={theme.colors.textSubtle} />
+      <View style={styles.actionsRow}>
+        <Pressable
+          onPress={onPress}
+          disabled={!onPress}
+          style={({ pressed }) => [
+            styles.primaryAction,
+            !onPress ? styles.actionDisabled : null,
+            pressed && onPress ? styles.pressed : null,
+          ]}>
+          <Text style={styles.primaryActionText}>View Policy Details</Text>
+        </Pressable>
+
+        {showQuoteAction ? (
+          <Pressable
+            onPress={onRequestQuote}
+            style={({ pressed }) => [styles.secondaryAction, pressed ? styles.pressed : null]}>
+            <Text style={styles.secondaryActionText}>Request a Quote</Text>
+          </Pressable>
         ) : null}
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -91,13 +100,15 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 4,
   },
-  title: {
-    ...theme.typography.title,
-    color: theme.colors.textStrong,
+  carrierText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textMuted,
+    fontWeight: '700',
   },
   policyNumber: {
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
+    fontWeight: '700',
   },
   statusBadge: {
     borderRadius: theme.radius.pill,
@@ -106,8 +117,9 @@ const styles = StyleSheet.create({
   },
   statusText: {
     ...theme.typography.caption,
+    fontWeight: '700',
   },
-  metricsRow: {
+  datesRow: {
     flexDirection: 'row',
     gap: theme.spacing.sm,
   },
@@ -129,14 +141,48 @@ const styles = StyleSheet.create({
     color: theme.colors.textStrong,
     fontWeight: '700',
   },
-  footer: {
+  actionsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
+    gap: theme.spacing.sm,
+    flexWrap: 'wrap',
   },
-  footerText: {
-    ...theme.typography.bodySmall,
+  primaryAction: {
     flex: 1,
-    color: theme.colors.textMuted,
+    minWidth: 170,
+    minHeight: 44,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.md,
+  },
+  secondaryAction: {
+    flex: 1,
+    minWidth: 170,
+    minHeight: 44,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.borderStrong,
+    backgroundColor: theme.colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.md,
+  },
+  primaryActionText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.white,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  secondaryActionText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  actionDisabled: {
+    opacity: 0.5,
   },
 });

@@ -11,6 +11,7 @@ import { useIsDesktopWebLayout } from '@/components/web-auth-shell';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { usePolicies } from '@/context/policies-context';
+import { fetchPolicyCoveragesByPolicyId, type PolicyCoverageGroup } from '@/services/policy-coverages-api';
 import { fetchPolicyFilesListByInsuredId } from '@/services/policy-files-api';
 import type { PolicyStatus } from '@/types/policy';
 import { PolicyFileEntry } from '@/types/policy-file';
@@ -39,9 +40,14 @@ const POLICY_STATUS_BADGE_STYLES: Record<
   },
 };
 
-function toUserFacingError(error: unknown) {
+function toPolicyFilesError(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   return 'Unable to load policy files right now.';
+}
+
+function toPolicyCoveragesError(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  return 'Unable to load policy coverage details right now.';
 }
 
 type PolicyDetailScreenProps = {
@@ -61,6 +67,9 @@ export default function PolicyDetailScreen({
   const [policyFiles, setPolicyFiles] = useState<PolicyFileEntry[]>([]);
   const [isLoadingPolicyFiles, setIsLoadingPolicyFiles] = useState(false);
   const [policyFilesError, setPolicyFilesError] = useState<string | null>(null);
+  const [coverageGroups, setCoverageGroups] = useState<PolicyCoverageGroup[]>([]);
+  const [isLoadingPolicyCoverages, setIsLoadingPolicyCoverages] = useState(false);
+  const [policyCoveragesError, setPolicyCoveragesError] = useState<string | null>(null);
 
   const filteredPolicyFiles = useMemo(() => {
     if (!policy) return [];
@@ -89,6 +98,14 @@ export default function PolicyDetailScreen({
     });
   }, [policy, policyFiles]);
 
+  const invoiceFiles = useMemo(
+    () =>
+      filteredPolicyFiles.filter(
+        (entry) => entry.fileOrFolder === 'File' && /invoice|statement|bill/i.test(entry.name)
+      ),
+    [filteredPolicyFiles]
+  );
+
   useEffect(() => {
     if (!isAuthenticated) router.replace('/(auth)/login');
   }, [isAuthenticated]);
@@ -113,7 +130,7 @@ export default function PolicyDetailScreen({
       } catch (error) {
         if (!isMounted) return;
         setPolicyFiles([]);
-        setPolicyFilesError(toUserFacingError(error));
+        setPolicyFilesError(toPolicyFilesError(error));
       } finally {
         if (isMounted) {
           setIsLoadingPolicyFiles(false);
@@ -127,6 +144,41 @@ export default function PolicyDetailScreen({
       isMounted = false;
     };
   }, [policy, policyFilesInsuredId]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydratePolicyCoverages = async () => {
+      if (!policy) {
+        setCoverageGroups([]);
+        setPolicyCoveragesError(null);
+        setIsLoadingPolicyCoverages(false);
+        return;
+      }
+
+      setIsLoadingPolicyCoverages(true);
+      setPolicyCoveragesError(null);
+      try {
+        const nextCoverageGroups = await fetchPolicyCoveragesByPolicyId(policy.id);
+        if (!isMounted) return;
+        setCoverageGroups(nextCoverageGroups);
+      } catch (error) {
+        if (!isMounted) return;
+        setCoverageGroups([]);
+        setPolicyCoveragesError(toPolicyCoveragesError(error));
+      } finally {
+        if (isMounted) {
+          setIsLoadingPolicyCoverages(false);
+        }
+      }
+    };
+
+    void hydratePolicyCoverages();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [policy]);
 
   if (isLoadingPolicies) {
     return (
@@ -178,22 +230,105 @@ export default function PolicyDetailScreen({
     policy.billing.lastPaymentDate === 'Not billed yet'
       ? policy.billing.lastPaymentDate
       : formatDate(policy.billing.lastPaymentDate);
+  const outstandingBalanceLabel =
+    policy.billing.lastPaymentDate === 'Not billed yet' ? 'Not billed yet' : 'Not available';
+  const invoiceSummaryLabel = policyFilesError
+    ? 'Unavailable'
+    : isLoadingPolicyFiles
+      ? 'Loading...'
+      : invoiceFiles.length === 1
+        ? '1 Available in Policy Files'
+        : invoiceFiles.length > 1
+          ? `${invoiceFiles.length} Available in Policy Files`
+          : 'No Invoices Available';
   const desktopSummaryFacts = [
     {
       label: 'Carrier',
       value: policy.carrierName,
     },
     {
-      label: 'Effective',
+      label: 'Effective Date',
       value: formatDate(policy.effectiveDate),
     },
     {
-      label: 'Renewal',
-      value: formatDate(policy.renewalDate),
+      label: 'Expiration Date',
+      value: formatDate(policy.expirationDate),
     },
     {
-      label: 'Monthly premium',
+      label: 'Monthly Premium',
       value: formatCurrency(policy.premiumMonthly),
+    },
+  ] as const;
+  const policyDateRows = [
+    {
+      label: 'Effective Date',
+      value: formatDate(policy.effectiveDate),
+    },
+    {
+      label: 'Expiration Date',
+      value: formatDate(policy.expirationDate),
+    },
+  ] as const;
+  const coverageDetailsBody = (
+    <>
+      {isLoadingPolicyCoverages ? <Text style={styles.sectionNote}>Loading Coverage Details...</Text> : null}
+      {policyCoveragesError ? <Text style={[styles.sectionNote, styles.sectionError]}>{policyCoveragesError}</Text> : null}
+
+      {coverageGroups.length > 0 ? (
+        <View style={styles.coverageGroupGrid}>
+          {coverageGroups.map((group) => (
+            <View key={group.id} style={styles.coverageGroupCard}>
+              <Text style={styles.coverageGroupTitle}>{group.title}</Text>
+              {group.rows.map((row) => (
+                <View key={`${group.id}-${row.label}`} style={styles.lineItem}>
+                  <Text style={styles.lineLabel}>{row.label}</Text>
+                  <Text style={styles.lineValue}>{row.value}</Text>
+                </View>
+              ))}
+            </View>
+          ))}
+        </View>
+      ) : policy.coverageSummary.length > 0 ? (
+        <View style={styles.coverageGroupGrid}>
+          <View style={styles.coverageGroupCard}>
+            <Text style={styles.coverageGroupTitle}>Coverage Summary</Text>
+            {policy.coverageSummary.map((coverage) => (
+              <View style={styles.lineItem} key={coverage.label}>
+                <Text style={styles.lineLabel}>{coverage.label}</Text>
+                <Text style={styles.lineValue}>{coverage.value}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : !isLoadingPolicyCoverages ? (
+        <Text style={styles.sectionNote}>Coverage Details are not available for this policy yet.</Text>
+      ) : null}
+    </>
+  );
+  const billingRows = [
+    {
+      label: 'Plan',
+      value: policy.billing.plan,
+    },
+    {
+      label: 'Monthly Premium',
+      value: formatCurrency(policy.billing.monthlyPremium),
+    },
+    {
+      label: 'Outstanding Balance',
+      value: outstandingBalanceLabel,
+    },
+    {
+      label: 'Invoices',
+      value: invoiceSummaryLabel,
+    },
+    {
+      label: 'Next Due Date',
+      value: formatDate(policy.billing.nextDueDate),
+    },
+    {
+      label: 'Last Payment',
+      value: lastPaymentDateLabel,
     },
   ] as const;
 
@@ -228,7 +363,7 @@ export default function PolicyDetailScreen({
 
   const policyFilesAction = (
     <AppButton
-      label="Browse policy files"
+      label="Browse Policy Files"
       variant="secondary"
       onPress={() => {
         router.push({
@@ -259,7 +394,7 @@ export default function PolicyDetailScreen({
 
           <View style={styles.desktopHeroTop}>
             <View style={styles.desktopHeroCopy}>
-              <Text style={styles.desktopEyebrow}>Policy details</Text>
+              <Text style={styles.desktopEyebrow}>Policy Details</Text>
               <Text style={styles.desktopProduct}>{policy.productName}</Text>
               <Text style={styles.desktopPolicyNumber}>Policy {policy.policyNumber}</Text>
             </View>
@@ -283,60 +418,27 @@ export default function PolicyDetailScreen({
         <View style={styles.desktopGrid}>
           <View style={styles.desktopMainColumn}>
             <View style={styles.card}>
-              <SectionHeader title="Documents" subtitle="Policy file folders and files" />
-              {policyFilesContent}
-              {policyFilesError ? <Text style={styles.fileError}>{policyFilesError}</Text> : null}
-              <View style={styles.desktopInlineAction}>{policyFilesAction}</View>
+              <SectionHeader title="Coverage Details" subtitle="Policy Limits and Coverage Information" />
+              {coverageDetailsBody}
             </View>
 
             <View style={styles.card}>
-              <SectionHeader title="Policy overview" subtitle="Coverage and insured details" />
-              <View style={styles.desktopOverviewGrid}>
-                <View style={styles.desktopOverviewPanel}>
-                  <Text style={styles.desktopPanelTitle}>Coverage summary</Text>
-                  {policy.coverageSummary.map((coverage) => (
-                    <View style={styles.lineItem} key={coverage.label}>
-                      <Text style={styles.lineLabel}>{coverage.label}</Text>
-                      <Text style={styles.lineValue}>{coverage.value}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={styles.desktopOverviewPanel}>
-                  <Text style={styles.desktopPanelTitle}>Insured item / person</Text>
-                  <View style={styles.desktopStackedField}>
-                    <Text style={styles.lineLabel}>Named insured</Text>
-                    <Text style={styles.desktopStackValue}>{policy.insuredName}</Text>
-                  </View>
-                  <View style={styles.divider} />
-                  <View style={styles.desktopStackedField}>
-                    <Text style={styles.lineLabel}>Coverage applies to</Text>
-                    <Text style={styles.desktopStackValue}>{policy.insuredItem}</Text>
-                  </View>
-                </View>
-              </View>
+              <SectionHeader title="Documents" subtitle="Policy File Folders and Files" />
+              {policyFilesContent}
+              {policyFilesError ? <Text style={styles.fileError}>{policyFilesError}</Text> : null}
+              <View style={styles.desktopInlineAction}>{policyFilesAction}</View>
             </View>
           </View>
 
           <View style={styles.desktopSideColumn}>
             <View style={styles.card}>
-              <SectionHeader title="Billing summary" subtitle="Payment plan and due date" />
-              <View style={styles.lineItem}>
-                <Text style={styles.lineLabel}>Plan</Text>
-                <Text style={styles.lineValue}>{policy.billing.plan}</Text>
-              </View>
-              <View style={styles.lineItem}>
-                <Text style={styles.lineLabel}>Monthly premium</Text>
-                <Text style={styles.lineValue}>{formatCurrency(policy.billing.monthlyPremium)}</Text>
-              </View>
-              <View style={styles.lineItem}>
-                <Text style={styles.lineLabel}>Next due date</Text>
-                <Text style={styles.lineValue}>{formatDate(policy.billing.nextDueDate)}</Text>
-              </View>
-              <View style={styles.lineItem}>
-                <Text style={styles.lineLabel}>Last payment</Text>
-                <Text style={styles.lineValue}>{lastPaymentDateLabel}</Text>
-              </View>
+              <SectionHeader title="Billing Summary" subtitle="Billing Status and Invoice Availability" />
+              {billingRows.map((row) => (
+                <View key={row.label} style={styles.lineItem}>
+                  <Text style={styles.lineLabel}>{row.label}</Text>
+                  <Text style={styles.lineValue}>{row.value}</Text>
+                </View>
+              ))}
               <View
                 style={[
                   styles.desktopAutopayBadge,
@@ -353,7 +455,7 @@ export default function PolicyDetailScreen({
             </View>
 
             <View style={styles.card}>
-              <SectionHeader title="Need help?" subtitle="Secondary desktop actions" />
+              <SectionHeader title="Need Help?" subtitle="Secondary Desktop Actions" />
               <Text style={styles.desktopHelpText}>
                 For document requests or policy support, use quick actions or return to your policy list.
               </Text>
@@ -388,50 +490,32 @@ export default function PolicyDetailScreen({
         <Text style={styles.status}>{policy.status}</Text>
       </View>
 
-      <SectionHeader title="Coverage summary" />
+      <SectionHeader title="Policy Dates" />
       <View style={styles.card}>
-        {policy.coverageSummary.map((coverage) => (
-          <View style={styles.lineItem} key={coverage.label}>
-            <Text style={styles.lineLabel}>{coverage.label}</Text>
-            <Text style={styles.lineValue}>{coverage.value}</Text>
+        {policyDateRows.map((row) => (
+          <View key={row.label} style={styles.lineItem}>
+            <Text style={styles.lineLabel}>{row.label}</Text>
+            <Text style={styles.lineValue}>{row.value}</Text>
           </View>
         ))}
       </View>
 
-      <SectionHeader title="Insured item / person" />
+      <SectionHeader title="Coverage Details" />
       <View style={styles.card}>
-        <Text style={styles.lineLabel}>Named insured</Text>
-        <Text style={styles.lineValue}>{policy.insuredName}</Text>
-        <View style={styles.divider} />
-        <Text style={styles.lineLabel}>Coverage applies to</Text>
-        <Text style={styles.lineValue}>{policy.insuredItem}</Text>
+        {coverageDetailsBody}
       </View>
 
-      <SectionHeader title="Billing summary" />
+      <SectionHeader title="Billing Summary" />
       <View style={styles.card}>
-        <View style={styles.lineItem}>
-          <Text style={styles.lineLabel}>Plan</Text>
-          <Text style={styles.lineValue}>{policy.billing.plan}</Text>
-        </View>
-        <View style={styles.lineItem}>
-          <Text style={styles.lineLabel}>Monthly premium</Text>
-          <Text style={styles.lineValue}>{formatCurrency(policy.billing.monthlyPremium)}</Text>
-        </View>
-        <View style={styles.lineItem}>
-          <Text style={styles.lineLabel}>Next due date</Text>
-          <Text style={styles.lineValue}>{formatDate(policy.billing.nextDueDate)}</Text>
-        </View>
-        <View style={styles.lineItem}>
-          <Text style={styles.lineLabel}>Last payment</Text>
-          <Text style={styles.lineValue}>
-            {policy.billing.lastPaymentDate === 'Not billed yet'
-              ? policy.billing.lastPaymentDate
-              : formatDate(policy.billing.lastPaymentDate)}
-          </Text>
-        </View>
+        {billingRows.map((row) => (
+          <View key={row.label} style={styles.lineItem}>
+            <Text style={styles.lineLabel}>{row.label}</Text>
+            <Text style={styles.lineValue}>{row.value}</Text>
+          </View>
+        ))}
       </View>
 
-      <SectionHeader title="Documents" subtitle="Policy file folders and files" />
+      <SectionHeader title="Documents" subtitle="Policy File Folders and Files" />
       <View style={styles.card}>
         {policyFilesContent}
         {policyFilesError ? <Text style={styles.fileError}>{policyFilesError}</Text> : null}
@@ -561,6 +645,28 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     width: '100%',
     maxWidth: 260,
+  },
+  coverageGroupGrid: {
+    gap: theme.spacing.sm,
+  },
+  coverageGroupCard: {
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceTint,
+    padding: theme.spacing.sm,
+    gap: theme.spacing.xs,
+  },
+  coverageGroupTitle: {
+    ...theme.typography.label,
+    color: theme.colors.textStrong,
+  },
+  sectionNote: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+  },
+  sectionError: {
+    color: theme.colors.danger,
   },
   desktopOverviewGrid: {
     flexDirection: 'row',

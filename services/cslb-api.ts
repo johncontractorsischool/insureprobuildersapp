@@ -17,6 +17,10 @@ export type CslbWorkersComp = {
   policyNumber: string | null;
   effectiveDate: string | null;
   expireDate: string | null;
+  status: string | null;
+  exemption: string | null;
+  exception: string | null;
+  notes: string | null;
 };
 
 export type CslbPersonnel = {
@@ -114,6 +118,10 @@ function mapWorkersComp(value: unknown): CslbWorkersComp | null {
     policyNumber: normalizeText(payload.policyNumber),
     effectiveDate: normalizeText(payload.effectiveDate),
     expireDate: normalizeText(payload.expireDate),
+    status: normalizeText(payload.status),
+    exemption: normalizeText(payload.exemption),
+    exception: normalizeText(payload.exception),
+    notes: normalizeText(payload.notes),
   };
 }
 

@@ -82,7 +82,7 @@ export default function ProfileScreen({
 
   const accountCard = (
     <View style={[styles.accountCard, isDesktopLayout ? styles.desktopCard : null]}>
-      <Text style={styles.label}>Account holder</Text>
+      <Text style={styles.label}>Account Holder</Text>
       <Text style={styles.name}>{getNameFromCustomer(customer, userEmail)}</Text>
       <Text style={styles.email}>{customer?.email ?? userEmail ?? 'member@email.com'}</Text>
     </View>

@@ -18,11 +18,7 @@ const COMPANY_STATUS_CHIP_STYLES: Record<
     backgroundColor: '#EBF9F1',
     textColor: theme.colors.success,
   },
-  Current: {
-    backgroundColor: '#E9F2FF',
-    textColor: '#295E9C',
-  },
-  Inactive: {
+  'Needs Attention': {
     backgroundColor: theme.colors.dangerSoft,
     textColor: theme.colors.danger,
   },
@@ -191,7 +187,7 @@ export default function CompanyDetailScreen({
 
       {workersCompRows.length > 0 ? (
         <>
-          <SectionHeader title="Workers compensation" />
+          <SectionHeader title="Workers' Compensation" />
           <View style={styles.card}>
             {workersCompRows.map((row) => (
               <View key={row.label} style={styles.infoRow}>

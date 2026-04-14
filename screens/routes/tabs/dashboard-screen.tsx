@@ -1,10 +1,24 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Alert,
+  Image,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BrandMark } from "@/components/brand-mark";
+import {
+  type PbiaFormSlug,
+  buildPbiaFormUrl,
+  createPbiaInstanceId,
+  findPbiaFormBySlug,
+} from "@/constants/pbia-forms";
 import { ScreenContainer } from "@/components/screen-container";
 import { SectionHeader } from "@/components/section-header";
 import { theme } from "@/constants/theme";
@@ -60,11 +74,7 @@ const COMPANY_STATUS_CHIP_STYLES: Record<
     backgroundColor: "#EBF9F1",
     textColor: theme.colors.success,
   },
-  Current: {
-    backgroundColor: "#E9F2FF",
-    textColor: "#295E9C",
-  },
-  Inactive: {
+  "Needs Attention": {
     backgroundColor: theme.colors.dangerSoft,
     textColor: theme.colors.danger,
   },
@@ -83,6 +93,13 @@ type AgentAction = {
   unavailableMessage: string;
 };
 
+type DashboardRequestAction = {
+  id: "quote" | "additional-insured" | "coi";
+  label: string;
+  variant: "primary" | "secondary";
+  onPress: () => void;
+};
+
 function getInitials(value: string) {
   const parts = value.trim().split(/\s+/).filter(Boolean).slice(0, 2);
   if (parts.length === 0) return "AG";
@@ -93,7 +110,7 @@ function normalizeText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
 }
-[];
+
 function toAvatarKey(value: string) {
   return value
     .toLowerCase()
@@ -226,12 +243,13 @@ function DashboardSkeleton({
 
             <View style={styles.card}>
               <SectionHeader
-                title="Quick actions"
-                subtitle="Portal shortcuts"
+                title="Request Quotes"
+                subtitle="Quote and service requests"
               />
               <View
                 style={[styles.skeletonButton, styles.skeletonButtonPrimary]}
               />
+              <View style={styles.skeletonButton} />
               <View style={styles.skeletonButton} />
             </View>
           </View>
@@ -293,9 +311,10 @@ function DashboardSkeleton({
         </View>
       </View>
 
-      <SectionHeader title="Actions" />
+      <SectionHeader title="Request Quotes" />
       <View style={styles.card}>
         <View style={[styles.skeletonButton, styles.skeletonButtonPrimary]} />
+        <View style={styles.skeletonButton} />
         <View style={styles.skeletonButton} />
       </View>
     </ScreenContainer>
@@ -330,6 +349,7 @@ export default function DashboardScreen({
     summaryRows,
     statusChips,
     statusFallbackText,
+    dataCurrentAsOf,
   } = useCompanyProfile();
   // `/insuredAgents?insuredId=` expects the insured *database* id (UUID from `databaseId`).
   const insuredLookupId = useMemo(() => {
@@ -521,16 +541,101 @@ export default function DashboardScreen({
     getNameFromCustomer(customer, userEmail);
   const accountHolderEmail = customer?.email ?? userEmail ?? "member@email.com";
   const accountHolderInitials = getInitials(accountHolderName);
+  const supportEmail = portalConfig.actions.supportEmail;
   const licenseNumber = lookupSummaryValue(summaryRows, [
     "license #",
     "license",
   ]);
-  const expiration = lookupSummaryValue(summaryRows, ["expiration"]);
-  const complianceState = lookupSummaryValue(summaryRows, [
-    "current",
-    "compliance",
-    "current state",
+  const effectiveDate = lookupSummaryValue(summaryRows, [
+    "effective date",
+    "effective",
+    "issue date",
   ]);
+  const expiration = lookupSummaryValue(summaryRows, [
+    "expiration date",
+    "expiration",
+  ]);
+  const dataCurrentValue = dataCurrentAsOf ?? "Not available";
+
+  // Until dedicated request APIs are available, these dashboard actions route
+  // into the existing PBIA intake forms or a prefilled support email.
+  const openPbiaRequestForm = async (slug: PbiaFormSlug) => {
+    if (Platform.OS !== "web") {
+      const form = findPbiaFormBySlug(slug);
+      if (!form) {
+        Alert.alert("Form unavailable", "Please try again.");
+        return;
+      }
+
+      const formUrl = buildPbiaFormUrl(form, createPbiaInstanceId());
+      const result = await openInAppBrowser(
+        formUrl,
+        "The form link is unavailable right now.",
+      );
+      if (!result.ok) {
+        Alert.alert("Unable to open form", result.message ?? "Please try again.");
+      }
+      return;
+    }
+
+    router.push({
+      pathname: "/forms/[slug]",
+      params: { slug },
+    });
+  };
+
+  const handleRequestCoi = async () => {
+    const target = buildEmailLink(supportEmail, {
+      subject: "Request COI",
+      body: [
+        "Hello Support,",
+        "",
+        "I need to request a certificate of insurance.",
+        "",
+        `Account Holder: ${accountHolderName}`,
+        `Email Address: ${accountHolderEmail}`,
+        customer?.insuredId ? `Insured ID: ${customer.insuredId}` : null,
+        "",
+        "Please contact me with the next steps.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+    const result = await openExternalLink(
+      target,
+      "Support email is not configured yet.",
+    );
+    if (!result.ok) {
+      Alert.alert("Action unavailable", result.message ?? "Please try again.");
+    }
+  };
+
+  const requestActions: DashboardRequestAction[] = [
+    {
+      id: "quote",
+      label: "Request Quote",
+      variant: "primary",
+      onPress: () => {
+        router.push("/forms");
+      },
+    },
+    {
+      id: "additional-insured",
+      label: "Request Additional Insured",
+      variant: "secondary",
+      onPress: () => {
+        void openPbiaRequestForm("additional-insured-request");
+      },
+    },
+    {
+      id: "coi",
+      label: "Request COI",
+      variant: "secondary",
+      onPress: () => {
+        void handleRequestCoi();
+      },
+    },
+  ];
 
   if (showDashboardSkeleton) {
     return (
@@ -554,7 +659,7 @@ export default function DashboardScreen({
               <Text style={styles.avatarText}>{accountHolderInitials}</Text>
             </View>
             <View style={styles.desktopIdentityCopy}>
-              <Text style={styles.accountLabel}>Account holder</Text>
+              <Text style={styles.accountLabel}>Account Holder</Text>
               <Text style={styles.desktopAccountName}>{accountHolderName}</Text>
               <Text style={styles.accountEmail}>{accountHolderEmail}</Text>
             </View>
@@ -608,13 +713,17 @@ export default function DashboardScreen({
                   )}
                 </View>
                 <View style={styles.desktopSnapshotItem}>
-                  <Text style={styles.desktopSnapshotLabel}>Compliance</Text>
+                  <Text style={styles.desktopSnapshotLabel}>Effective Date</Text>
+                  <Text style={styles.desktopSnapshotValue}>{effectiveDate}</Text>
+                </View>
+                <View style={styles.desktopSnapshotItem}>
+                  <Text style={styles.desktopSnapshotLabel}>Data Current</Text>
                   <Text style={styles.desktopSnapshotValue}>
-                    {complianceState}
+                    {dataCurrentValue}
                   </Text>
                 </View>
                 <View style={styles.desktopSnapshotItem}>
-                  <Text style={styles.desktopSnapshotLabel}>Expiration</Text>
+                  <Text style={styles.desktopSnapshotLabel}>Expiration Date</Text>
                   <Text style={styles.desktopSnapshotValue}>{expiration}</Text>
                 </View>
               </View>
@@ -658,11 +767,11 @@ export default function DashboardScreen({
             <View style={styles.card}>
               <SectionHeader
                 title="Workspace"
-                subtitle="Forms, notes, tasks, and related details"
+                subtitle="Business details and request tools"
               />
               <Text style={styles.agentHint}>
-                Continue to use All Intake Forms and Company Details while
-                additional dashboard sections are added.
+                Use Company Details and Request Quotes to manage business
+                information and service requests.
               </Text>
             </View>
           </View>
@@ -758,40 +867,31 @@ export default function DashboardScreen({
 
             <View style={styles.card}>
               <SectionHeader
-                title="Quick actions"
-                subtitle="Portal shortcuts"
+                title="Request Quotes"
+                subtitle="Quote and service requests"
               />
-              <Pressable
-                onPress={() => {
-                  router.push("/forms");
-                }}
-                style={({ pressed }) => [
-                  styles.primaryAction,
-                  pressed ? styles.pressed : null,
-                ]}
-              >
-                <Text style={styles.primaryActionText}>All Intake Forms</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  void openAction(
-                    portalConfig.actions.issueCoiUrl,
-                    "Issue COI link is not configured yet.",
-                  );
-                }}
-                disabled={!portalConfig.actions.issueCoiUrl}
-                style={({ pressed }) => [
-                  styles.secondaryAction,
-                  !portalConfig.actions.issueCoiUrl
-                    ? styles.actionCardDisabled
-                    : null,
-                  pressed && portalConfig.actions.issueCoiUrl
-                    ? styles.pressed
-                    : null,
-                ]}
-              >
-                <Text style={styles.secondaryActionText}>Issue COI</Text>
-              </Pressable>
+              {requestActions.map((action) => (
+                <Pressable
+                  key={action.id}
+                  onPress={action.onPress}
+                  style={({ pressed }) => [
+                    action.variant === "primary"
+                      ? styles.primaryAction
+                      : styles.secondaryAction,
+                    pressed ? styles.pressed : null,
+                  ]}
+                >
+                  <Text
+                    style={
+                      action.variant === "primary"
+                        ? styles.primaryActionText
+                        : styles.secondaryActionText
+                    }
+                  >
+                    {action.label}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
           </View>
         </View>
@@ -807,7 +907,7 @@ export default function DashboardScreen({
         <View style={styles.headerCopy}>
           {showHeaderBrandMark ? <BrandMark /> : null}
           <View style={styles.accountCard}>
-            <Text style={styles.accountLabel}>Account holder</Text>
+            <Text style={styles.accountLabel}>Account Holder</Text>
             <Text style={styles.accountName}>{accountHolderName}</Text>
             <Text style={styles.accountEmail}>{accountHolderEmail}</Text>
           </View>
@@ -974,38 +1074,30 @@ export default function DashboardScreen({
         </View>
       </View>
 
-      <SectionHeader title="Actions" />
+      <SectionHeader title="Request Quotes" />
       <View style={styles.card}>
-        <Pressable
-          onPress={() => {
-            router.push("/forms");
-          }}
-          style={({ pressed }) => [
-            styles.primaryAction,
-            pressed ? styles.pressed : null,
-          ]}
-        >
-          <Text style={styles.primaryActionText}>All Intake Forms</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => {
-            void openAction(
-              portalConfig.actions.issueCoiUrl,
-              "Issue COI link is not configured yet.",
-            );
-          }}
-          disabled={!portalConfig.actions.issueCoiUrl}
-          style={({ pressed }) => [
-            styles.secondaryAction,
-            !portalConfig.actions.issueCoiUrl
-              ? styles.actionCardDisabled
-              : null,
-            pressed && portalConfig.actions.issueCoiUrl ? styles.pressed : null,
-          ]}
-        >
-          <Text style={styles.secondaryActionText}>Issue COI</Text>
-        </Pressable>
+        {requestActions.map((action) => (
+          <Pressable
+            key={action.id}
+            onPress={action.onPress}
+            style={({ pressed }) => [
+              action.variant === "primary"
+                ? styles.primaryAction
+                : styles.secondaryAction,
+              pressed ? styles.pressed : null,
+            ]}
+          >
+            <Text
+              style={
+                action.variant === "primary"
+                  ? styles.primaryActionText
+                  : styles.secondaryActionText
+              }
+            >
+              {action.label}
+            </Text>
+          </Pressable>
+        ))}
       </View>
     </ScreenContainer>
   );
@@ -1316,6 +1408,7 @@ const styles = StyleSheet.create({
     ...theme.typography.bodySmall,
     color: theme.colors.white,
     fontWeight: "700",
+    textAlign: "center",
   },
   secondaryAction: {
     minHeight: 46,
@@ -1331,6 +1424,7 @@ const styles = StyleSheet.create({
     ...theme.typography.bodySmall,
     color: theme.colors.textStrong,
     fontWeight: "700",
+    textAlign: "center",
   },
   skeletonBlock: {
     borderRadius: theme.radius.pill,

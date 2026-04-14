@@ -26,6 +26,7 @@ type CoverageSectionConfig = {
   title: string;
   formSlug: PbiaFormSlug;
   keywords: readonly string[];
+  quoteDescription: string;
 };
 
 type CoverageSectionModel = CoverageSectionConfig & {
@@ -49,24 +50,28 @@ const COVERAGE_SECTIONS: readonly CoverageSectionConfig[] = [
     title: 'Workers Compensation',
     formSlug: 'workers-comp',
     keywords: ['workers compensation', 'workers comp', 'worker compensation', 'worker comp'],
+    quoteDescription: 'Request a quote for workers compensation insurance.',
   },
   {
     key: 'clb-bond',
     title: 'CLB Bond',
     formSlug: 'bond-quote',
     keywords: ['bond', 'contractor bond', 'license bond', 'surety bond', 'cslb bond', 'clb bond'],
+    quoteDescription: 'Request a quote for contractor bond coverage.',
   },
   {
     key: 'general-liability',
     title: 'General Liability',
     formSlug: 'general-liability',
     keywords: ['general liability', 'general liab', 'cgl'],
+    quoteDescription: 'Request a quote for general liability insurance.',
   },
   {
     key: 'commercial-auto',
     title: 'Commercial Auto',
     formSlug: 'commercial-auto',
     keywords: ['commercial auto', 'commercial automobile', 'business auto', 'auto liability'],
+    quoteDescription: 'Request a quote for commercial auto insurance.',
   },
 ] as const;
 
@@ -106,13 +111,10 @@ function PoliciesSkeleton({
       <ScreenContainer contentContainerStyle={[styles.desktopScreenContent, contentPadding]}>
         <View style={styles.skeletonHeader}>
           <View style={[styles.skeletonBlock, styles.skeletonHeaderTitle]} />
-          <View style={[styles.skeletonBlock, styles.skeletonHeaderSubtitle]} />
         </View>
 
         <View style={styles.desktopLayout}>
           <View style={styles.desktopMainColumn}>
-            <View style={[styles.skeletonBlock, styles.skeletonGroupLabel]} />
-
             {[0, 1].map((index) => (
               <View key={`owned-desktop-${index}`} style={styles.desktopSectionPanel}>
                 <View style={[styles.skeletonBlock, styles.skeletonSectionTitle]} />
@@ -157,10 +159,7 @@ function PoliciesSkeleton({
     <ScreenContainer contentContainerStyle={contentPadding}>
       <View style={styles.skeletonHeader}>
         <View style={[styles.skeletonBlock, styles.skeletonHeaderTitle]} />
-        <View style={[styles.skeletonBlock, styles.skeletonHeaderSubtitle]} />
       </View>
-
-      <View style={[styles.skeletonBlock, styles.skeletonGroupLabel]} />
 
       {[0, 1].map((index) => (
         <View key={`owned-${index}`} style={styles.sectionBlock}>
@@ -301,8 +300,14 @@ export default function PoliciesScreen({
             <PolicyCard
               key={`${section.key}-${policy.id}`}
               policy={policy}
-              titleOverride={policy.carrierName}
               onPress={() => handlePolicyPress(policy.id)}
+              onRequestQuote={
+                policy.status === 'Lapsed'
+                  ? () => {
+                      void handleQuotePress(section.formSlug);
+                    }
+                  : undefined
+              }
             />
           ))}
         </View>
@@ -317,14 +322,12 @@ export default function PoliciesScreen({
         style={[styles.sectionBlock, isDesktopLayout ? styles.desktopSectionPanel : null]}>
         <Text style={styles.sectionTitle}>{section.title}</Text>
         <View style={styles.quoteCard}>
-          <Text style={styles.quoteCardTitle}>No policy on file</Text>
-          <Text style={styles.quoteCardDescription}>
-            Request a quote for {section.title.toLowerCase()} and our team will follow up with options.
-          </Text>
+          <Text style={styles.quoteCardTitle}>No Policy on File</Text>
+          <Text style={styles.quoteCardDescription}>{section.quoteDescription}</Text>
           <Pressable
             onPress={() => void handleQuotePress(section.formSlug)}
             style={({ pressed }) => [styles.quoteButton, pressed ? styles.quoteButtonPressed : null]}>
-            <Text style={styles.quoteButtonText}>Get Quote</Text>
+            <Text style={styles.quoteButtonText}>Request a Quote</Text>
           </Pressable>
         </View>
       </View>
@@ -363,16 +366,12 @@ export default function PoliciesScreen({
         { paddingBottom: insets.bottom + (includeTabBarPadding ? 116 : 24) },
         isDesktopLayout ? styles.desktopScreenContent : null,
       ]}>
-      <SectionHeader
-        title="Policies"
-        subtitle="Review current coverage and request quotes for missing lines"
-      />
+      <SectionHeader title="Policies" />
 
       {isDesktopLayout ? (
         // Desktop uses a stable split shell so policies stay readable while summary/actions are always visible.
         <View style={styles.desktopLayout}>
           <View style={styles.desktopMainColumn}>
-            {ownedSections.length > 0 ? <Text style={styles.groupTitle}>Current Coverage</Text> : null}
             {ownedSections.map(renderOwnedSection)}
             {missingSections.map(renderMissingSection)}
           </View>
@@ -444,12 +443,12 @@ export default function PoliciesScreen({
                     <Pressable
                       key={`quick-${section.key}`}
                       onPress={() => void handleQuotePress(section.formSlug)}
-                      style={({ pressed }) => [
+                    style={({ pressed }) => [
                         styles.desktopQuickAction,
                         pressed ? styles.desktopQuickActionPressed : null,
                       ]}>
                       <Text style={styles.desktopQuickActionTitle}>{section.title}</Text>
-                      <Text style={styles.desktopQuickActionBody}>Get Quote</Text>
+                      <Text style={styles.desktopQuickActionBody}>Request a Quote</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -459,7 +458,6 @@ export default function PoliciesScreen({
         </View>
       ) : (
         <>
-          {ownedSections.length > 0 ? <Text style={styles.groupTitle}>Current Coverage</Text> : null}
           {ownedSections.map(renderOwnedSection)}
           {missingSections.map(renderMissingSection)}
         </>
@@ -674,13 +672,6 @@ const styles = StyleSheet.create({
     width: '48%',
     height: 26,
     borderRadius: theme.radius.sm,
-  },
-  skeletonHeaderSubtitle: {
-    width: '82%',
-  },
-  skeletonGroupLabel: {
-    width: '32%',
-    height: 10,
   },
   skeletonSectionTitle: {
     width: '38%',

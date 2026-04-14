@@ -6,6 +6,13 @@ type OpenExternalResult = {
   message?: string;
 };
 
+type EmailLinkOptions = {
+  subject?: string | null;
+  body?: string | null;
+  cc?: string | null;
+  bcc?: string | null;
+};
+
 function normalizePhone(value: string | null | undefined) {
   if (!value) return null;
   const normalized = value.trim().replace(/[^\d+]/g, '');
@@ -24,10 +31,33 @@ export function buildSmsLink(phone: string | null | undefined) {
   return `sms:${normalized}`;
 }
 
-export function buildEmailLink(email: string | null | undefined) {
+export function buildEmailLink(
+  email: string | null | undefined,
+  options: EmailLinkOptions = {}
+) {
   const normalized = email?.trim().toLowerCase();
   if (!normalized) return null;
-  return `mailto:${normalized}`;
+
+  const params = new URLSearchParams();
+
+  if (options.subject?.trim()) {
+    params.set('subject', options.subject.trim());
+  }
+
+  if (options.body?.trim()) {
+    params.set('body', options.body.trim());
+  }
+
+  if (options.cc?.trim()) {
+    params.set('cc', options.cc.trim());
+  }
+
+  if (options.bcc?.trim()) {
+    params.set('bcc', options.bcc.trim());
+  }
+
+  const query = params.toString();
+  return query ? `mailto:${normalized}?${query}` : `mailto:${normalized}`;
 }
 
 export async function openExternalLink(

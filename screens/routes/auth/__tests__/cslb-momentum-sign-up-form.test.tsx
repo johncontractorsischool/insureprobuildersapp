@@ -101,7 +101,7 @@ describe('CslbMomentumSignUpForm', () => {
 
     render(<CslbMomentumSignUpForm />);
 
-    expect(screen.getByText('Sync failed')).toBeTruthy();
+    expect(screen.getByText('Sync Failed')).toBeTruthy();
     expect(screen.getByTestId('sync-error-message')).toHaveTextContent('Network request failed.');
   });
 

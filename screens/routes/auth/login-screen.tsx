@@ -145,7 +145,7 @@ export default function LoginScreen() {
                   </Text>
 
                   <AppInput
-                    label="Email address"
+                    label="Email Address"
                     leftIcon="mail-outline"
                     value={email}
                     onChangeText={setEmail}

@@ -13,6 +13,7 @@ type PortalConfig = {
   actions: {
     intakeFormsUrl: string | null;
     issueCoiUrl: string | null;
+    supportEmail: string;
   };
 };
 
@@ -48,6 +49,7 @@ export function getPortalConfig(): PortalConfig {
     actions: {
       intakeFormsUrl: normalizeHttpUrl(process.env.EXPO_PUBLIC_INTAKE_FORMS_URL),
       issueCoiUrl: normalizeHttpUrl(process.env.EXPO_PUBLIC_ISSUE_COI_URL),
+      supportEmail: normalizeText(process.env.EXPO_PUBLIC_SUPPORT_EMAIL) ?? 'support@insureprobuilders.com',
     },
   };
 }
