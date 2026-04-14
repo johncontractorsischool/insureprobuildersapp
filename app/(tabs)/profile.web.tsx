@@ -3,5 +3,5 @@ import ProfileScreen from '@/screens/routes/tabs/profile-screen';
 
 export default function ProfileWebRoute() {
   const isDesktopLayout = useIsDesktopWebLayout();
-  return <ProfileScreen includeTabBarPadding={!isDesktopLayout} />;
+  return <ProfileScreen includeTabBarPadding={!isDesktopLayout} isDesktopLayout={isDesktopLayout} />;
 }

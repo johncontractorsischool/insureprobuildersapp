@@ -1,14 +1,16 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Platform, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
 import { ScreenContainer } from '@/components/screen-container';
 import { SectionHeader } from '@/components/section-header';
+import { buildPbiaFormUrl, createPbiaInstanceId, findPbiaFormBySlug } from '@/constants/pbia-forms';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { getNameFromCustomer } from '@/utils/format';
+import { openInAppBrowser } from '@/utils/external-actions';
 
 function PreferenceRow({
   label,
@@ -39,16 +41,35 @@ function PreferenceRow({
 
 type ProfileScreenProps = {
   includeTabBarPadding?: boolean;
+  isDesktopLayout?: boolean;
 };
 
-export default function ProfileScreen({ includeTabBarPadding = true }: ProfileScreenProps) {
+export default function ProfileScreen({
+  includeTabBarPadding = true,
+  isDesktopLayout = false,
+}: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { customer, userEmail, signOut } = useAuth();
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [smsAlerts, setSmsAlerts] = useState(false);
   const [paperless, setPaperless] = useState(true);
 
-  const handleContactUs = () => {
+  const handleContactUs = async () => {
+    if (Platform.OS !== 'web') {
+      const contactForm = findPbiaFormBySlug('contact');
+      if (!contactForm) {
+        Alert.alert('Form unavailable', 'Please try again.');
+        return;
+      }
+
+      const formUrl = buildPbiaFormUrl(contactForm, createPbiaInstanceId());
+      const result = await openInAppBrowser(formUrl, 'The form link is unavailable right now.');
+      if (!result.ok) {
+        Alert.alert('Unable to open form', result.message ?? 'Please try again.');
+      }
+      return;
+    }
+
     router.push({
       pathname: '/forms/[slug]',
       params: { slug: 'contact' },
@@ -59,17 +80,19 @@ export default function ProfileScreen({ includeTabBarPadding = true }: ProfileSc
     await signOut();
   };
 
-  return (
-    <ScreenContainer contentContainerStyle={{ paddingBottom: insets.bottom + (includeTabBarPadding ? 116 : 24) }}>
-      <View style={styles.accountCard}>
-        <Text style={styles.label}>Account holder</Text>
-        <Text style={styles.name}>{getNameFromCustomer(customer, userEmail)}</Text>
-        <Text style={styles.email}>{customer?.email ?? userEmail ?? 'member@email.com'}</Text>
-      </View>
+  const accountCard = (
+    <View style={[styles.accountCard, isDesktopLayout ? styles.desktopCard : null]}>
+      <Text style={styles.label}>Account holder</Text>
+      <Text style={styles.name}>{getNameFromCustomer(customer, userEmail)}</Text>
+      <Text style={styles.email}>{customer?.email ?? userEmail ?? 'member@email.com'}</Text>
+    </View>
+  );
 
+  const preferencesBlock = (
+    <View style={styles.preferencesBlock}>
       <SectionHeader title="Contact preferences" subtitle="How we communicate policy updates" />
 
-      <View style={styles.preferencesCard}>
+      <View style={[styles.preferencesCard, isDesktopLayout ? styles.desktopCard : null]}>
         <PreferenceRow
           label="Email notifications"
           detail="Billing reminders and policy notices"
@@ -89,23 +112,76 @@ export default function ProfileScreen({ includeTabBarPadding = true }: ProfileSc
           onChange={setPaperless}
         />
       </View>
+    </View>
+  );
 
-      <View style={styles.contactCard}>
+  const supportBlock = (
+    <View style={styles.sideStack}>
+      <View style={[styles.contactCard, isDesktopLayout ? styles.desktopCard : null]}>
         <Text style={styles.contactTitle}>Need help with your account?</Text>
         <Text style={styles.contactDetail}>
           Reach our team through the Contact Us form and we will follow up shortly.
         </Text>
-        <AppButton label="Contact Us" variant="secondary" onPress={handleContactUs} />
+        <AppButton label="Contact Us" variant="secondary" onPress={() => void handleContactUs()} />
       </View>
 
       <View style={styles.footer}>
         <AppButton label="Log out" variant="danger" onPress={handleLogout} />
       </View>
+    </View>
+  );
+
+  return (
+    <ScreenContainer
+      contentContainerStyle={[
+        { paddingBottom: insets.bottom + (includeTabBarPadding ? 116 : 24) },
+        isDesktopLayout ? styles.desktopScreenContent : null,
+      ]}>
+      {isDesktopLayout ? (
+        // Desktop keeps profile preferences in a readable primary column with account actions in a calm right rail.
+        <View style={styles.desktopLayout}>
+          <View style={styles.desktopMainColumn}>
+            {accountCard}
+            {preferencesBlock}
+          </View>
+          <View style={styles.desktopSideColumn}>{supportBlock}</View>
+        </View>
+      ) : (
+        <>
+          {accountCard}
+          {preferencesBlock}
+          {supportBlock}
+        </>
+      )}
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  desktopScreenContent: {
+    gap: theme.spacing.md,
+    paddingBottom: theme.spacing.xl,
+  },
+  desktopLayout: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: theme.spacing.md,
+  },
+  desktopMainColumn: {
+    flex: 1.8,
+    gap: theme.spacing.md,
+    minWidth: 0,
+  },
+  desktopSideColumn: {
+    flex: 1,
+    minWidth: 280,
+  },
+  sideStack: {
+    gap: theme.spacing.md,
+  },
+  desktopCard: {
+    borderColor: '#CBDAD4',
+  },
   accountCard: {
     borderRadius: theme.radius.lg,
     borderWidth: 1,
@@ -128,6 +204,9 @@ const styles = StyleSheet.create({
   email: {
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
+  },
+  preferencesBlock: {
+    gap: theme.spacing.sm,
   },
   preferencesCard: {
     borderRadius: theme.radius.lg,
@@ -177,7 +256,6 @@ const styles = StyleSheet.create({
     color: theme.colors.textSubtle,
   },
   footer: {
-    marginTop: theme.spacing.xs,
     gap: theme.spacing.sm,
   },
 });

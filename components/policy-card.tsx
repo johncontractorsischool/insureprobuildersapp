@@ -8,6 +8,7 @@ import { formatCurrency, formatDate } from '@/utils/format';
 type PolicyCardProps = {
   policy: Policy;
   onPress?: () => void;
+  titleOverride?: string;
 };
 
 const statusStyles = {
@@ -25,8 +26,9 @@ const statusStyles = {
   },
 } as const;
 
-export function PolicyCard({ policy, onPress }: PolicyCardProps) {
+export function PolicyCard({ policy, onPress, titleOverride }: PolicyCardProps) {
   const status = statusStyles[policy.status];
+  const title = titleOverride?.trim() || policy.productName;
 
   return (
     <Pressable
@@ -35,7 +37,7 @@ export function PolicyCard({ policy, onPress }: PolicyCardProps) {
       style={({ pressed }) => [styles.card, pressed && onPress ? styles.pressed : null]}>
       <View style={styles.header}>
         <View style={styles.titleWrap}>
-          <Text style={styles.title}>{policy.productName}</Text>
+          <Text style={styles.title}>{title}</Text>
           <Text style={styles.policyNumber}>Policy {policy.policyNumber}</Text>
         </View>
         <View style={[styles.statusBadge, { backgroundColor: status.backgroundColor }]}>

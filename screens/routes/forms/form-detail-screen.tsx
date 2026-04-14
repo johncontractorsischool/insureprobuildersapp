@@ -17,6 +17,8 @@ import {
 } from '@/services/pbia-webview-diagnostics';
 import { openInAppBrowser } from '@/utils/external-actions';
 
+const ENABLE_PBIA_EMBEDDED_FORMS = process.env.EXPO_PUBLIC_ENABLE_PBIA_EMBEDDED_FORMS === 'true';
+
 function formatDiagnosticLine(entry: PbiaWebViewDiagnosticEntry) {
   const parsedDate = new Date(entry.timestamp);
   const hh = String(parsedDate.getHours()).padStart(2, '0');
@@ -37,6 +39,7 @@ export default function PbiaFormDetailScreen() {
     () => (form ? buildPbiaFormUrl(form, createPbiaInstanceId()) : null),
     [form]
   );
+  const canUseEmbeddedForm = Platform.OS !== 'web' && ENABLE_PBIA_EMBEDDED_FORMS;
 
   const refreshDiagnostics = useCallback(async () => {
     setIsLoadingDiagnostics(true);
@@ -49,6 +52,10 @@ export default function PbiaFormDetailScreen() {
   }, []);
 
   useEffect(() => {
+    if (!canUseEmbeddedForm) {
+      return;
+    }
+
     let mounted = true;
 
     const initializeDiagnostics = async () => {
@@ -75,7 +82,7 @@ export default function PbiaFormDetailScreen() {
     return () => {
       mounted = false;
     };
-  }, [form?.slug, slug]);
+  }, [canUseEmbeddedForm, form?.slug, slug]);
 
   if (!form) {
     return (
@@ -107,6 +114,10 @@ export default function PbiaFormDetailScreen() {
   };
 
   const handleTryEmbeddedForm = () => {
+    if (!canUseEmbeddedForm) {
+      return;
+    }
+
     void appendPbiaWebViewDiagnostic({
       event: 'try-embedded-form-pressed',
       formSlug: form.slug,
@@ -119,7 +130,7 @@ export default function PbiaFormDetailScreen() {
     await refreshDiagnostics();
   };
 
-  const shouldUseBrowserFallback = Platform.OS !== 'web' && !showEmbeddedForm;
+  const shouldUseBrowserFallback = Platform.OS !== 'web' && (!canUseEmbeddedForm || !showEmbeddedForm);
 
   return (
     <>
@@ -135,28 +146,36 @@ export default function PbiaFormDetailScreen() {
               To prevent app reloads while typing, this form opens in your device browser.
             </Text>
             <AppButton label="Open Form" onPress={() => void handleOpenInBrowser()} />
-            <AppButton
-              label="Try Embedded Form"
-              variant="secondary"
-              onPress={handleTryEmbeddedForm}
-            />
-            <Text style={styles.diagnosticsTitle}>Embedded Crash Log</Text>
-            {diagnosticLines.length > 0 ? (
-              diagnosticLines.map((line) => (
-                <Text key={line.id} style={styles.diagnosticsLine}>
-                  {formatDiagnosticLine(line)}
-                </Text>
-              ))
-            ) : (
-              <Text style={styles.diagnosticsEmpty}>No diagnostic events recorded yet.</Text>
-            )}
-            <AppButton
-              label="Refresh Crash Log"
-              variant="secondary"
-              loading={isLoadingDiagnostics}
-              onPress={() => void refreshDiagnostics()}
-            />
-            <AppButton label="Clear Crash Log" variant="ghost" onPress={() => void handleClearDiagnostics()} />
+            {canUseEmbeddedForm ? (
+              <>
+                <AppButton
+                  label="Try Embedded Form"
+                  variant="secondary"
+                  onPress={handleTryEmbeddedForm}
+                />
+                <Text style={styles.diagnosticsTitle}>Embedded Crash Log</Text>
+                {diagnosticLines.length > 0 ? (
+                  diagnosticLines.map((line) => (
+                    <Text key={line.id} style={styles.diagnosticsLine}>
+                      {formatDiagnosticLine(line)}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={styles.diagnosticsEmpty}>No diagnostic events recorded yet.</Text>
+                )}
+                <AppButton
+                  label="Refresh Crash Log"
+                  variant="secondary"
+                  loading={isLoadingDiagnostics}
+                  onPress={() => void refreshDiagnostics()}
+                />
+                <AppButton
+                  label="Clear Crash Log"
+                  variant="ghost"
+                  onPress={() => void handleClearDiagnostics()}
+                />
+              </>
+            ) : null}
           </View>
         ) : (
           <View style={styles.webViewContainer}>

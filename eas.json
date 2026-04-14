@@ -16,6 +16,11 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "companyName": "Pro-Builders Insurance Agency",
+        "appName": "Insure Probuilders"
+      }
+    }
   }
 }

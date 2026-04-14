@@ -1,5 +1,13 @@
 import { createContext, PropsWithChildren, useContext } from 'react';
-import { ScrollView, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleProp,
+  StyleSheet,
+  View,
+  ViewStyle,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { theme } from '@/constants/theme';
@@ -32,6 +40,8 @@ type ScreenContainerProps = PropsWithChildren<{
   backgroundTone?: 'default' | 'soft';
   includeTopInset?: boolean;
   maxContentWidth?: number;
+  keyboardAware?: boolean;
+  keyboardVerticalOffset?: number;
 }>;
 
 export function ScreenContainer({
@@ -42,15 +52,34 @@ export function ScreenContainer({
   backgroundTone = 'default',
   includeTopInset = true,
   maxContentWidth,
+  keyboardAware = false,
+  keyboardVerticalOffset = 0,
 }: ScreenContainerProps) {
   const containerSettings = useContext(ScreenContainerSettingsContext);
   const resolvedMaxContentWidth =
     maxContentWidth ?? containerSettings.maxContentWidth ?? theme.layout.maxContentWidth;
 
   const content = (
-    <View style={[styles.inner, { maxWidth: resolvedMaxContentWidth }, style, contentContainerStyle]}>
+    <View
+      style={[
+        styles.innerBase,
+        scroll ? styles.innerScroll : styles.innerNoScroll,
+        { maxWidth: resolvedMaxContentWidth },
+        style,
+        contentContainerStyle,
+      ]}>
       {children}
     </View>
+  );
+
+  const scrollContent = (
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+      automaticallyAdjustKeyboardInsets={keyboardAware && Platform.OS === 'ios'}>
+      {content}
+    </ScrollView>
   );
 
   return (
@@ -63,12 +92,16 @@ export function ScreenContainer({
       <View pointerEvents="none" style={styles.glowPrimary} />
       <View pointerEvents="none" style={styles.glowSecondary} />
       {scroll ? (
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled">
-          {content}
-        </ScrollView>
+        keyboardAware && Platform.OS === 'android' ? (
+          <KeyboardAvoidingView
+            style={styles.keyboardAware}
+            behavior="height"
+            keyboardVerticalOffset={keyboardVerticalOffset}>
+            {scrollContent}
+          </KeyboardAvoidingView>
+        ) : (
+          scrollContent
+        )
       ) : (
         <View style={styles.noScrollContent}>{content}</View>
       )}
@@ -112,12 +145,20 @@ const styles = StyleSheet.create({
   noScrollContent: {
     flex: 1,
   },
-  inner: {
+  keyboardAware: {
     flex: 1,
+  },
+  innerBase: {
     width: '100%',
     alignSelf: 'center',
     paddingHorizontal: theme.layout.screenHorizontal,
     paddingTop: 14,
     gap: theme.spacing.lg,
+  },
+  innerScroll: {
+    flexGrow: 1,
+  },
+  innerNoScroll: {
+    flex: 1,
   },
 });

@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { AppButton } from '@/components/app-button';
@@ -27,10 +27,15 @@ function getAuthModeFromParam(value: string | string[] | undefined): AuthMode {
 export default function LoginScreen() {
   const params = useLocalSearchParams<{ mode?: string | string[] }>();
   const { setPendingEmail, setCustomer } = useAuth();
+  const { width } = useWindowDimensions();
   const [mode, setMode] = useState<AuthMode>(getAuthModeFromParam(params.mode));
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const isDesktop = width >= 1100;
+  const isTablet = width >= 760;
+  const showDesktopVisual = isDesktop;
+  const maxContentWidth = isDesktop ? 1240 : isTablet ? 820 : undefined;
 
   useEffect(() => {
     setMode(getAuthModeFromParam(params.mode));
@@ -95,73 +100,143 @@ export default function LoginScreen() {
   };
 
   return (
-    <ScreenContainer>
-      <Pressable onPress={handleBack} style={styles.backButton} accessibilityRole="button">
-        <Ionicons name="chevron-back" size={18} color={theme.colors.primary} />
-        <Text style={styles.backButtonText}>Back</Text>
-      </Pressable>
+    <ScreenContainer
+      maxContentWidth={maxContentWidth}
+      keyboardAware={!isDesktop}
+      keyboardVerticalOffset={theme.spacing.md}
+      contentContainerStyle={!isDesktop ? styles.mobileContent : undefined}>
+      <View style={styles.page}>
+        <View style={[styles.desktopFrame, isDesktop ? styles.desktopFrameActive : null]}>
+          <View style={[styles.authColumn, isDesktop ? styles.authColumnDesktop : null]}>
+            <Pressable onPress={handleBack} style={styles.backButton} accessibilityRole="button">
+              <Ionicons name="chevron-back" size={18} color={theme.colors.primary} />
+              <Text style={styles.backButtonText}>Back</Text>
+            </Pressable>
 
-      <View style={styles.header}>
-        <BrandMark />
-      </View>
+            <View style={styles.header}>
+              <BrandMark />
+            </View>
 
-      <View style={styles.card}>
-        <View style={styles.modeSwitch}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => handleModeChange('signin')}
-            style={[styles.modeButton, mode === 'signin' ? styles.modeButtonActive : null]}>
-            <Text style={[styles.modeButtonText, mode === 'signin' ? styles.modeButtonTextActive : null]}>
-              Sign In
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => handleModeChange('signup')}
-            style={[styles.modeButton, mode === 'signup' ? styles.modeButtonActive : null]}>
-            <Text style={[styles.modeButtonText, mode === 'signup' ? styles.modeButtonTextActive : null]}>
-              Sign Up
-            </Text>
-          </Pressable>
+            <View style={[styles.card, isDesktop ? styles.cardDesktop : null]}>
+              <View style={styles.modeSwitch}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => handleModeChange('signin')}
+                  style={[styles.modeButton, mode === 'signin' ? styles.modeButtonActive : null]}>
+                  <Text style={[styles.modeButtonText, mode === 'signin' ? styles.modeButtonTextActive : null]}>
+                    Sign In
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => handleModeChange('signup')}
+                  style={[styles.modeButton, mode === 'signup' ? styles.modeButtonActive : null]}>
+                  <Text style={[styles.modeButtonText, mode === 'signup' ? styles.modeButtonTextActive : null]}>
+                    Sign Up
+                  </Text>
+                </Pressable>
+              </View>
+
+              {mode === 'signin' ? (
+                <>
+                  <Text style={styles.title}>Sign In</Text>
+                  <Text style={styles.subtitle}>
+                    Enter the email associated with your policies. We will send a one-time verification code.
+                  </Text>
+
+                  <AppInput
+                    label="Email address"
+                    leftIcon="mail-outline"
+                    value={email}
+                    onChangeText={setEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="You@Company.com"
+                    returnKeyType="done"
+                    onSubmitEditing={handleContinue}
+                    errorText={error}
+                    helperText="We only use this for secure account verification."
+                  />
+
+                  <AppButton label="Continue" onPress={handleContinue} loading={submitting} />
+
+                  <Text style={styles.disclaimer}>
+                    Your login session is encrypted and protected with one-time code verification.
+                  </Text>
+                </>
+              ) : (
+                <CslbMomentumSignUpForm />
+              )}
+            </View>
+          </View>
+
+          {showDesktopVisual ? (
+            // Keep the desktop shell stable across Sign In and Sign Up to avoid jarring layout jumps when toggling tabs.
+            <View
+              pointerEvents="none"
+              style={styles.visualColumn}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants">
+              <View style={styles.visualCanvas}>
+                <View style={styles.visualGlowTop} />
+                <View style={styles.visualGlowBottom} />
+                <View style={styles.visualGrid} />
+                <View style={[styles.visualPanel, styles.visualPanelTop]} />
+                <View style={[styles.visualPanel, styles.visualPanelBottom]} />
+
+                <View style={styles.emblemWrap}>
+                  <View style={styles.emblemOuter}>
+                    <View style={styles.emblemInner}>
+                      <Ionicons name="shield-checkmark-outline" size={34} color={theme.colors.primaryDeep} />
+                    </View>
+                  </View>
+                </View>
+
+                <View style={[styles.iconTile, styles.iconTileOne]}>
+                  <Ionicons name="document-text-outline" size={24} color={theme.colors.primary} />
+                </View>
+                <View style={[styles.iconTile, styles.iconTileTwo]}>
+                  <Ionicons name="business-outline" size={24} color={theme.colors.primary} />
+                </View>
+                <View style={[styles.iconTile, styles.iconTileThree]}>
+                  <Ionicons name="construct-outline" size={24} color={theme.colors.primary} />
+                </View>
+
+                <View style={styles.visualOutline} />
+              </View>
+            </View>
+          ) : null}
         </View>
-
-        {mode === 'signin' ? (
-          <>
-            <Text style={styles.title}>Sign in to your secure portal</Text>
-            <Text style={styles.subtitle}>
-              Enter the email associated with your policies. We will send a one-time verification code.
-            </Text>
-
-            <AppInput
-              label="Email address"
-              leftIcon="mail-outline"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="You@Company.com"
-              returnKeyType="done"
-              onSubmitEditing={handleContinue}
-              errorText={error}
-              helperText="We only use this for secure account verification."
-            />
-
-            <AppButton label="Continue" onPress={handleContinue} loading={submitting} />
-
-            <Text style={styles.disclaimer}>
-              Your login session is encrypted and protected with one-time code verification.
-            </Text>
-          </>
-        ) : (
-          <CslbMomentumSignUpForm />
-        )}
       </View>
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  page: {
+    flex: 1,
+  },
+  desktopFrame: {
+    flex: 1,
+  },
+  // Split layout is only enabled for desktop sign-up so mobile and sign-in remain close to existing behavior.
+  desktopFrameActive: {
+    flexDirection: 'row',
+    gap: theme.spacing.xl,
+    borderRadius: theme.radius.xl,
+    borderWidth: 1,
+    borderColor: '#D7E2DD',
+    backgroundColor: '#F2F7F4',
+    padding: theme.spacing.xl,
+    ...theme.shadows.surface,
+  },
+  authColumn: {
+    flex: 1,
+  },
+  authColumnDesktop: {
+    maxWidth: 640,
+  },
   header: {
     marginTop: theme.spacing.xs,
   },
@@ -187,6 +262,12 @@ const styles = StyleSheet.create({
     padding: theme.spacing.xl,
     gap: theme.spacing.md,
     ...theme.shadows.elevated,
+  },
+  cardDesktop: {
+    padding: theme.spacing.xxl,
+  },
+  mobileContent: {
+    paddingBottom: theme.spacing.xxxl,
   },
   modeSwitch: {
     flexDirection: 'row',
@@ -229,5 +310,128 @@ const styles = StyleSheet.create({
     ...theme.typography.bodySmall,
     color: theme.colors.textSubtle,
     textAlign: 'center',
+  },
+  visualColumn: {
+    flex: 1,
+    minWidth: 460,
+  },
+  visualCanvas: {
+    flex: 1,
+    minHeight: 720,
+    borderRadius: theme.radius.xl,
+    borderWidth: 1,
+    borderColor: '#C8D9D1',
+    backgroundColor: '#EAF3EE',
+    overflow: 'hidden',
+  },
+  visualGlowTop: {
+    position: 'absolute',
+    top: -90,
+    left: -60,
+    width: 360,
+    height: 360,
+    borderRadius: 999,
+    backgroundColor: '#D8ECE2',
+  },
+  visualGlowBottom: {
+    position: 'absolute',
+    right: -78,
+    bottom: -90,
+    width: 330,
+    height: 330,
+    borderRadius: 999,
+    backgroundColor: '#D2E7DC',
+  },
+  visualGrid: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    left: 0,
+    bottom: 0,
+    borderWidth: 1,
+    borderColor: '#D8E7E1',
+  },
+  visualPanel: {
+    position: 'absolute',
+    borderRadius: theme.radius.xl,
+    borderWidth: 1,
+    borderColor: '#C8D9D1',
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+  },
+  visualPanelTop: {
+    top: 120,
+    left: 56,
+    width: 250,
+    height: 160,
+    transform: [{ rotate: '-8deg' }],
+  },
+  visualPanelBottom: {
+    right: 52,
+    bottom: 130,
+    width: 220,
+    height: 144,
+    transform: [{ rotate: '8deg' }],
+  },
+  emblemWrap: {
+    position: 'absolute',
+    top: '36%',
+    left: '50%',
+    marginLeft: -78,
+    marginTop: -78,
+  },
+  emblemOuter: {
+    width: 156,
+    height: 156,
+    borderRadius: 78,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: '#C4D6CD',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...theme.shadows.elevated,
+  },
+  emblemInner: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    borderWidth: 1,
+    borderColor: '#C6D8CF',
+    backgroundColor: '#EAF3EE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconTile: {
+    position: 'absolute',
+    width: 72,
+    height: 72,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: '#C6D8CF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...theme.shadows.surface,
+  },
+  iconTileOne: {
+    top: 122,
+    right: 84,
+  },
+  iconTileTwo: {
+    bottom: 164,
+    left: 78,
+  },
+  iconTileThree: {
+    bottom: 96,
+    right: 116,
+  },
+  visualOutline: {
+    position: 'absolute',
+    top: 24,
+    right: 24,
+    left: 24,
+    bottom: 24,
+    borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: '#CBDBD4',
   },
 });

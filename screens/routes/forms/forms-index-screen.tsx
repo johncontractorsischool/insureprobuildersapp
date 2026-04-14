@@ -1,15 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { Alert, Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenContainer } from '@/components/screen-container';
 import {
   PBIA_FORMS,
+  buildPbiaFormUrl,
+  createPbiaInstanceId,
   type PbiaFormRegistryItem,
   type PbiaFormSlug,
 } from '@/constants/pbia-forms';
 import { theme } from '@/constants/theme';
+import { openInAppBrowser } from '@/utils/external-actions';
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -130,10 +133,19 @@ export default function PbiaFormsScreen({
     router.replace('/(tabs)');
   };
 
-  const handleFormPress = (item: IntakeFormItem) => {
+  const handleFormPress = async (item: IntakeFormItem) => {
     const selectedForm = FORM_REGISTRY_BY_SLUG[item.slug];
     if (!selectedForm) {
       Alert.alert('Form unavailable', 'Please refresh and try again.');
+      return;
+    }
+
+    if (Platform.OS !== 'web') {
+      const formUrl = buildPbiaFormUrl(selectedForm, createPbiaInstanceId());
+      const result = await openInAppBrowser(formUrl, 'The form link is unavailable right now.');
+      if (!result.ok) {
+        Alert.alert('Unable to open form', result.message ?? 'Please try again.');
+      }
       return;
     }
 

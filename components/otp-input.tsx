@@ -1,5 +1,5 @@
 import { useMemo, useRef } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import { Platform, StyleSheet, TextInput, View } from 'react-native';
 
 import { theme } from '@/constants/theme';
 
@@ -11,6 +11,10 @@ type OTPInputProps = {
 
 export function OTPInput({ value, onChange, length = 6 }: OTPInputProps) {
   const refs = useRef<(TextInput | null)[]>([]);
+  const webInputReset =
+    Platform.OS === 'web'
+      ? ({ outlineStyle: 'none', outlineWidth: 0, boxShadow: 'none' } as any)
+      : undefined;
   const digits = useMemo(
     () => Array.from({ length }, (_, index) => value[index] ?? ''),
     [length, value]
@@ -60,7 +64,7 @@ export function OTPInput({ value, onChange, length = 6 }: OTPInputProps) {
               refs.current[index - 1]?.focus();
             }
           }}
-          style={[styles.cell, digit ? styles.filled : null]}
+          style={[styles.cell, webInputReset, digit ? styles.filled : null]}
         />
       ))}
     </View>

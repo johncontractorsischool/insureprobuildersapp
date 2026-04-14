@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ComponentProps, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
 
 import { theme } from '@/constants/theme';
 
@@ -25,6 +25,10 @@ export function AppInput({
 }: AppInputProps) {
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const webInputReset =
+    Platform.OS === 'web'
+      ? ({ outlineStyle: 'none', outlineWidth: 0, boxShadow: 'none' } as any)
+      : undefined;
 
   return (
     <View style={styles.wrapper}>
@@ -44,7 +48,7 @@ export function AppInput({
         <TextInput
           {...props}
           ref={inputRef}
-          style={[styles.input, style]}
+          style={[styles.input, webInputReset, style]}
           placeholderTextColor={theme.colors.textSubtle}
           onFocus={(event) => {
             setFocused(true);
