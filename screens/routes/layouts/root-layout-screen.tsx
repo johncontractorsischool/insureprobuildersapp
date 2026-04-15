@@ -52,7 +52,7 @@ export default function RootLayout() {
             name="company/index"
             options={{
               headerShown: true,
-              headerTitle: 'Company details',
+              headerTitle: 'Business Details',
               headerShadowVisible: false,
               headerTintColor: theme.colors.textStrong,
               headerStyle: { backgroundColor: theme.colors.background },

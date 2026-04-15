@@ -54,7 +54,7 @@ describe('LoginScreen', () => {
 
     const { getByPlaceholderText, getByText } = render(<LoginScreen />);
 
-    fireEvent.changeText(getByPlaceholderText('you@company.com'), ' Jane@Example.com ');
+    fireEvent.changeText(getByPlaceholderText('You@Company.com'), ' Jane@Example.com ');
     fireEvent.press(getByText('Continue'));
 
     await waitFor(() => expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com'));
@@ -70,7 +70,7 @@ describe('LoginScreen', () => {
 
     const { getByPlaceholderText, getByText, findByText } = render(<LoginScreen />);
 
-    fireEvent.changeText(getByPlaceholderText('you@company.com'), 'jane@example.com');
+    fireEvent.changeText(getByPlaceholderText('You@Company.com'), 'jane@example.com');
     fireEvent.press(getByText('Continue'));
 
     expect(await findByText('No account was found for that email address.')).toBeTruthy();
@@ -87,7 +87,7 @@ describe('LoginScreen', () => {
 
     const { getByPlaceholderText, getByText } = render(<LoginScreen />);
 
-    fireEvent.changeText(getByPlaceholderText('you@company.com'), 'jane@example.com');
+    fireEvent.changeText(getByPlaceholderText('You@Company.com'), 'jane@example.com');
     fireEvent.press(getByText('Continue'));
 
     await waitFor(() =>

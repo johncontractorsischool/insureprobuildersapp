@@ -33,6 +33,7 @@ import {
 import { getPortalConfig } from "@/services/portal-config";
 import {
   buildEmailLink,
+  buildMapLink,
   buildPhoneLink,
   buildSmsLink,
   openExternalLink,
@@ -84,7 +85,6 @@ const COMPANY_STATUS_CHIP_STYLES: Record<
 type AgentAction = {
   id: "contact" | "schedule" | "email" | "sms";
   label: string;
-  meta: string;
   icon:
     | "call-outline"
     | "calendar-outline"
@@ -93,6 +93,13 @@ type AgentAction = {
   target: string | null;
   unavailableMessage: string;
 };
+
+function buildAgencyMailingAddress(rows: { label: string; value: string }[]) {
+  const street = lookupSummaryValue(rows, ["street"]);
+  const cityStateZip = lookupSummaryValue(rows, ["city/state/zip"]);
+  const parts = [street, cityStateZip].filter((value) => value !== "Not available");
+  return parts.length > 0 ? parts.join(", ") : "Not available";
+}
 
 type DashboardRequestAction = {
   id: "quote" | "additional-insured" | "coi";
@@ -163,9 +170,15 @@ function DashboardSkeleton({
         <View style={styles.desktopGrid}>
           <View style={styles.desktopMainColumn}>
             <View style={styles.card}>
+              <SectionHeader title="Business Information" />
+              <View style={[styles.skeletonBlock, styles.skeletonLineWide]} />
+              <View style={[styles.skeletonBlock, styles.skeletonLineMedium]} />
+              <View style={[styles.skeletonBlock, styles.skeletonLineWide]} />
+            </View>
+
+            <View style={styles.card}>
               <SectionHeader
-                title="Company Information"
-                subtitle="License snapshot and compliance status"
+                title="License"
               />
               <View style={styles.desktopSnapshotGrid}>
                 {Array.from({ length: 4 }).map((_, index) => (
@@ -193,8 +206,7 @@ function DashboardSkeleton({
 
             <View style={styles.card}>
               <SectionHeader
-                title="Workspace"
-                subtitle="Forms, notes, tasks, and related details"
+                title="Business Information"
               />
               <View style={[styles.skeletonBlock, styles.skeletonLineWide]} />
               <View style={[styles.skeletonBlock, styles.skeletonLineMedium]} />
@@ -205,7 +217,6 @@ function DashboardSkeleton({
             <View style={styles.card}>
               <SectionHeader
                 title="Assigned Agent"
-                subtitle="Support contact for your account"
               />
               <View style={styles.agentTopRow}>
                 <View style={styles.skeletonAvatar} />
@@ -301,8 +312,7 @@ function DashboardSkeleton({
       </View>
 
       <SectionHeader
-        title="Company Information"
-        subtitle="License snapshot and compliance status"
+        title="License"
       />
       <View style={styles.card}>
         {Array.from({ length: 3 }).map((_, index) => (
@@ -352,10 +362,11 @@ export default function DashboardScreen({
     isLoadingCompany,
     companyLookupNotice,
     cslbLink,
-    summaryRows,
+    licenseRows,
     statusChips,
     statusFallbackText,
-    dataCurrentAsOf,
+    businessName,
+    businessRows,
   } = useCompanyProfile();
   // `/insuredAgents?insuredId=` expects the insured *database* id (UUID from `databaseId`).
   const insuredLookupId = useMemo(() => {
@@ -472,7 +483,6 @@ export default function DashboardScreen({
       {
         id: "contact",
         label: "Contact Agent",
-        meta: "Phone",
         icon: "call-outline" as const,
         target: buildPhoneLink(resolvedAgent.phone),
         unavailableMessage: "Agent phone number is not configured yet.",
@@ -480,7 +490,6 @@ export default function DashboardScreen({
       {
         id: "schedule",
         label: "Schedule",
-        meta: "Calendar",
         icon: "calendar-outline" as const,
         target: resolvedScheduleUrl,
         unavailableMessage: "Scheduling link is not configured yet.",
@@ -488,15 +497,13 @@ export default function DashboardScreen({
       {
         id: "email",
         label: "Email",
-        meta: "Google",
         icon: "mail-outline" as const,
         target: buildEmailLink(resolvedAgent.email),
         unavailableMessage: "Agent email is not configured yet.",
       },
       {
         id: "sms",
-        label: "SMS",
-        meta: "Text",
+        label: "SMS/Text",
         icon: "chatbubble-ellipses-outline" as const,
         target: buildSmsLink(resolvedAgent.smsPhone),
         unavailableMessage: "Agent SMS number is not configured yet.",
@@ -548,20 +555,25 @@ export default function DashboardScreen({
   const accountHolderEmail = customer?.email ?? userEmail ?? "member@email.com";
   const accountHolderInitials = getInitials(accountHolderName);
   const supportEmail = portalConfig.actions.supportEmail;
-  const licenseNumber = lookupSummaryValue(summaryRows, [
+  const licenseNumber = lookupSummaryValue(licenseRows, [
     "license #",
     "license",
   ]);
-  const effectiveDate = lookupSummaryValue(summaryRows, [
+  const effectiveDate = lookupSummaryValue(licenseRows, [
     "effective date",
     "effective",
     "issue date",
   ]);
-  const expiration = lookupSummaryValue(summaryRows, [
+  const expiration = lookupSummaryValue(licenseRows, [
     "expiration date",
     "expiration",
   ]);
-  const dataCurrentValue = dataCurrentAsOf ?? "Not available";
+  const dataCurrentValue = lookupSummaryValue(licenseRows, ["data current"]);
+  const agencyMailingAddress = buildAgencyMailingAddress(businessRows);
+  const agencyMailingAddressLink =
+    agencyMailingAddress !== "Not available"
+      ? buildMapLink(agencyMailingAddress)
+      : null;
 
   // Until dedicated request APIs are available, these dashboard actions route
   // into the existing PBIA intake forms or a prefilled support email.
@@ -677,8 +689,7 @@ export default function DashboardScreen({
           <View style={styles.desktopMainColumn}>
             <View style={styles.card}>
               <SectionHeader
-                title="Company Information"
-                subtitle="License snapshot and compliance status"
+                title="License"
               />
               <View style={styles.desktopSnapshotGrid}>
                 <View style={styles.desktopSnapshotItem}>
@@ -750,7 +761,7 @@ export default function DashboardScreen({
                     pressed ? styles.pressed : null,
                   ]}
                 >
-                  <Text style={styles.detailLinkButtonText}>View details</Text>
+                  <Text style={styles.detailLinkButtonText}>View Details</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {
@@ -771,24 +782,11 @@ export default function DashboardScreen({
               </View>
             </View>
 
-            <View style={styles.card}>
-              <SectionHeader
-                title="Workspace"
-                subtitle="Business details and request tools"
-              />
-              <Text style={styles.agentHint}>
-                Use Company Details and Request Quotes to manage business
-                information and service requests.
-              </Text>
-            </View>
           </View>
 
           <View style={styles.desktopSideColumn}>
             <View style={styles.card}>
-              <SectionHeader
-                title="Assigned Agent"
-                subtitle="Support contact for your account"
-              />
+              <SectionHeader title="Assigned Agent" />
               <View style={styles.agentTopRow}>
                 <View style={styles.avatar}>
                   {avatarSource ? (
@@ -817,12 +815,69 @@ export default function DashboardScreen({
                 </View>
                 <View style={styles.agentCopy}>
                   <Text style={styles.agentName}>{resolvedAgent.name}</Text>
-                  <Text style={styles.agentMeta}>
-                    Phone: {resolvedAgent.phone ?? "Not available"}
-                  </Text>
-                  <Text style={styles.agentMeta}>
-                    Email: {resolvedAgent.email ?? "Not available"}
-                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      void openAction(
+                        buildPhoneLink(resolvedAgent.phone),
+                        "Agent phone number is not configured yet.",
+                      );
+                    }}
+                    disabled={!resolvedAgent.phone}
+                    style={({ pressed }) => [
+                      pressed && resolvedAgent.phone ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.agentMeta,
+                        resolvedAgent.phone ? styles.linkText : null,
+                      ]}
+                    >
+                      Phone: {resolvedAgent.phone ?? "Not available"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      void openAction(
+                        buildEmailLink(resolvedAgent.email),
+                        "Agent email is not configured yet.",
+                      );
+                    }}
+                    disabled={!resolvedAgent.email}
+                    style={({ pressed }) => [
+                      pressed && resolvedAgent.email ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.agentMeta,
+                        resolvedAgent.email ? styles.linkText : null,
+                      ]}
+                    >
+                      Email: {resolvedAgent.email ?? "Not available"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      void openAction(
+                        agencyMailingAddressLink,
+                        "Agency mailing address is not configured yet.",
+                      );
+                    }}
+                    disabled={!agencyMailingAddressLink}
+                    style={({ pressed }) => [
+                      pressed && agencyMailingAddressLink ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.agentMeta,
+                        agencyMailingAddressLink ? styles.linkText : null,
+                      ]}
+                    >
+                      Agency Address: {agencyMailingAddress}
+                    </Text>
+                  </Pressable>
                 </View>
               </View>
               <View style={styles.desktopActionList}>
@@ -858,7 +913,6 @@ export default function DashboardScreen({
                       />
                       <View style={styles.desktopActionCopy}>
                         <Text style={styles.actionTitle}>{action.label}</Text>
-                        <Text style={styles.actionMeta}>{action.meta}</Text>
                       </View>
                     </Pressable>
                   );
@@ -954,12 +1008,69 @@ export default function DashboardScreen({
           </View>
           <View style={styles.agentCopy}>
             <Text style={styles.agentName}>{resolvedAgent.name}</Text>
-            <Text style={styles.agentMeta}>
-              Phone: {resolvedAgent.phone ?? "Not available"}
-            </Text>
-            <Text style={styles.agentMeta}>
-              Email: {resolvedAgent.email ?? "Not available"}
-            </Text>
+            <Pressable
+              onPress={() => {
+                void openAction(
+                  buildPhoneLink(resolvedAgent.phone),
+                  "Agent phone number is not configured yet.",
+                );
+              }}
+              disabled={!resolvedAgent.phone}
+              style={({ pressed }) => [
+                pressed && resolvedAgent.phone ? styles.pressed : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.agentMeta,
+                  resolvedAgent.phone ? styles.linkText : null,
+                ]}
+              >
+                Phone: {resolvedAgent.phone ?? "Not available"}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                void openAction(
+                  buildEmailLink(resolvedAgent.email),
+                  "Agent email is not configured yet.",
+                );
+              }}
+              disabled={!resolvedAgent.email}
+              style={({ pressed }) => [
+                pressed && resolvedAgent.email ? styles.pressed : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.agentMeta,
+                  resolvedAgent.email ? styles.linkText : null,
+                ]}
+              >
+                Email: {resolvedAgent.email ?? "Not available"}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                void openAction(
+                  agencyMailingAddressLink,
+                  "Agency mailing address is not configured yet.",
+                );
+              }}
+              disabled={!agencyMailingAddressLink}
+              style={({ pressed }) => [
+                pressed && agencyMailingAddressLink ? styles.pressed : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.agentMeta,
+                  agencyMailingAddressLink ? styles.linkText : null,
+                ]}
+              >
+                Agency Address: {agencyMailingAddress}
+              </Text>
+            </Pressable>
           </View>
         </View>
         {isLoadingAgent ? (
@@ -998,20 +1109,37 @@ export default function DashboardScreen({
                   color={theme.colors.primary}
                 />
                 <Text style={styles.actionTitle}>{action.label}</Text>
-                <Text style={styles.actionMeta}>{action.meta}</Text>
               </Pressable>
             );
           })}
         </View>
       </View>
 
+      <SectionHeader title="Business Information" />
+      <View style={styles.card}>
+        {businessName ? (
+          <Text style={styles.businessNameText}>{businessName}</Text>
+        ) : null}
+        {businessRows.length > 0 ? (
+          businessRows.map((row) => (
+            <View key={row.label} style={styles.infoRow}>
+              <Text style={styles.infoLabel}>{row.label}</Text>
+              <Text style={styles.infoValue}>{row.value}</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.agentHint}>
+            Business information is not available yet.
+          </Text>
+        )}
+      </View>
+
       <SectionHeader
-        title="Company Information"
-        subtitle="License snapshot and compliance status"
+        title="License"
       />
       <View style={styles.card}>
-        {summaryRows.length > 0 ? (
-          summaryRows.map((row) => (
+        {licenseRows.length > 0 ? (
+          licenseRows.map((row) => (
             <View key={row.label} style={styles.infoRow}>
               <Text style={styles.infoLabel}>{row.label}</Text>
               {row.label === "Status" ? (
@@ -1049,7 +1177,7 @@ export default function DashboardScreen({
           ))
         ) : (
           <Text style={styles.agentHint}>
-            Company summary is not available yet.
+            License details are not available yet.
           </Text>
         )}
         {isLoadingCompany ? (
@@ -1068,7 +1196,7 @@ export default function DashboardScreen({
               pressed ? styles.pressed : null,
             ]}
           >
-            <Text style={styles.detailLinkButtonText}>View details</Text>
+            <Text style={styles.detailLinkButtonText}>View Details</Text>
           </Pressable>
           <Pressable
             onPress={() => {
@@ -1262,6 +1390,11 @@ const styles = StyleSheet.create({
   accountEmail: {
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
+  },
+  businessNameText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: "700",
   },
   card: {
     borderRadius: theme.radius.lg,

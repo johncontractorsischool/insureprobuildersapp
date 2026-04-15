@@ -28,6 +28,34 @@ export function formatIsoDateTime(value: string | null | undefined) {
   }).format(date);
 }
 
+function trimContactValue(value: string | null | undefined) {
+  return value?.trim() ?? '';
+}
+
+export function formatEmailAddress(email: string | null | undefined) {
+  return trimContactValue(email).toLowerCase();
+}
+
+export function formatPhoneNumber(value: string | null | undefined) {
+  const trimmed = trimContactValue(value);
+
+  if (!trimmed) {
+    return '';
+  }
+
+  const digits = trimmed.replace(/\D/g, '');
+
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+
+  return trimmed;
+}
+
 export function getNameFromEmail(email: string | null) {
   if (!email) return 'Member';
   const token = email.split('@')[0] ?? 'Member';

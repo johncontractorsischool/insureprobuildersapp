@@ -37,6 +37,7 @@ describe('getPortalConfig', () => {
       actions: {
         intakeFormsUrl: null,
         issueCoiUrl: 'https://portal.example.com/coi',
+        supportEmail: 'support@insureprobuilders.com',
       },
     });
   });

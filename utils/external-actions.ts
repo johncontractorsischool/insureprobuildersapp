@@ -1,5 +1,6 @@
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import { Platform } from 'react-native';
 
 type OpenExternalResult = {
   ok: boolean;
@@ -29,6 +30,22 @@ export function buildSmsLink(phone: string | null | undefined) {
   const normalized = normalizePhone(phone);
   if (!normalized) return null;
   return `sms:${normalized}`;
+}
+
+export function buildMapLink(address: string | null | undefined) {
+  const normalized = address?.trim();
+  if (!normalized) return null;
+
+  const encodedAddress = encodeURIComponent(normalized);
+  if (Platform.OS === 'android') {
+    return `geo:0,0?q=${encodedAddress}`;
+  }
+
+  if (Platform.OS === 'ios') {
+    return `http://maps.apple.com/?q=${encodedAddress}`;
+  }
+
+  return `https://maps.apple.com/?q=${encodedAddress}`;
 }
 
 export function buildEmailLink(

@@ -97,11 +97,12 @@ describe('useCompanyProfile', () => {
 
     expect(mockFetchCslbLicenseByInsuredId).toHaveBeenCalledWith('LIC-123456');
     expect(result.current.statusChips).toEqual(['Active']);
-    expect(result.current.summaryRows).toEqual(
+    expect(result.current.licenseRows).toEqual(
       expect.arrayContaining([
         { label: 'License #', value: 'LIC-123456' },
         { label: 'Effective Date', value: 'Jan 1, 2020' },
         { label: 'Expiration Date', value: 'Jan 1, 2027' },
+        { label: 'Data Current', value: 'Mar 1, 2026' },
       ])
     );
     expect(result.current.businessName).toBe('Builder Co');
@@ -169,8 +170,6 @@ describe('useCompanyProfile', () => {
     expect(result.current.businessRows).toEqual(
       expect.arrayContaining([
         { label: 'Entity', value: 'LLC' },
-        { label: 'Effective Date', value: 'Jan 1, 2022' },
-        { label: 'Expiration Date', value: 'Jan 1, 2027' },
       ])
     );
     expect(result.current.workersCompRows).toEqual([

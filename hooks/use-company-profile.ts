@@ -269,15 +269,16 @@ export function useCompanyProfile() {
   const companyExpirationDate = normalizeDisplayValue(cslbLicense?.expireDate);
   const dataCurrentAsOf = normalizeDisplayValue(cslbLicense?.dataCurrentAsOf);
 
-  const summaryRows = useMemo(
+  const licenseRows = useMemo(
     () =>
       toRows([
         { label: 'License #', value: companyLicenseNumber },
         { label: 'Status', value: statusFallbackText },
         { label: 'Effective Date', value: companyEffectiveDate },
         { label: 'Expiration Date', value: companyExpirationDate },
+        { label: 'Data Current', value: dataCurrentAsOf },
       ]),
-    [companyEffectiveDate, companyExpirationDate, companyLicenseNumber, statusFallbackText]
+    [companyEffectiveDate, companyExpirationDate, companyLicenseNumber, dataCurrentAsOf, statusFallbackText]
   );
 
   const businessName = normalizeDisplayValue(cslbLicense?.business.businessName);
@@ -290,8 +291,6 @@ export function useCompanyProfile() {
         { label: 'City/State/ZIP', value: cslbLicense?.business.cityStateZip },
         { label: 'Phone', value: cslbLicense?.business.phone },
         { label: 'Entity', value: formatEntityDisplay(cslbLicense?.entity) },
-        { label: 'Effective Date', value: cslbLicense?.issueDate },
-        { label: 'Expiration Date', value: cslbLicense?.expireDate },
       ]),
     [
       cslbLicense?.business.cityStateZip,
@@ -299,8 +298,6 @@ export function useCompanyProfile() {
       cslbLicense?.business.phone,
       cslbLicense?.business.street,
       cslbLicense?.entity,
-      cslbLicense?.expireDate,
-      cslbLicense?.issueDate,
     ]
   );
 
@@ -371,6 +368,7 @@ export function useCompanyProfile() {
   }, [cslbLicense?.personnel]);
 
   const hasDetailContent =
+    licenseRows.length > 0 ||
     Boolean(businessName) ||
     businessRows.length > 0 ||
     classifications.length > 0 ||
@@ -382,7 +380,7 @@ export function useCompanyProfile() {
     isLoadingCompany,
     companyLookupNotice,
     cslbLink,
-    summaryRows,
+    licenseRows,
     statusChips,
     statusFallbackText,
     dataCurrentAsOf,

@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { StyleSheet, Switch, Text, View } from 'react-native';
+import { Platform, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
@@ -15,7 +15,7 @@ import { fetchCustomersByEmail, updateInsuredProfile } from '@/services/customer
 import { getPortalConfig } from '@/services/portal-config';
 import { sendSmtpEmail } from '@/services/smtp-email-api';
 import { Customer, CustomerLookupRecord } from '@/types/customer';
-import { getNameFromCustomer } from '@/utils/format';
+import { formatEmailAddress, formatPhoneNumber, getNameFromCustomer } from '@/utils/format';
 
 function isEmailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -24,6 +24,11 @@ function isEmailValid(value: string) {
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
 }
+
+const webWrapText =
+  Platform.OS === 'web'
+    ? ({ overflowWrap: 'anywhere', wordBreak: 'break-word' } as any)
+    : undefined;
 
 function pickPrimaryCustomer(customers: CustomerLookupRecord[], currentCustomer: Customer | null) {
   return (
@@ -50,11 +55,11 @@ type ProfileFieldChange = {
 
 function buildFormState(customer: Customer | null, userEmail: string | null): ProfileFormState {
   return {
-    firstName: customer?.firstName ?? '',
-    lastName: customer?.lastName ?? '',
-    email: customer?.email ?? userEmail ?? '',
-    phone: customer?.phone ?? '',
-    cellPhone: customer?.cellPhone ?? '',
+    firstName: customer?.firstName?.trim() ?? '',
+    lastName: customer?.lastName?.trim() ?? '',
+    email: formatEmailAddress(customer?.email ?? userEmail ?? ''),
+    phone: customer?.phone?.trim() ?? '',
+    cellPhone: customer?.cellPhone?.trim() ?? '',
   };
 }
 
@@ -86,8 +91,41 @@ function normalizeProfileFieldValue(field: keyof ProfileFormState, value: string
   return value.trim();
 }
 
-function formatProfileFieldValue(value: string) {
-  return value || 'Blank';
+function formatProfileFieldValue(field: keyof ProfileFormState, value: string) {
+  if (!value) {
+    return 'Blank';
+  }
+
+  if (field === 'email') {
+    return formatEmailAddress(value) || 'Blank';
+  }
+
+  if (field === 'phone' || field === 'cellPhone') {
+    return formatPhoneNumber(value) || 'Blank';
+  }
+
+  return value;
+}
+
+function formatProfileDisplayValue(
+  value: string | null | undefined,
+  type: 'text' | 'email' | 'phone' = 'text'
+) {
+  const trimmed = value?.trim() ?? '';
+
+  if (!trimmed) {
+    return 'Not provided';
+  }
+
+  if (type === 'email') {
+    return formatEmailAddress(trimmed) || 'Not provided';
+  }
+
+  if (type === 'phone') {
+    return formatPhoneNumber(trimmed) || 'Not provided';
+  }
+
+  return trimmed;
 }
 
 function buildProfileFieldChanges(
@@ -115,8 +153,8 @@ function buildProfileFieldChanges(
 
       return {
         label: fieldLabels[field],
-        previousValue: formatProfileFieldValue(previousValue),
-        nextValue: formatProfileFieldValue(nextValue),
+        previousValue: formatProfileFieldValue(field, previousValue),
+        nextValue: formatProfileFieldValue(field, nextValue),
       };
     })
     .filter((value): value is ProfileFieldChange => Boolean(value));
@@ -140,8 +178,8 @@ function buildProfileUpdateEmailBody(
       (change) => `
         <tr>
           <td style="padding:8px;border:1px solid #d7ddda;font-weight:600;">${escapeHtml(change.label)}</td>
-          <td style="padding:8px;border:1px solid #d7ddda;">${escapeHtml(change.previousValue)}</td>
-          <td style="padding:8px;border:1px solid #d7ddda;">${escapeHtml(change.nextValue)}</td>
+          <td style="padding:8px;border:1px solid #d7ddda;overflow-wrap:anywhere;word-break:break-word;">${escapeHtml(change.previousValue)}</td>
+          <td style="padding:8px;border:1px solid #d7ddda;overflow-wrap:anywhere;word-break:break-word;">${escapeHtml(change.nextValue)}</td>
         </tr>
       `
     )
@@ -152,7 +190,7 @@ function buildProfileUpdateEmailBody(
       <p>A profile update was submitted in the Insure Pro Builders app.</p>
       <p><strong>Account Holder:</strong> ${escapeHtml(getNameFromCustomer(existingCustomer, userEmail))}</p>
       <p><strong>Business Name:</strong> ${escapeHtml(existingCustomer?.commercialName?.trim() || 'Blank')}</p>
-      <p><strong>Login Email:</strong> ${escapeHtml(userEmail?.trim() || existingCustomer?.email?.trim() || 'Blank')}</p>
+      <p><strong>Login Email:</strong> ${escapeHtml(formatEmailAddress(userEmail ?? existingCustomer?.email) || 'Blank')}</p>
       <p><strong>Database ID:</strong> ${escapeHtml(existingCustomer?.databaseId?.trim() || 'Blank')}</p>
       <p><strong>Insured ID:</strong> ${escapeHtml(existingCustomer?.insuredId?.trim() || 'Blank')}</p>
       <table style="border-collapse:collapse;width:100%;margin-top:16px;">
@@ -172,14 +210,16 @@ function buildProfileUpdateEmailBody(
 function DetailRow({
   label,
   value,
+  valueType = 'text',
 }: {
   label: string;
-  value: string;
+  value: string | null | undefined;
+  valueType?: 'text' | 'email' | 'phone';
 }) {
   return (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value}</Text>
+      <Text style={[styles.detailValue, webWrapText]}>{formatProfileDisplayValue(value, valueType)}</Text>
     </View>
   );
 }
@@ -231,6 +271,8 @@ export default function ProfileScreen({
   const [profileError, setProfileError] = useState('');
   const [profileNotice, setProfileNotice] = useState('');
   const [formState, setFormState] = useState<ProfileFormState>(() => buildFormState(customer, userEmail));
+  const accountHolderName = getNameFromCustomer(customer, userEmail);
+  const accountEmail = formatProfileDisplayValue(customer?.email ?? userEmail, 'email');
 
   useEffect(() => {
     if (isEditingProfile) return;
@@ -377,11 +419,15 @@ export default function ProfileScreen({
       <View style={styles.accountHeaderRow}>
         <View style={styles.accountHeaderCopy}>
           <Text style={styles.label}>Account Holder</Text>
-          <Text style={styles.name}>{getNameFromCustomer(customer, userEmail)}</Text>
-          <Text style={styles.email}>{customer?.email ?? userEmail ?? 'member@email.com'}</Text>
+          <Text style={styles.name}>{accountHolderName}</Text>
+          <Text style={[styles.email, webWrapText]}>{accountEmail}</Text>
         </View>
         {!isEditingProfile ? (
-          <View style={styles.accountHeaderAction}>
+          <View
+            style={[
+              styles.accountHeaderAction,
+              isDesktopLayout ? styles.accountHeaderActionDesktop : styles.accountHeaderActionMobile,
+            ]}>
             <AppButton label="Edit Profile" variant="secondary" onPress={handleStartEdit} />
           </View>
         ) : null}
@@ -442,11 +488,11 @@ export default function ProfileScreen({
         </View>
       ) : (
         <View style={styles.detailStack}>
-          <DetailRow label="First Name" value={customer?.firstName?.trim() || 'Not provided'} />
-          <DetailRow label="Last Name" value={customer?.lastName?.trim() || 'Not provided'} />
-          <DetailRow label="Email Address" value={customer?.email?.trim() || userEmail || 'Not provided'} />
-          <DetailRow label="Phone Number" value={customer?.phone?.trim() || 'Not provided'} />
-          <DetailRow label="Mobile Phone" value={customer?.cellPhone?.trim() || 'Not provided'} />
+          <DetailRow label="First Name" value={customer?.firstName} />
+          <DetailRow label="Last Name" value={customer?.lastName} />
+          <DetailRow label="Email Address" value={customer?.email ?? userEmail} valueType="email" />
+          <DetailRow label="Phone Number" value={customer?.phone} valueType="phone" />
+          <DetailRow label="Mobile Phone" value={customer?.cellPhone} valueType="phone" />
         </View>
       )}
     </View>
@@ -575,13 +621,21 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: theme.spacing.md,
+    flexWrap: 'wrap',
   },
   accountHeaderCopy: {
     flex: 1,
+    minWidth: 0,
     gap: 4,
   },
   accountHeaderAction: {
+    alignSelf: 'stretch',
+  },
+  accountHeaderActionDesktop: {
     width: 160,
+  },
+  accountHeaderActionMobile: {
+    width: '100%',
   },
   label: {
     ...theme.typography.caption,
@@ -592,10 +646,13 @@ const styles = StyleSheet.create({
   name: {
     ...theme.typography.h1,
     color: theme.colors.textStrong,
+    flexShrink: 1,
   },
   email: {
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
+    flexShrink: 1,
+    maxWidth: '100%',
   },
   noticeText: {
     ...theme.typography.bodySmall,
@@ -610,24 +667,22 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
   },
   detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: theme.spacing.md,
+    gap: theme.spacing.xxs,
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
     paddingTop: theme.spacing.sm,
   },
   detailLabel: {
-    ...theme.typography.bodySmall,
+    ...theme.typography.caption,
     color: theme.colors.textMuted,
-    flex: 1,
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
   },
   detailValue: {
     ...theme.typography.bodySmall,
     color: theme.colors.textStrong,
     fontWeight: '700',
-    flex: 1.2,
-    textAlign: 'right',
+    maxWidth: '100%',
   },
   editStack: {
     gap: theme.spacing.sm,
