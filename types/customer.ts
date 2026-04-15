@@ -4,6 +4,7 @@ export type Customer = {
   fullName?: string | null;
   firstName?: string | null;
   lastName?: string | null;
+  type?: number | null;
   email?: string | null;
   phone?: string | null;
   cellPhone?: string | null;

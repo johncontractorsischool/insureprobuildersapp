@@ -22,27 +22,20 @@ jest.mock('@/context/policies-context', () => ({
 const PoliciesScreen = require('@/app/(tabs)/policies').default;
 
 describe('PoliciesScreen', () => {
-  it('filters policies by status and routes to the selected policy detail', () => {
+  it('renders grouped coverage sections and routes to the selected policy detail', () => {
     mockUsePolicies.mockReturnValue({
-      policies: [
-        buildPolicy({ id: 'policy-active', productName: 'General Liability', status: 'Active' }),
-        buildPolicy({ id: 'policy-pending', productName: 'Workers Compensation', status: 'Pending' }),
-      ],
+      policies: [buildPolicy({ id: 'policy-pending', productName: 'Workers Compensation', status: 'Pending' })],
       isLoadingPolicies: false,
       policiesError: null,
       refreshPolicies: jest.fn(),
     });
 
-    const { getByText, getAllByText, queryByText } = render(<PoliciesScreen />);
+    const { getByText, getAllByText } = render(<PoliciesScreen />);
 
-    expect(getByText('General Liability')).toBeTruthy();
     expect(getByText('Workers Compensation')).toBeTruthy();
+    expect(getAllByText('View Policy Details').length).toBeGreaterThan(0);
 
-    fireEvent.press(getAllByText('Pending')[0]);
-    expect(queryByText('General Liability')).toBeNull();
-    expect(getByText('Workers Compensation')).toBeTruthy();
-
-    fireEvent.press(getByText('Workers Compensation'));
+    fireEvent.press(getAllByText('View Policy Details')[0]);
 
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/policy/[id]',

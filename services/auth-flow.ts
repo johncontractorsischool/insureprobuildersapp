@@ -53,6 +53,7 @@ export function toCustomerProfile(customer: CustomerLookupRecord): Customer {
     fullName: buildFullName(customer),
     firstName: customer.firstName,
     lastName: customer.lastName,
+    type: customer.type,
     email: customer.eMail,
     phone: customer.phone,
     cellPhone: customer.cellPhone,

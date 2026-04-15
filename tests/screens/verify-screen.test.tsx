@@ -86,6 +86,31 @@ describe('VerifyScreen', () => {
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
   });
 
+  it('still completes sign in with the refreshed customer when Supabase cache sync is blocked', async () => {
+    const completeSignIn = jest.fn();
+    mockUseAuth.mockReturnValue({
+      pendingEmail: 'jane@example.com',
+      completeSignIn,
+    });
+    mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
+    mockFetchCustomersByEmail.mockResolvedValue([buildCustomerLookupRecord()]);
+    mockPersistCustomersForEmail.mockRejectedValue(
+      new Error('Unable to save customer profile to Supabase (row level security).')
+    );
+
+    const { getByTestId, getByText } = render(<VerifyScreen />);
+
+    fireEvent.changeText(getByTestId('otp-input'), '123456');
+    fireEvent.press(getByText('Verify and Continue'));
+
+    await waitFor(() => expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com'));
+    expect(completeSignIn).toHaveBeenCalledWith(
+      'jane@example.com',
+      expect.objectContaining({ insuredId: 'LIC-123456' })
+    );
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
+  });
+
   it('redirects back to login when there is no pending email', async () => {
     mockUseAuth.mockReturnValue({
       pendingEmail: '',

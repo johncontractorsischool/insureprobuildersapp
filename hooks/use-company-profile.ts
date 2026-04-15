@@ -230,7 +230,11 @@ export function useCompanyProfile() {
         const nextLicense = await fetchCslbLicenseByInsuredId(cslbInsuredId);
         if (!isMounted) return;
         setCslbLicense(nextLicense);
-      } catch {
+      } catch (error) {
+        console.warn('[Company Profile] CSLB lookup failed.', {
+          insuredId: cslbInsuredId,
+          error: error instanceof Error ? error.message : 'Unknown company lookup error',
+        });
         if (!isMounted) return;
         setCslbLicense(null);
         setCompanyLookupNotice('Unable to load CSLB details right now. You can still open the CSLB website.');

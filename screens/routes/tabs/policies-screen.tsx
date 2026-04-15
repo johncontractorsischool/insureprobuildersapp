@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ContactUsMenu } from '@/components/contact-us-menu';
 import { EmptyState } from '@/components/empty-state';
 import { PolicyCard } from '@/components/policy-card';
 import { ScreenContainer } from '@/components/screen-container';
@@ -366,6 +367,9 @@ export default function PoliciesScreen({
         { paddingBottom: insets.bottom + (includeTabBarPadding ? 116 : 24) },
         isDesktopLayout ? styles.desktopScreenContent : null,
       ]}>
+      <View style={styles.topActionsRow}>
+        <ContactUsMenu />
+      </View>
       <SectionHeader title="Policies" />
 
       {isDesktopLayout ? (
@@ -470,6 +474,9 @@ const styles = StyleSheet.create({
   desktopScreenContent: {
     gap: theme.spacing.md,
     paddingBottom: theme.spacing.xl,
+  },
+  topActionsRow: {
+    alignItems: 'flex-end',
   },
   desktopLayout: {
     flexDirection: 'row',

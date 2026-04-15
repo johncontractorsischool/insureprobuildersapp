@@ -78,9 +78,14 @@ export default function VerifyScreen() {
       try {
         const customers = await fetchCustomersByEmail(verifiedEmail);
         if (customers.length > 0) {
-          await persistCustomersForEmail(verifiedEmail, customers);
           const primaryCustomer = pickPrimaryCustomer(customers);
           customerProfile = toCustomerProfile(primaryCustomer);
+          try {
+            await persistCustomersForEmail(verifiedEmail, customers);
+          } catch (persistError) {
+            // Keep the fresh customer profile in memory even if the Supabase cache write is blocked.
+            console.warn('Customer cache sync failed after successful OTP verification.', persistError);
+          }
         }
       } catch (syncError) {
         // OTP verification already succeeded. Keep sign-in valid even if profile sync is temporarily unavailable.

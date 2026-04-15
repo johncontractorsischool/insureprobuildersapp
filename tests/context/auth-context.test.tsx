@@ -2,11 +2,16 @@ import React, { PropsWithChildren } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 
 import { AuthProvider, useAuth } from '@/context/auth-context';
+import { buildCustomerLookupRecord } from '@/tests/factories';
 
 const mockGetSupabaseClient = jest.fn();
+const mockFetchCustomersByEmail = jest.fn();
 
 jest.mock('@/services/supabase', () => ({
   getSupabaseClient: () => mockGetSupabaseClient(),
+}));
+jest.mock('@/services/customer-api', () => ({
+  fetchCustomersByEmail: (...args: unknown[]) => mockFetchCustomersByEmail(...args),
 }));
 
 function createSupabaseMock({
@@ -64,25 +69,12 @@ function wrapper({ children }: PropsWithChildren) {
 }
 
 describe('AuthProvider', () => {
-  it('hydrates the current session and best customer profile from Supabase', async () => {
+  it('hydrates the current session from the live customer lookup when it is available', async () => {
     const supabaseMock = createSupabaseMock({
       sessionEmail: 'jane@example.com',
-      portalRows: [
-        {
-          database_id: 'insured-db-1',
-          commercial_name: 'Builder Co',
-          first_name: 'Jane',
-          last_name: 'Builder',
-          email: 'jane@example.com',
-          phone: '5551112222',
-          cell_phone: '5559990000',
-          customer_id: 'customer-1',
-          insured_id: 'LIC-123456',
-          is_active: true,
-        },
-      ],
     });
     mockGetSupabaseClient.mockReturnValue(supabaseMock);
+    mockFetchCustomersByEmail.mockResolvedValue([buildCustomerLookupRecord()]);
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
@@ -95,6 +87,46 @@ describe('AuthProvider', () => {
       expect.objectContaining({
         databaseId: 'insured-db-1',
         insuredId: 'LIC-123456',
+        type: 1,
+        fullName: 'Jane Builder',
+      })
+    );
+    expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com');
+  });
+
+  it('falls back to cached portal_customers rows when the live customer lookup fails', async () => {
+    const supabaseMock = createSupabaseMock({
+      sessionEmail: 'jane@example.com',
+      portalRows: [
+        {
+          database_id: 'insured-db-1',
+          commercial_name: 'Builder Co',
+          first_name: 'Jane',
+          last_name: 'Builder',
+          source_payload: {
+            type: 0,
+          },
+          email: 'jane@example.com',
+          phone: '5551112222',
+          cell_phone: '5559990000',
+          customer_id: 'customer-1',
+          insured_id: 'LIC-123456',
+          is_active: true,
+        },
+      ],
+    });
+    mockGetSupabaseClient.mockReturnValue(supabaseMock);
+    mockFetchCustomersByEmail.mockRejectedValue(new Error('lookup unavailable'));
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
+
+    expect(result.current.customer).toEqual(
+      expect.objectContaining({
+        databaseId: 'insured-db-1',
+        insuredId: 'LIC-123456',
+        type: 0,
         fullName: 'Jane Builder',
       })
     );

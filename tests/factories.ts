@@ -10,6 +10,7 @@ export function buildCustomer(overrides: Partial<Customer> = {}): Customer {
     fullName: 'Jane Builder',
     firstName: 'Jane',
     lastName: 'Builder',
+    type: 1,
     email: 'jane@example.com',
     phone: '5551112222',
     cellPhone: '5559990000',

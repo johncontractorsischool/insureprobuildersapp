@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BrandMark } from "@/components/brand-mark";
+import { ContactUsMenu } from "@/components/contact-us-menu";
 import {
   type PbiaFormSlug,
   buildPbiaFormUrl,
@@ -263,8 +264,13 @@ function DashboardSkeleton({
       contentContainerStyle={{ paddingBottom: dashboardBottomPadding }}
     >
       <View style={styles.header}>
+        <View style={styles.headerTopRow}>
+          {showHeaderBrandMark ? <BrandMark /> : <View />}
+          <View style={styles.headerMenuRow}>
+            <ContactUsMenu />
+          </View>
+        </View>
         <View style={styles.headerCopy}>
-          {showHeaderBrandMark ? <BrandMark /> : null}
           <View style={styles.accountCard}>
             <View style={[styles.skeletonBlock, styles.skeletonLabel]} />
             <View style={[styles.skeletonBlock, styles.skeletonHeadline]} />
@@ -664,6 +670,7 @@ export default function DashboardScreen({
               <Text style={styles.accountEmail}>{accountHolderEmail}</Text>
             </View>
           </View>
+          <ContactUsMenu />
         </View>
 
         <View style={styles.desktopGrid}>
@@ -904,8 +911,13 @@ export default function DashboardScreen({
       contentContainerStyle={{ paddingBottom: dashboardBottomPadding }}
     >
       <View style={styles.header}>
+        <View style={styles.headerTopRow}>
+          {showHeaderBrandMark ? <BrandMark /> : <View />}
+          <View style={styles.headerMenuRow}>
+            <ContactUsMenu />
+          </View>
+        </View>
         <View style={styles.headerCopy}>
-          {showHeaderBrandMark ? <BrandMark /> : null}
           <View style={styles.accountCard}>
             <Text style={styles.accountLabel}>Account Holder</Text>
             <Text style={styles.accountName}>{accountHolderName}</Text>
@@ -1115,7 +1127,8 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     padding: theme.spacing.md,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     gap: theme.spacing.md,
     ...theme.shadows.surface,
   },
@@ -1212,8 +1225,18 @@ const styles = StyleSheet.create({
   header: {
     width: "100%",
   },
-  headerCopy: {
+  headerTopRow: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     gap: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
+  },
+  headerMenuRow: {
+    alignItems: "flex-end",
+  },
+  headerCopy: {
     width: "100%",
   },
   accountCard: {
