@@ -30,9 +30,7 @@ type PortalCustomerRow = {
   commercial_name: string | null;
   first_name: string | null;
   last_name: string | null;
-  source_payload?: {
-    type?: number | null;
-  } | null;
+  source_payload?: Partial<CustomerLookupRecord> | null;
   email: string | null;
   phone: string | null;
   cell_phone: string | null;
@@ -61,9 +59,18 @@ function mapCustomerLookupToProfile(customer: CustomerLookupRecord): Customer {
     firstName: customer.firstName,
     lastName: customer.lastName,
     type: customer.type,
+    addressLine1: customer.addressLine1,
+    addressLine2: customer.addressLine2,
+    city: customer.city,
+    stateNameOrAbbreviation: customer.stateNameOrAbbreviation,
+    zipCode: customer.zipCode,
     email: customer.eMail,
     phone: customer.phone,
     cellPhone: customer.cellPhone,
+    smsPhone: customer.smsPhone,
+    description: customer.description,
+    website: customer.website,
+    fein: customer.fein,
     customerId: customer.customerId,
     insuredId: customer.insuredId,
     active: customer.active,
@@ -79,16 +86,27 @@ function pickBestCustomerLookup(customers: CustomerLookupRecord[]) {
 }
 
 function mapPortalCustomer(row: PortalCustomerRow, loginEmail: string): Customer {
+  const sourcePayload = row.source_payload;
+
   return {
     databaseId: row.database_id,
     commercialName: row.commercial_name,
     fullName: buildFullName(row.first_name, row.last_name, row.commercial_name),
     firstName: row.first_name,
     lastName: row.last_name,
-    type: typeof row.source_payload?.type === 'number' ? row.source_payload.type : null,
+    type: typeof sourcePayload?.type === 'number' ? sourcePayload.type : null,
+    addressLine1: sourcePayload?.addressLine1 ?? null,
+    addressLine2: sourcePayload?.addressLine2 ?? null,
+    city: sourcePayload?.city ?? null,
+    stateNameOrAbbreviation: sourcePayload?.stateNameOrAbbreviation ?? null,
+    zipCode: sourcePayload?.zipCode ?? null,
     email: row.email ?? loginEmail,
     phone: row.phone,
     cellPhone: row.cell_phone,
+    smsPhone: sourcePayload?.smsPhone ?? null,
+    description: sourcePayload?.description ?? null,
+    website: sourcePayload?.website ?? null,
+    fein: sourcePayload?.fein ?? null,
     customerId: row.customer_id,
     insuredId: row.insured_id,
     active: row.is_active ?? true,

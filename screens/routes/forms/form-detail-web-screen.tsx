@@ -1,20 +1,28 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { type CSSProperties, useMemo } from 'react';
+import { type CSSProperties, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { EmptyState } from '@/components/empty-state';
 import { ScreenContainer } from '@/components/screen-container';
-import { PBIA_BASE_URL, findPbiaFormBySlug } from '@/constants/pbia-forms';
+import { createPbiaInstanceId, findPbiaFormBySlug } from '@/constants/pbia-forms';
 import { theme } from '@/constants/theme';
+import { usePolicies } from '@/context/policies-context';
+import { usePbiaFormUrl } from '@/hooks/use-pbia-form-url';
 
 export default function FormDetailWebScreen() {
-  const { slug } = useLocalSearchParams<{ slug?: string }>();
+  const { slug, policyId } = useLocalSearchParams<{ slug?: string; policyId?: string }>();
   const form = findPbiaFormBySlug(slug);
   const headerTitle = form?.title ?? 'Form';
-  const formUrl = useMemo(() => {
+  const { policies } = usePolicies();
+  const { buildUrl } = usePbiaFormUrl();
+  const policy = useMemo(
+    () => policies.find((entry) => entry.id === policyId) ?? null,
+    [policies, policyId]
+  );
+  const [formUrl] = useState(() => {
     if (!form) return '';
-    return new URL(form.path, PBIA_BASE_URL).toString();
-  }, [form]);
+    return buildUrl(form, createPbiaInstanceId(), { policy });
+  });
 
   if (!form) {
     return (

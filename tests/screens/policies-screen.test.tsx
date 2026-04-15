@@ -10,6 +10,7 @@ const mockRouter = {
   canGoBack: jest.fn(() => false),
 };
 const mockUsePolicies = jest.fn();
+const mockUsePbiaFormUrl = jest.fn();
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -18,10 +19,19 @@ jest.mock('expo-router', () => ({
 jest.mock('@/context/policies-context', () => ({
   usePolicies: () => mockUsePolicies(),
 }));
+jest.mock('@/hooks/use-pbia-form-url', () => ({
+  usePbiaFormUrl: () => mockUsePbiaFormUrl(),
+}));
 
 const PoliciesScreen = require('@/app/(tabs)/policies').default;
 
 describe('PoliciesScreen', () => {
+  beforeEach(() => {
+    mockUsePbiaFormUrl.mockReturnValue({
+      buildUrl: jest.fn(() => 'https://pbia-form-app.vercel.app/forms/workers-comp'),
+    });
+  });
+
   it('renders grouped coverage sections and routes to the selected policy detail', () => {
     mockUsePolicies.mockReturnValue({
       policies: [buildPolicy({ id: 'policy-pending', productName: 'Workers Compensation', status: 'Pending' })],

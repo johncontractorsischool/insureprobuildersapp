@@ -10,12 +10,12 @@ import { ScreenContainer } from '@/components/screen-container';
 import { SectionHeader } from '@/components/section-header';
 import {
   PbiaFormSlug,
-  buildPbiaFormUrl,
   createPbiaInstanceId,
   findPbiaFormBySlug,
 } from '@/constants/pbia-forms';
 import { theme } from '@/constants/theme';
 import { usePolicies } from '@/context/policies-context';
+import { usePbiaFormUrl } from '@/hooks/use-pbia-form-url';
 import { Policy } from '@/types/policy';
 import { openInAppBrowser } from '@/utils/external-actions';
 import { formatCurrency } from '@/utils/format';
@@ -207,6 +207,7 @@ export default function PoliciesScreen({
 }: PoliciesScreenProps) {
   const insets = useSafeAreaInsets();
   const { policies, isLoadingPolicies, policiesError, refreshPolicies } = usePolicies();
+  const { buildUrl: buildPbiaUrl } = usePbiaFormUrl();
 
   const coverageSections = useMemo<CoverageSectionModel[]>(() => {
     const policiesWithMatchText = policies.map((policy) => ({
@@ -268,7 +269,7 @@ export default function PoliciesScreen({
     });
   };
 
-  const handleQuotePress = async (slug: PbiaFormSlug) => {
+  const handleQuotePress = async (slug: PbiaFormSlug, policy?: Policy) => {
     if (Platform.OS !== 'web') {
       const form = findPbiaFormBySlug(slug);
       if (!form) {
@@ -276,7 +277,7 @@ export default function PoliciesScreen({
         return;
       }
 
-      const formUrl = buildPbiaFormUrl(form, createPbiaInstanceId());
+      const formUrl = buildPbiaUrl(form, createPbiaInstanceId(), { policy });
       const result = await openInAppBrowser(formUrl, 'The form link is unavailable right now.');
       if (!result.ok) {
         Alert.alert('Unable to open form', result.message ?? 'Please try again.');
@@ -286,7 +287,10 @@ export default function PoliciesScreen({
 
     router.push({
       pathname: '/forms/[slug]',
-      params: { slug },
+      params: {
+        slug,
+        policyId: policy?.id,
+      },
     });
   };
 
@@ -305,7 +309,7 @@ export default function PoliciesScreen({
               onRequestQuote={
                 policy.status === 'Lapsed'
                   ? () => {
-                      void handleQuotePress(section.formSlug);
+                      void handleQuotePress(section.formSlug, policy);
                     }
                   : undefined
               }

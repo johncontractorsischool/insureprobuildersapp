@@ -6,12 +6,12 @@ import { Alert, Platform, Pressable, SectionList, StyleSheet, Text, View } from 
 import { ScreenContainer } from '@/components/screen-container';
 import {
   PBIA_FORMS,
-  buildPbiaFormUrl,
   createPbiaInstanceId,
   type PbiaFormRegistryItem,
   type PbiaFormSlug,
 } from '@/constants/pbia-forms';
 import { theme } from '@/constants/theme';
+import { usePbiaFormUrl } from '@/hooks/use-pbia-form-url';
 import { openInAppBrowser } from '@/utils/external-actions';
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
@@ -125,6 +125,8 @@ type FormsIndexScreenProps = {
 export default function PbiaFormsScreen({
   showInContentBackButton = false,
 }: FormsIndexScreenProps) {
+  const { buildUrl } = usePbiaFormUrl();
+
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -141,7 +143,7 @@ export default function PbiaFormsScreen({
     }
 
     if (Platform.OS !== 'web') {
-      const formUrl = buildPbiaFormUrl(selectedForm, createPbiaInstanceId());
+      const formUrl = buildUrl(selectedForm, createPbiaInstanceId());
       const result = await openInAppBrowser(formUrl, 'The form link is unavailable right now.');
       if (!result.ok) {
         Alert.alert('Unable to open form', result.message ?? 'Please try again.');

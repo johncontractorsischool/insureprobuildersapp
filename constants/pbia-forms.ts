@@ -24,6 +24,16 @@ export type PbiaFormRegistryItem = {
   path: `/forms/${PbiaFormSlug}`;
 };
 
+type PbiaQueryParamPrimitive = string | number | boolean;
+
+export type PbiaQueryParamValue =
+  | PbiaQueryParamPrimitive
+  | readonly PbiaQueryParamPrimitive[]
+  | null
+  | undefined;
+
+export type PbiaQueryParams = Record<string, PbiaQueryParamValue>;
+
 export const PBIA_FORMS: readonly PbiaFormRegistryItem[] = [
   {
     slug: 'commercial-auto',
@@ -96,17 +106,50 @@ export function createPbiaInstanceId() {
   return `pbia-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function buildPbiaFormUrl(form: PbiaFormRegistryItem, instanceId: string) {
+const PBIA_RESERVED_QUERY_KEYS = new Set(['embed', 'instance', 'speed']);
+
+function appendPbiaQueryParams(url: URL, params?: PbiaQueryParams) {
+  if (!params) return;
+
+  for (const [key, rawValue] of Object.entries(params)) {
+    if (!key || PBIA_RESERVED_QUERY_KEYS.has(key)) {
+      continue;
+    }
+
+    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+
+    for (const value of values) {
+      if (value === null || value === undefined) {
+        continue;
+      }
+
+      const normalizedValue = String(value).trim();
+      if (!normalizedValue) {
+        continue;
+      }
+
+      url.searchParams.append(key, normalizedValue);
+    }
+  }
+}
+
+export function buildPbiaFormUrl(
+  form: PbiaFormRegistryItem,
+  instanceId: string,
+  params?: PbiaQueryParams
+) {
   const url = new URL(form.path, PBIA_BASE_URL);
   url.searchParams.set('embed', 'true');
   url.searchParams.set('instance', instanceId);
+  appendPbiaQueryParams(url, params);
   return url.toString();
 }
 
-export function buildPbiaEmbeddedUrl(target: string, instanceId: string) {
+export function buildPbiaEmbeddedUrl(target: string, instanceId: string, params?: PbiaQueryParams) {
   const url = new URL(target, PBIA_BASE_URL);
   url.searchParams.set('embed', 'true');
   url.searchParams.set('instance', instanceId);
+  appendPbiaQueryParams(url, params);
   return url.toString();
 }
 

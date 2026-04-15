@@ -6,8 +6,10 @@ import { AppButton } from '@/components/app-button';
 import { EmptyState } from '@/components/empty-state';
 import { PbiaFormWebView } from '@/components/pbia-form-webview';
 import { ScreenContainer } from '@/components/screen-container';
-import { buildPbiaFormUrl, createPbiaInstanceId, findPbiaFormBySlug } from '@/constants/pbia-forms';
+import { createPbiaInstanceId, findPbiaFormBySlug } from '@/constants/pbia-forms';
 import { theme } from '@/constants/theme';
+import { usePolicies } from '@/context/policies-context';
+import { usePbiaFormUrl } from '@/hooks/use-pbia-form-url';
 import {
   appendPbiaWebViewDiagnostic,
   clearPbiaWebViewDiagnostics,
@@ -29,15 +31,21 @@ function formatDiagnosticLine(entry: PbiaWebViewDiagnosticEntry) {
 }
 
 export default function PbiaFormDetailScreen() {
-  const { slug } = useLocalSearchParams<{ slug?: string }>();
+  const { slug, policyId } = useLocalSearchParams<{ slug?: string; policyId?: string }>();
   const form = findPbiaFormBySlug(slug);
   const headerTitle = form?.title ?? 'Form';
+  const { policies } = usePolicies();
+  const { buildUrl } = usePbiaFormUrl();
+  const policy = useMemo(
+    () => policies.find((entry) => entry.id === policyId) ?? null,
+    [policies, policyId]
+  );
   const [showEmbeddedForm, setShowEmbeddedForm] = useState(false);
   const [diagnosticLines, setDiagnosticLines] = useState<PbiaWebViewDiagnosticEntry[]>([]);
   const [isLoadingDiagnostics, setIsLoadingDiagnostics] = useState(false);
   const browserFormUrl = useMemo(
-    () => (form ? buildPbiaFormUrl(form, createPbiaInstanceId()) : null),
-    [form]
+    () => (form ? buildUrl(form, createPbiaInstanceId(), { policy }) : null),
+    [buildUrl, form, policy]
   );
   const canUseEmbeddedForm = Platform.OS !== 'web' && ENABLE_PBIA_EMBEDDED_FORMS;
 
@@ -179,7 +187,7 @@ export default function PbiaFormDetailScreen() {
           </View>
         ) : (
           <View style={styles.webViewContainer}>
-            <PbiaFormWebView form={form} />
+            <PbiaFormWebView form={form} initialUrl={browserFormUrl ?? undefined} />
           </View>
         )}
       </ScreenContainer>

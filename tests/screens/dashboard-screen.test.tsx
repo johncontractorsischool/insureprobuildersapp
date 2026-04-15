@@ -82,6 +82,7 @@ describe('DashboardScreen', () => {
       isLoadingCompany: false,
       companyLookupNotice: null,
       cslbLink: 'https://cslb.ca.gov/license-detail',
+      cslbLicense: null,
       licenseRows: [{ label: 'License #', value: 'LIC-123456' }],
       statusChips: ['Active'],
       statusFallbackText: 'Active',

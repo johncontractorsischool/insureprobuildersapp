@@ -380,6 +380,7 @@ export function useCompanyProfile() {
     isLoadingCompany,
     companyLookupNotice,
     cslbLink,
+    cslbLicense,
     licenseRows,
     statusChips,
     statusFallbackText,

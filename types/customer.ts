@@ -5,9 +5,18 @@ export type Customer = {
   firstName?: string | null;
   lastName?: string | null;
   type?: number | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  stateNameOrAbbreviation?: string | null;
+  zipCode?: string | null;
   email?: string | null;
   phone?: string | null;
   cellPhone?: string | null;
+  smsPhone?: string | null;
+  description?: string | null;
+  website?: string | null;
+  fein?: string | null;
   customerId?: string | null;
   insuredId?: string | null;
   active?: boolean;

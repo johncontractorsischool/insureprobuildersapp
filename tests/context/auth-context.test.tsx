@@ -89,6 +89,11 @@ describe('AuthProvider', () => {
         insuredId: 'LIC-123456',
         type: 1,
         fullName: 'Jane Builder',
+        addressLine1: '123 Main St',
+        city: 'Los Angeles',
+        stateNameOrAbbreviation: 'CA',
+        zipCode: '90001',
+        smsPhone: '5559990000',
       })
     );
     expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com');
@@ -105,6 +110,13 @@ describe('AuthProvider', () => {
           last_name: 'Builder',
           source_payload: {
             type: 0,
+            addressLine1: '123 Main St',
+            city: 'Los Angeles',
+            stateNameOrAbbreviation: 'CA',
+            zipCode: '90001',
+            smsPhone: '5559990000',
+            website: 'https://builder.example.com',
+            fein: '12-3456789',
           },
           email: 'jane@example.com',
           phone: '5551112222',
@@ -128,6 +140,13 @@ describe('AuthProvider', () => {
         insuredId: 'LIC-123456',
         type: 0,
         fullName: 'Jane Builder',
+        addressLine1: '123 Main St',
+        city: 'Los Angeles',
+        stateNameOrAbbreviation: 'CA',
+        zipCode: '90001',
+        smsPhone: '5559990000',
+        website: 'https://builder.example.com',
+        fein: '12-3456789',
       })
     );
     expect(supabaseMock.from).toHaveBeenCalledWith('portal_customers');

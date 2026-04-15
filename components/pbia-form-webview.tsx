@@ -71,6 +71,7 @@ type PbiaBridgePayload = {
 type PbiaFormWebViewProps = {
   form: PbiaFormRegistryItem;
   instanceId?: string;
+  initialUrl?: string;
   autoHeight?: boolean;
   enableMessageBridge?: boolean;
 };
@@ -138,12 +139,16 @@ function safeBuildEmbeddedUrl(target: string, instanceId: string) {
 export function PbiaFormWebView({
   form,
   instanceId: providedInstanceId,
+  initialUrl: providedInitialUrl,
   autoHeight = false,
   enableMessageBridge = false,
 }: PbiaFormWebViewProps) {
   const shouldUseMessageBridge = autoHeight || enableMessageBridge;
   const instanceId = useMemo(() => providedInstanceId ?? createPbiaInstanceId(), [providedInstanceId]);
-  const initialUrl = useMemo(() => buildPbiaFormUrl(form, instanceId), [form, instanceId]);
+  const initialUrl = useMemo(
+    () => providedInitialUrl ?? buildPbiaFormUrl(form, instanceId),
+    [form, instanceId, providedInitialUrl]
+  );
   const [webViewUrl, setWebViewUrl] = useState(initialUrl);
   const [webViewHeight, setWebViewHeight] = useState(900);
   const [loading, setLoading] = useState(true);

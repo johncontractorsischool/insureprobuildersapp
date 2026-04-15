@@ -40,6 +40,7 @@ import {
   openInAppBrowser,
 } from "@/utils/external-actions";
 import { getNameFromCustomer } from "@/utils/format";
+import { buildPbiaFormPrefillParams } from "@/utils/pbia-form-prefill";
 
 const AGENT_AVATARS: Record<string, number> = {
   ariesapcar: require("../../../assets/images/ariesapcar.jpg"),
@@ -362,6 +363,7 @@ export default function DashboardScreen({
     isLoadingCompany,
     companyLookupNotice,
     cslbLink,
+    cslbLicense,
     licenseRows,
     statusChips,
     statusFallbackText,
@@ -585,7 +587,16 @@ export default function DashboardScreen({
         return;
       }
 
-      const formUrl = buildPbiaFormUrl(form, createPbiaInstanceId());
+      const formUrl = buildPbiaFormUrl(
+        form,
+        createPbiaInstanceId(),
+        buildPbiaFormPrefillParams(form.slug, {
+          customer,
+          userEmail,
+          cslbLicense,
+          fallbackLicenseNumber: portalConfig.company.licenseNumber,
+        }),
+      );
       const result = await openInAppBrowser(
         formUrl,
         "The form link is unavailable right now.",
