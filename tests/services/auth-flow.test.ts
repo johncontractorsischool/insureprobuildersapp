@@ -1,5 +1,6 @@
-import { isOtpRateLimitError, sendEmailSignInCode } from '@/services/auth-flow';
+import { isOtpRateLimitError, persistCustomersForEmail, sendEmailSignInCode } from '@/services/auth-flow';
 import { getSupabaseClient } from '@/services/supabase';
+import { buildCustomerLookupRecord } from '@/tests/factories';
 
 jest.mock('@/services/supabase', () => ({
   getSupabaseClient: jest.fn(),
@@ -12,6 +13,17 @@ function createSupabaseAuthMock() {
     auth: {
       signInWithOtp: jest.fn(),
     },
+  };
+}
+
+function createSupabaseWriteMock() {
+  const tableMock = {
+    upsert: jest.fn(),
+  };
+
+  return {
+    from: jest.fn(() => tableMock),
+    __table: tableMock,
   };
 }
 
@@ -122,5 +134,50 @@ describe('sendEmailSignInCode', () => {
         message: 'Email rate limit exceeded',
       })
     ).toBe(true);
+  });
+});
+
+describe('persistCustomersForEmail', () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+  });
+
+  it('upserts cached customers by login email and database id', async () => {
+    const supabaseMock = createSupabaseWriteMock();
+    const upsert = supabaseMock.__table.upsert as jest.Mock;
+    upsert.mockResolvedValue({ error: null });
+    mockedGetSupabaseClient.mockReturnValue(supabaseMock);
+
+    await persistCustomersForEmail('jane@example.com', [buildCustomerLookupRecord()]);
+
+    expect(supabaseMock.from).toHaveBeenCalledWith('portal_customers');
+    expect(upsert).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          login_email: 'jane@example.com',
+          database_id: 'insured-db-1',
+        }),
+      ],
+      {
+        onConflict: 'login_email,database_id',
+      }
+    );
+  });
+
+  it('throws a readable error when Supabase rejects the cache upsert', async () => {
+    const supabaseMock = createSupabaseWriteMock();
+    const upsert = supabaseMock.__table.upsert as jest.Mock;
+    upsert.mockResolvedValue({
+      error: {
+        message: 'new row violates row-level security policy',
+      },
+    });
+    mockedGetSupabaseClient.mockReturnValue(supabaseMock);
+
+    await expect(
+      persistCustomersForEmail('jane@example.com', [buildCustomerLookupRecord()])
+    ).rejects.toThrow(
+      'Unable to save customer profile to Supabase (new row violates row-level security policy).'
+    );
   });
 });

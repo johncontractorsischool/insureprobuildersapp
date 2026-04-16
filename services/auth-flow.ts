@@ -209,7 +209,7 @@ export async function persistCustomersForEmail(loginEmail: string, customers: Cu
   const { error } = await supabase
     .from(CUSTOMER_TABLE)
     .upsert(customers.map((customer) => mapCustomerRecord(loginEmail, customer)), {
-      onConflict: 'database_id',
+      onConflict: 'login_email,database_id',
     });
 
   if (error) {
