@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { AppButton } from '@/components/app-button';
@@ -16,6 +16,8 @@ import { isOtpRateLimitError, sendEmailSignInCode, toUserFacingError } from '@/s
 function isEmailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
+
+const LOGIN_VISUAL_IMAGE = require('../../../assets/images/imageWorker.png');
 
 type AuthMode = 'signin' | 'signup';
 
@@ -179,29 +181,13 @@ export default function LoginScreen() {
               accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants">
               <View style={styles.visualCanvas}>
+                <Image source={LOGIN_VISUAL_IMAGE} style={styles.visualImage} resizeMode="cover" />
+                <View style={styles.visualImageScrim} />
                 <View style={styles.visualGlowTop} />
                 <View style={styles.visualGlowBottom} />
                 <View style={styles.visualGrid} />
                 <View style={[styles.visualPanel, styles.visualPanelTop]} />
                 <View style={[styles.visualPanel, styles.visualPanelBottom]} />
-
-                <View style={styles.emblemWrap}>
-                  <View style={styles.emblemOuter}>
-                    <View style={styles.emblemInner}>
-                      <Ionicons name="shield-checkmark-outline" size={34} color={theme.colors.primaryDeep} />
-                    </View>
-                  </View>
-                </View>
-
-                <View style={[styles.iconTile, styles.iconTileOne]}>
-                  <Ionicons name="document-text-outline" size={24} color={theme.colors.primary} />
-                </View>
-                <View style={[styles.iconTile, styles.iconTileTwo]}>
-                  <Ionicons name="business-outline" size={24} color={theme.colors.primary} />
-                </View>
-                <View style={[styles.iconTile, styles.iconTileThree]}>
-                  <Ionicons name="construct-outline" size={24} color={theme.colors.primary} />
-                </View>
 
                 <View style={styles.visualOutline} />
               </View>
@@ -324,6 +310,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#EAF3EE',
     overflow: 'hidden',
   },
+  visualImage: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: -130,
+    width: '129%',
+    height: '100%',
+  },
+  visualImageScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(21, 78, 57, 0.38)',
+  },
   visualGlowTop: {
     position: 'absolute',
     top: -90,
@@ -371,58 +369,6 @@ const styles = StyleSheet.create({
     width: 220,
     height: 144,
     transform: [{ rotate: '8deg' }],
-  },
-  emblemWrap: {
-    position: 'absolute',
-    top: '36%',
-    left: '50%',
-    marginLeft: -78,
-    marginTop: -78,
-  },
-  emblemOuter: {
-    width: 156,
-    height: 156,
-    borderRadius: 78,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: '#C4D6CD',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...theme.shadows.elevated,
-  },
-  emblemInner: {
-    width: 104,
-    height: 104,
-    borderRadius: 52,
-    borderWidth: 1,
-    borderColor: '#C6D8CF',
-    backgroundColor: '#EAF3EE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconTile: {
-    position: 'absolute',
-    width: 72,
-    height: 72,
-    borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: '#C6D8CF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...theme.shadows.surface,
-  },
-  iconTileOne: {
-    top: 122,
-    right: 84,
-  },
-  iconTileTwo: {
-    bottom: 164,
-    left: 78,
-  },
-  iconTileThree: {
-    bottom: 96,
-    right: 116,
   },
   visualOutline: {
     position: 'absolute',

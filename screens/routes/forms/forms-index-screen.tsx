@@ -76,43 +76,12 @@ const INTAKE_FORM_SECTIONS: readonly IntakeFormSection[] = [
   },
   {
     key: 'certificates-admin',
-    title: 'Certificates / Admin',
+    title: 'Additional',
     data: [
       {
         slug: 'additional-insured-request',
         description: 'Request to add another party to a certificate',
         icon: 'person-add-outline',
-      },
-      {
-        slug: 'total-net-worth',
-        description: 'Provide financial information for underwriting',
-        icon: 'calculator-outline',
-      },
-    ],
-  },
-  {
-    key: 'specialty-coverage',
-    title: 'Specialty Coverage',
-    data: [
-      {
-        slug: 'inland-marine-intake',
-        description: 'Coverage for tools, equipment, and property in transit',
-        icon: 'boat-outline',
-      },
-      {
-        slug: 'pollution-liability-intake',
-        description: 'Coverage for pollution-related claims',
-        icon: 'leaf-outline',
-      },
-      {
-        slug: 'builder-risk-quote-request',
-        description: 'Coverage for buildings under construction',
-        icon: 'construct-outline',
-      },
-      {
-        slug: 'professional-liability-quote-request',
-        description: 'Coverage for professional errors and omissions',
-        icon: 'document-lock-outline',
       },
     ],
   },
@@ -176,7 +145,7 @@ export default function PbiaFormsScreen({
             ) : null}
 
             <View style={styles.introCard}>
-              <Text style={styles.introTitle}>Select A Form To Begin</Text>
+              <Text style={styles.introTitle}>Request A Quote</Text>
               <Text style={styles.introDescription}>
                 Choose the request type that best matches your coverage or service need.
               </Text>

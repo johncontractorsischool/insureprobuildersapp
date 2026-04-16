@@ -37,17 +37,17 @@ export type PbiaQueryParams = Record<string, PbiaQueryParamValue>;
 export const PBIA_FORMS: readonly PbiaFormRegistryItem[] = [
   {
     slug: 'commercial-auto',
-    title: 'Commercial Auto Insurance Intake',
+    title: 'Commercial Auto Insurance',
     path: '/forms/commercial-auto',
   },
   {
     slug: 'general-liability',
-    title: 'General Liability Intake',
+    title: 'General Liability',
     path: '/forms/general-liability',
   },
   {
     slug: 'workers-comp',
-    title: 'Workers Compensation Intake',
+    title: 'Workers Compensation',
     path: '/forms/workers-comp',
   },
   {
@@ -72,12 +72,12 @@ export const PBIA_FORMS: readonly PbiaFormRegistryItem[] = [
   },
   {
     slug: 'inland-marine-intake',
-    title: 'Inland Marine Intake Form',
+    title: 'Inland Marine Form',
     path: '/forms/inland-marine-intake',
   },
   {
     slug: 'pollution-liability-intake',
-    title: 'Pollution Liability Intake Form',
+    title: 'Pollution Liability Form',
     path: '/forms/pollution-liability-intake',
   },
   {

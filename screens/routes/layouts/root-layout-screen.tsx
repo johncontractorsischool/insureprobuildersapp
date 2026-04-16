@@ -62,7 +62,7 @@ export default function RootLayout() {
             name="forms/index"
             options={{
               headerShown: true,
-              headerTitle: 'Intake Forms',
+              headerTitle: 'Request A Quote',
               headerShadowVisible: false,
               headerTintColor: theme.colors.textStrong,
               headerStyle: { backgroundColor: theme.colors.background },
