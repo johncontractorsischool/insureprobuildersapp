@@ -4,6 +4,7 @@ type PortalConfig = {
     phone: string | null;
     email: string | null;
     smsPhone: string | null;
+    mailingAddress: string | null;
     scheduleUrl: string | null;
   };
   company: {
@@ -13,6 +14,7 @@ type PortalConfig = {
   actions: {
     intakeFormsUrl: string | null;
     issueCoiUrl: string | null;
+    supportEmail: string;
   };
 };
 
@@ -39,6 +41,9 @@ export function getPortalConfig(): PortalConfig {
       phone: normalizeText(process.env.EXPO_PUBLIC_AGENT_PHONE),
       email: normalizeText(process.env.EXPO_PUBLIC_AGENT_EMAIL),
       smsPhone: normalizeText(process.env.EXPO_PUBLIC_AGENT_SMS_PHONE),
+      mailingAddress:
+        normalizeText(process.env.EXPO_PUBLIC_AGENCY_MAILING_ADDRESS) ??
+        '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742',
       scheduleUrl: normalizeHttpUrl(process.env.EXPO_PUBLIC_AGENT_SCHEDULE_URL),
     },
     company: {
@@ -48,6 +53,7 @@ export function getPortalConfig(): PortalConfig {
     actions: {
       intakeFormsUrl: normalizeHttpUrl(process.env.EXPO_PUBLIC_INTAKE_FORMS_URL),
       issueCoiUrl: normalizeHttpUrl(process.env.EXPO_PUBLIC_ISSUE_COI_URL),
+      supportEmail: normalizeText(process.env.EXPO_PUBLIC_SUPPORT_EMAIL) ?? 'support@insureprobuilders.com',
     },
   };
 }

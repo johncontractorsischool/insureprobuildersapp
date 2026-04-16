@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '@/context/auth-context';
-import { CslbLicense, buildCslbLicenseUrl, fetchCslbLicenseByInsuredId } from '@/services/cslb-api';
+import {
+  CslbLicense,
+  CslbWorkersComp,
+  buildCslbLicenseUrl,
+  fetchCslbLicenseByInsuredId,
+} from '@/services/cslb-api';
 import { getPortalConfig } from '@/services/portal-config';
 
 export type CompanyInfoRow = {
@@ -15,7 +20,7 @@ export type CompanyInfoGroup = {
   rows: CompanyInfoRow[];
 };
 
-export type CompanyStatusChip = 'Active' | 'Current' | 'Inactive';
+export type CompanyStatusChip = 'Active' | 'Needs Attention';
 
 const HIDDEN_DISPLAY_VALUES = new Set([
   'n/a',
@@ -25,6 +30,47 @@ const HIDDEN_DISPLAY_VALUES = new Set([
   'not available',
   'null',
   'undefined',
+]);
+
+const LLC_PATTERNS = [
+  /\bl\.?\s*l\.?\s*c\.?\b/i,
+  /limited liability company/i,
+  /limited liability co/i,
+  /ltd liability/i,
+] as const;
+
+const POSITIVE_LICENSE_STATUS_TOKENS = ['active', 'current'] as const;
+const NEGATIVE_LICENSE_STATUS_TOKENS = [
+  'inactive',
+  'expired',
+  'suspend',
+  'revoked',
+  'cancel',
+  'denied',
+  'delinquent',
+  'attention',
+  'pending',
+  'complaint',
+] as const;
+
+const WORKERS_COMP_EXEMPT_PATTERNS = [
+  /exempt/i,
+  /no employees?/i,
+  /self[- ]insured/i,
+  /not required/i,
+  /waiv/i,
+] as const;
+
+const GENERIC_WORKERS_COMP_EXEMPT_VALUES = new Set([
+  'exempt',
+  'workers compensation exempt',
+  'workers comp exempt',
+  'workers compensation exempted',
+  'workers compensation exemption',
+  'workers comp exemption',
+  'workers compensation exception',
+  'workers comp exception',
+  'w/c exempt',
 ]);
 
 function normalizeForComparison(value: string) {
@@ -58,21 +104,103 @@ function toRows(entries: Array<{ label: string; value: string | null | undefined
   }, []);
 }
 
-function buildStatusChips(statusText: string): CompanyStatusChip[] {
-  const normalized = normalizeForComparison(statusText);
-  const chips: CompanyStatusChip[] = [];
-
-  if (normalized.includes('inactive')) {
-    chips.push('Inactive');
-  } else if (normalized.includes('active')) {
-    chips.push('Active');
+function toDisplayStatus(statusText: string | null | undefined, isCustomerActive: boolean | undefined) {
+  const normalizedStatus = normalizeDisplayValue(statusText);
+  if (!normalizedStatus) {
+    return isCustomerActive === false ? 'Needs Attention' : 'Active';
   }
 
-  if (normalized.includes('current')) {
-    chips.push('Current');
+  const normalized = normalizeForComparison(normalizedStatus);
+  const hasPositiveToken = POSITIVE_LICENSE_STATUS_TOKENS.some((token) => normalized.includes(token));
+  const hasNegativeToken = NEGATIVE_LICENSE_STATUS_TOKENS.some((token) => normalized.includes(token));
+
+  if (hasPositiveToken && !hasNegativeToken) {
+    return 'Active';
   }
 
-  return chips;
+  return 'Needs Attention';
+}
+
+function buildStatusChips(statusText: CompanyStatusChip): CompanyStatusChip[] {
+  return [statusText];
+}
+
+function formatEntityDisplay(value: string | null | undefined) {
+  const normalized = normalizeDisplayValue(value);
+  if (!normalized) return null;
+
+  if (LLC_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return 'LLC';
+  }
+
+  return normalized;
+}
+
+function hasWorkersCompExemptIndicator(value: string | null | undefined) {
+  const normalized = normalizeDisplayValue(value);
+  if (!normalized) return false;
+  return WORKERS_COMP_EXEMPT_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function toWorkersCompExemptDetail(value: string | null | undefined) {
+  const normalized = normalizeDisplayValue(value);
+  if (!normalized) return null;
+
+  const comparisonValue = normalizeForComparison(normalized);
+  const isGenericExemptLabel =
+    GENERIC_WORKERS_COMP_EXEMPT_VALUES.has(comparisonValue) ||
+    (comparisonValue.includes('exempt') &&
+      (comparisonValue.includes('worker') ||
+        comparisonValue.includes('workmen') ||
+        comparisonValue.includes('w/c') ||
+        comparisonValue.includes('comp')));
+
+  if (isGenericExemptLabel) {
+    return null;
+  }
+
+  if (comparisonValue.includes('no employees')) {
+    return 'No employees reported';
+  }
+
+  if (comparisonValue.includes('self insured') || comparisonValue.includes('self-insured')) {
+    return 'Self-insured';
+  }
+
+  return normalized;
+}
+
+function buildWorkersCompRows(workersComp: CslbWorkersComp | null) {
+  if (!workersComp) return [];
+
+  const exemptDetailSources = [
+    workersComp.exemption,
+    workersComp.exception,
+    workersComp.notes,
+    workersComp.status,
+    workersComp.policyNumber,
+    workersComp.carrierName,
+  ];
+  const isExempt = exemptDetailSources.some((value) => hasWorkersCompExemptIndicator(value));
+
+  if (isExempt) {
+    const detail =
+      exemptDetailSources
+        .map((value) => toWorkersCompExemptDetail(value))
+        .find((value): value is string => Boolean(value)) ?? null;
+
+    return toRows([
+      { label: 'Status', value: 'Exempt' },
+      { label: 'Details', value: detail },
+    ]);
+  }
+
+  return toRows([
+    { label: 'Carrier', value: workersComp.carrierName },
+    { label: 'Policy #', value: workersComp.policyNumber },
+    { label: 'Effective Date', value: workersComp.effectiveDate },
+    { label: 'Expiration Date', value: workersComp.expireDate },
+  ]);
 }
 
 export function useCompanyProfile() {
@@ -102,7 +230,11 @@ export function useCompanyProfile() {
         const nextLicense = await fetchCslbLicenseByInsuredId(cslbInsuredId);
         if (!isMounted) return;
         setCslbLicense(nextLicense);
-      } catch {
+      } catch (error) {
+        console.warn('[Company Profile] CSLB lookup failed.', {
+          insuredId: cslbInsuredId,
+          error: error instanceof Error ? error.message : 'Unknown company lookup error',
+        });
         if (!isMounted) return;
         setCslbLicense(null);
         setCompanyLookupNotice('Unable to load CSLB details right now. You can still open the CSLB website.');
@@ -130,21 +262,23 @@ export function useCompanyProfile() {
     normalizeDisplayValue(cslbInsuredId) ||
     normalizeDisplayValue(portalConfig.company.licenseNumber);
 
-  const statusFallbackText =
-    normalizeDisplayValue(cslbLicense?.status) || (customer?.active === false ? 'Inactive' : 'Active');
+  const statusFallbackText = toDisplayStatus(cslbLicense?.status, customer?.active);
   const statusChips = useMemo(() => buildStatusChips(statusFallbackText), [statusFallbackText]);
 
-  const companyExpiration = normalizeDisplayValue(cslbLicense?.expireDate);
+  const companyEffectiveDate = normalizeDisplayValue(cslbLicense?.issueDate);
+  const companyExpirationDate = normalizeDisplayValue(cslbLicense?.expireDate);
   const dataCurrentAsOf = normalizeDisplayValue(cslbLicense?.dataCurrentAsOf);
 
-  const summaryRows = useMemo(
+  const licenseRows = useMemo(
     () =>
       toRows([
         { label: 'License #', value: companyLicenseNumber },
         { label: 'Status', value: statusFallbackText },
-        { label: 'Expiration', value: companyExpiration },
+        { label: 'Effective Date', value: companyEffectiveDate },
+        { label: 'Expiration Date', value: companyExpirationDate },
+        { label: 'Data Current', value: dataCurrentAsOf },
       ]),
-    [companyExpiration, companyLicenseNumber, statusFallbackText]
+    [companyEffectiveDate, companyExpirationDate, companyLicenseNumber, dataCurrentAsOf, statusFallbackText]
   );
 
   const businessName = normalizeDisplayValue(cslbLicense?.business.businessName);
@@ -156,9 +290,7 @@ export function useCompanyProfile() {
         { label: 'Street', value: cslbLicense?.business.street },
         { label: 'City/State/ZIP', value: cslbLicense?.business.cityStateZip },
         { label: 'Phone', value: cslbLicense?.business.phone },
-        { label: 'Entity', value: cslbLicense?.entity },
-        { label: 'Issue date', value: cslbLicense?.issueDate },
-        { label: 'Expiration', value: cslbLicense?.expireDate },
+        { label: 'Entity', value: formatEntityDisplay(cslbLicense?.entity) },
       ]),
     [
       cslbLicense?.business.cityStateZip,
@@ -166,8 +298,6 @@ export function useCompanyProfile() {
       cslbLicense?.business.phone,
       cslbLicense?.business.street,
       cslbLicense?.entity,
-      cslbLicense?.expireDate,
-      cslbLicense?.issueDate,
     ]
   );
 
@@ -185,8 +315,8 @@ export function useCompanyProfile() {
         { label: 'Carrier', value: bond.carrierName },
         { label: 'Bond #', value: bond.bondNumber },
         { label: 'Amount', value: bond.bondAmount },
-        { label: 'Effective', value: bond.effectiveDate },
-        { label: 'Expiration', value: bond.expirationDate },
+        { label: 'Effective Date', value: bond.effectiveDate },
+        { label: 'Expiration Date', value: bond.expirationDate },
       ]);
 
       if (rows.length === 0) return groups;
@@ -203,18 +333,16 @@ export function useCompanyProfile() {
   }, [cslbLicense?.bonding]);
 
   const workersCompRows = useMemo(
-    () =>
-      toRows([
-        { label: 'Carrier', value: cslbLicense?.workersComp?.carrierName },
-        { label: 'Policy #', value: cslbLicense?.workersComp?.policyNumber },
-        { label: 'Effective', value: cslbLicense?.workersComp?.effectiveDate },
-        { label: 'Expiration', value: cslbLicense?.workersComp?.expireDate },
-      ]),
+    () => buildWorkersCompRows(cslbLicense?.workersComp ?? null),
     [
       cslbLicense?.workersComp?.carrierName,
       cslbLicense?.workersComp?.effectiveDate,
+      cslbLicense?.workersComp?.exception,
+      cslbLicense?.workersComp?.exemption,
       cslbLicense?.workersComp?.expireDate,
+      cslbLicense?.workersComp?.notes,
       cslbLicense?.workersComp?.policyNumber,
+      cslbLicense?.workersComp?.status,
     ]
   );
 
@@ -240,6 +368,7 @@ export function useCompanyProfile() {
   }, [cslbLicense?.personnel]);
 
   const hasDetailContent =
+    licenseRows.length > 0 ||
     Boolean(businessName) ||
     businessRows.length > 0 ||
     classifications.length > 0 ||
@@ -251,7 +380,8 @@ export function useCompanyProfile() {
     isLoadingCompany,
     companyLookupNotice,
     cslbLink,
-    summaryRows,
+    cslbLicense,
+    licenseRows,
     statusChips,
     statusFallbackText,
     dataCurrentAsOf,

@@ -1,6 +1,4 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
-
-import { theme } from '@/constants/theme';
+import { Image, StyleSheet, View } from 'react-native';
 
 type BrandMarkProps = {
   size?: number;
@@ -8,54 +6,42 @@ type BrandMarkProps = {
   compactWordmark?: boolean;
 };
 
+const FULL_LOGO_ASPECT_RATIO = 180 / 40;
+
 export function BrandMark({
-  size = 58,
+  size = 40,
   withWordmark = true,
   compactWordmark = false,
 }: BrandMarkProps) {
+  const imageHeight = compactWordmark ? Math.round(size * 0.85) : size;
+  const imageWidth = withWordmark ? Math.round(imageHeight * FULL_LOGO_ASPECT_RATIO) : imageHeight;
+  const source = withWordmark
+    ? require('../assets/images/fullLogo.png')
+    : require('../assets/images/pbialogo.png');
+
   return (
     <View style={styles.row}>
-      <View style={[styles.logoWrap, { width: size, height: size }]}>
-        <Image source={require('../assets/images/pbialogo.png')} style={styles.iconImage} resizeMode="contain" />
-      </View>
-      {withWordmark ? (
-        <View>
-          <Text style={[styles.wordmarkTop, compactWordmark ? styles.wordmarkTopCompact : null]}>
-            Insure Probuilders
-          </Text>
-          <Text style={styles.wordmarkBottom}>Customer Portal</Text>
-        </View>
-      ) : null}
+      <Image
+        source={source}
+        style={[
+          styles.image,
+          {
+            width: imageWidth,
+            height: imageHeight,
+          },
+        ]}
+        resizeMode="contain"
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
+    alignSelf: 'flex-start',
+    alignItems: 'flex-start',
   },
-  logoWrap: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  iconImage: {
-    width: '132%',
-    height: '132%',
-  },
-  wordmarkTop: {
-    ...theme.typography.title,
-    color: theme.colors.textStrong,
-  },
-  wordmarkTopCompact: {
-    fontSize: 17,
-    lineHeight: 22,
-  },
-  wordmarkBottom: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    marginTop: 2,
+  image: {
+    maxWidth: '100%',
   },
 });

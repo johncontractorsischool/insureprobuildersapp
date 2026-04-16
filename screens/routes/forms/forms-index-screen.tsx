@@ -6,12 +6,12 @@ import { Alert, Platform, Pressable, SectionList, StyleSheet, Text, View } from 
 import { ScreenContainer } from '@/components/screen-container';
 import {
   PBIA_FORMS,
-  buildPbiaFormUrl,
   createPbiaInstanceId,
   type PbiaFormRegistryItem,
   type PbiaFormSlug,
 } from '@/constants/pbia-forms';
 import { theme } from '@/constants/theme';
+import { usePbiaFormUrl } from '@/hooks/use-pbia-form-url';
 import { openInAppBrowser } from '@/utils/external-actions';
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
@@ -76,43 +76,12 @@ const INTAKE_FORM_SECTIONS: readonly IntakeFormSection[] = [
   },
   {
     key: 'certificates-admin',
-    title: 'Certificates / Admin',
+    title: 'Additional',
     data: [
       {
         slug: 'additional-insured-request',
         description: 'Request to add another party to a certificate',
         icon: 'person-add-outline',
-      },
-      {
-        slug: 'total-net-worth',
-        description: 'Provide financial information for underwriting',
-        icon: 'calculator-outline',
-      },
-    ],
-  },
-  {
-    key: 'specialty-coverage',
-    title: 'Specialty Coverage',
-    data: [
-      {
-        slug: 'inland-marine-intake',
-        description: 'Coverage for tools, equipment, and property in transit',
-        icon: 'boat-outline',
-      },
-      {
-        slug: 'pollution-liability-intake',
-        description: 'Coverage for pollution-related claims',
-        icon: 'leaf-outline',
-      },
-      {
-        slug: 'builder-risk-quote-request',
-        description: 'Coverage for buildings under construction',
-        icon: 'construct-outline',
-      },
-      {
-        slug: 'professional-liability-quote-request',
-        description: 'Coverage for professional errors and omissions',
-        icon: 'document-lock-outline',
       },
     ],
   },
@@ -125,6 +94,8 @@ type FormsIndexScreenProps = {
 export default function PbiaFormsScreen({
   showInContentBackButton = false,
 }: FormsIndexScreenProps) {
+  const { buildUrl } = usePbiaFormUrl();
+
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -141,7 +112,7 @@ export default function PbiaFormsScreen({
     }
 
     if (Platform.OS !== 'web') {
-      const formUrl = buildPbiaFormUrl(selectedForm, createPbiaInstanceId());
+      const formUrl = buildUrl(selectedForm, createPbiaInstanceId());
       const result = await openInAppBrowser(formUrl, 'The form link is unavailable right now.');
       if (!result.ok) {
         Alert.alert('Unable to open form', result.message ?? 'Please try again.');
@@ -174,7 +145,7 @@ export default function PbiaFormsScreen({
             ) : null}
 
             <View style={styles.introCard}>
-              <Text style={styles.introTitle}>Select A Form To Begin</Text>
+              <Text style={styles.introTitle}>Request A Quote</Text>
               <Text style={styles.introDescription}>
                 Choose the request type that best matches your coverage or service need.
               </Text>

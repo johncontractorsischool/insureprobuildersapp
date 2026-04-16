@@ -102,7 +102,7 @@ function mapPolicyRecord(record: PolicyLookupRecord): Policy {
     normalizeText(record.inceptionDate) ??
     normalizeText(record.createDate) ??
     new Date().toISOString();
-  const renewalDate = normalizeText(record.expirationDate) ?? effectiveDate;
+  const expirationDate = normalizeText(record.expirationDate) ?? effectiveDate;
 
   const personalName = [normalizeText(record.insuredFirstName), normalizeText(record.insuredLastName)]
     .filter((entry): entry is string => Boolean(entry))
@@ -121,19 +121,19 @@ function mapPolicyRecord(record: PolicyLookupRecord): Policy {
     carrierName,
     premiumMonthly: monthlyPremium,
     effectiveDate,
-    renewalDate,
+    expirationDate,
     insuredName,
     insuredItem: `${lineOfBusiness} • ${carrierName}`,
     coverageSummary: [
       { label: 'Line of business', value: lineOfBusiness },
       { label: 'Carrier', value: carrierName },
       { label: 'Effective date', value: formatPolicyDate(effectiveDate) },
-      { label: 'Expiration date', value: formatPolicyDate(renewalDate) },
+      { label: 'Expiration date', value: formatPolicyDate(expirationDate) },
     ],
     billing: {
       plan: toBillingPlan(record),
       monthlyPremium,
-      nextDueDate: renewalDate,
+      nextDueDate: expirationDate,
       lastPaymentDate,
       autopayEnabled: false,
     },
@@ -165,5 +165,5 @@ export async function fetchPoliciesByInsuredDatabaseId(insuredDatabaseId: string
   }
 
   const policies = records.map(mapPolicyRecord);
-  return policies.sort((left, right) => right.renewalDate.localeCompare(left.renewalDate));
+  return policies.sort((left, right) => right.expirationDate.localeCompare(left.expirationDate));
 }

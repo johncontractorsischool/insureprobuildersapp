@@ -1,10 +1,25 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Alert,
+  Image,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BrandMark } from "@/components/brand-mark";
+import { ContactUsMenu } from "@/components/contact-us-menu";
+import {
+  type PbiaFormSlug,
+  buildPbiaFormUrl,
+  createPbiaInstanceId,
+  findPbiaFormBySlug,
+} from "@/constants/pbia-forms";
 import { ScreenContainer } from "@/components/screen-container";
 import { SectionHeader } from "@/components/section-header";
 import { theme } from "@/constants/theme";
@@ -18,12 +33,14 @@ import {
 import { getPortalConfig } from "@/services/portal-config";
 import {
   buildEmailLink,
+  buildMapLink,
   buildPhoneLink,
   buildSmsLink,
   openExternalLink,
   openInAppBrowser,
 } from "@/utils/external-actions";
 import { getNameFromCustomer } from "@/utils/format";
+import { buildPbiaFormPrefillParams } from "@/utils/pbia-form-prefill";
 
 const AGENT_AVATARS: Record<string, number> = {
   ariesapcar: require("../../../assets/images/ariesapcar.jpg"),
@@ -60,11 +77,7 @@ const COMPANY_STATUS_CHIP_STYLES: Record<
     backgroundColor: "#EBF9F1",
     textColor: theme.colors.success,
   },
-  Current: {
-    backgroundColor: "#E9F2FF",
-    textColor: "#295E9C",
-  },
-  Inactive: {
+  "Needs Attention": {
     backgroundColor: theme.colors.dangerSoft,
     textColor: theme.colors.danger,
   },
@@ -73,7 +86,6 @@ const COMPANY_STATUS_CHIP_STYLES: Record<
 type AgentAction = {
   id: "contact" | "schedule" | "email" | "sms";
   label: string;
-  meta: string;
   icon:
     | "call-outline"
     | "calendar-outline"
@@ -81,6 +93,20 @@ type AgentAction = {
     | "chatbubble-ellipses-outline";
   target: string | null;
   unavailableMessage: string;
+};
+
+function buildAgencyMailingAddress(rows: { label: string; value: string }[]) {
+  const street = lookupSummaryValue(rows, ["street"]);
+  const cityStateZip = lookupSummaryValue(rows, ["city/state/zip"]);
+  const parts = [street, cityStateZip].filter((value) => value !== "Not available");
+  return parts.length > 0 ? parts.join(", ") : "Not available";
+}
+
+type DashboardRequestAction = {
+  id: "quote" | "additional-insured" | "coi";
+  label: string;
+  variant: "primary" | "secondary";
+  onPress: () => void;
 };
 
 function getInitials(value: string) {
@@ -93,7 +119,7 @@ function normalizeText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
 }
-[];
+
 function toAvatarKey(value: string) {
   return value
     .toLowerCase()
@@ -145,9 +171,15 @@ function DashboardSkeleton({
         <View style={styles.desktopGrid}>
           <View style={styles.desktopMainColumn}>
             <View style={styles.card}>
+              <SectionHeader title="Business Information" />
+              <View style={[styles.skeletonBlock, styles.skeletonLineWide]} />
+              <View style={[styles.skeletonBlock, styles.skeletonLineMedium]} />
+              <View style={[styles.skeletonBlock, styles.skeletonLineWide]} />
+            </View>
+
+            <View style={styles.card}>
               <SectionHeader
-                title="Company Information"
-                subtitle="License snapshot and compliance status"
+                title="License"
               />
               <View style={styles.desktopSnapshotGrid}>
                 {Array.from({ length: 4 }).map((_, index) => (
@@ -175,8 +207,7 @@ function DashboardSkeleton({
 
             <View style={styles.card}>
               <SectionHeader
-                title="Workspace"
-                subtitle="Forms, notes, tasks, and related details"
+                title="Business Information"
               />
               <View style={[styles.skeletonBlock, styles.skeletonLineWide]} />
               <View style={[styles.skeletonBlock, styles.skeletonLineMedium]} />
@@ -187,7 +218,6 @@ function DashboardSkeleton({
             <View style={styles.card}>
               <SectionHeader
                 title="Assigned Agent"
-                subtitle="Support contact for your account"
               />
               <View style={styles.agentTopRow}>
                 <View style={styles.skeletonAvatar} />
@@ -226,12 +256,13 @@ function DashboardSkeleton({
 
             <View style={styles.card}>
               <SectionHeader
-                title="Quick actions"
-                subtitle="Portal shortcuts"
+                title="Request Quotes"
+                subtitle="Quote and service requests"
               />
               <View
                 style={[styles.skeletonButton, styles.skeletonButtonPrimary]}
               />
+              <View style={styles.skeletonButton} />
               <View style={styles.skeletonButton} />
             </View>
           </View>
@@ -245,8 +276,13 @@ function DashboardSkeleton({
       contentContainerStyle={{ paddingBottom: dashboardBottomPadding }}
     >
       <View style={styles.header}>
+        <View style={styles.headerTopRow}>
+          {showHeaderBrandMark ? <BrandMark /> : <View />}
+          <View style={styles.headerMenuRow}>
+            <ContactUsMenu />
+          </View>
+        </View>
         <View style={styles.headerCopy}>
-          {showHeaderBrandMark ? <BrandMark /> : null}
           <View style={styles.accountCard}>
             <View style={[styles.skeletonBlock, styles.skeletonLabel]} />
             <View style={[styles.skeletonBlock, styles.skeletonHeadline]} />
@@ -277,8 +313,7 @@ function DashboardSkeleton({
       </View>
 
       <SectionHeader
-        title="Company Information"
-        subtitle="License snapshot and compliance status"
+        title="License"
       />
       <View style={styles.card}>
         {Array.from({ length: 3 }).map((_, index) => (
@@ -293,9 +328,10 @@ function DashboardSkeleton({
         </View>
       </View>
 
-      <SectionHeader title="Actions" />
+      <SectionHeader title="Request Quotes" />
       <View style={styles.card}>
         <View style={[styles.skeletonButton, styles.skeletonButtonPrimary]} />
+        <View style={styles.skeletonButton} />
         <View style={styles.skeletonButton} />
       </View>
     </ScreenContainer>
@@ -327,9 +363,12 @@ export default function DashboardScreen({
     isLoadingCompany,
     companyLookupNotice,
     cslbLink,
-    summaryRows,
+    cslbLicense,
+    licenseRows,
     statusChips,
     statusFallbackText,
+    businessName,
+    businessRows,
   } = useCompanyProfile();
   // `/insuredAgents?insuredId=` expects the insured *database* id (UUID from `databaseId`).
   const insuredLookupId = useMemo(() => {
@@ -446,7 +485,6 @@ export default function DashboardScreen({
       {
         id: "contact",
         label: "Contact Agent",
-        meta: "Phone",
         icon: "call-outline" as const,
         target: buildPhoneLink(resolvedAgent.phone),
         unavailableMessage: "Agent phone number is not configured yet.",
@@ -454,7 +492,6 @@ export default function DashboardScreen({
       {
         id: "schedule",
         label: "Schedule",
-        meta: "Calendar",
         icon: "calendar-outline" as const,
         target: resolvedScheduleUrl,
         unavailableMessage: "Scheduling link is not configured yet.",
@@ -462,15 +499,13 @@ export default function DashboardScreen({
       {
         id: "email",
         label: "Email",
-        meta: "Google",
         icon: "mail-outline" as const,
         target: buildEmailLink(resolvedAgent.email),
         unavailableMessage: "Agent email is not configured yet.",
       },
       {
         id: "sms",
-        label: "SMS",
-        meta: "Text",
+        label: "SMS/Text",
         icon: "chatbubble-ellipses-outline" as const,
         target: buildSmsLink(resolvedAgent.smsPhone),
         unavailableMessage: "Agent SMS number is not configured yet.",
@@ -521,16 +556,117 @@ export default function DashboardScreen({
     getNameFromCustomer(customer, userEmail);
   const accountHolderEmail = customer?.email ?? userEmail ?? "member@email.com";
   const accountHolderInitials = getInitials(accountHolderName);
-  const licenseNumber = lookupSummaryValue(summaryRows, [
+  const supportEmail = portalConfig.actions.supportEmail;
+  const licenseNumber = lookupSummaryValue(licenseRows, [
     "license #",
     "license",
   ]);
-  const expiration = lookupSummaryValue(summaryRows, ["expiration"]);
-  const complianceState = lookupSummaryValue(summaryRows, [
-    "current",
-    "compliance",
-    "current state",
+  const effectiveDate = lookupSummaryValue(licenseRows, [
+    "effective date",
+    "effective",
+    "issue date",
   ]);
+  const expiration = lookupSummaryValue(licenseRows, [
+    "expiration date",
+    "expiration",
+  ]);
+  const dataCurrentValue = lookupSummaryValue(licenseRows, ["data current"]);
+  const agencyMailingAddress =
+    normalizeText(portalConfig.agent.mailingAddress) ??
+    buildAgencyMailingAddress(businessRows);
+  const agencyMailingAddressLink =
+    agencyMailingAddress !== "Not available"
+      ? buildMapLink(agencyMailingAddress)
+      : null;
+
+  // Until dedicated request APIs are available, these dashboard actions route
+  // into the existing PBIA intake forms or a prefilled support email.
+  const openPbiaRequestForm = async (slug: PbiaFormSlug) => {
+    if (Platform.OS !== "web") {
+      const form = findPbiaFormBySlug(slug);
+      if (!form) {
+        Alert.alert("Form unavailable", "Please try again.");
+        return;
+      }
+
+      const formUrl = buildPbiaFormUrl(
+        form,
+        createPbiaInstanceId(),
+        buildPbiaFormPrefillParams(form.slug, {
+          customer,
+          userEmail,
+          cslbLicense,
+          fallbackLicenseNumber: portalConfig.company.licenseNumber,
+        }),
+      );
+      const result = await openInAppBrowser(
+        formUrl,
+        "The form link is unavailable right now.",
+      );
+      if (!result.ok) {
+        Alert.alert("Unable to open form", result.message ?? "Please try again.");
+      }
+      return;
+    }
+
+    router.push({
+      pathname: "/forms/[slug]",
+      params: { slug },
+    });
+  };
+
+  const handleRequestCoi = async () => {
+    const target = buildEmailLink(supportEmail, {
+      subject: "Request COI",
+      body: [
+        "Hello Support,",
+        "",
+        "I need to request a certificate of insurance.",
+        "",
+        `Account Holder: ${accountHolderName}`,
+        `Email Address: ${accountHolderEmail}`,
+        customer?.insuredId ? `Insured ID: ${customer.insuredId}` : null,
+        "",
+        "Please contact me with the next steps.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+    const result = await openExternalLink(
+      target,
+      "Support email is not configured yet.",
+    );
+    if (!result.ok) {
+      Alert.alert("Action unavailable", result.message ?? "Please try again.");
+    }
+  };
+
+  const requestActions: DashboardRequestAction[] = [
+    {
+      id: "quote",
+      label: "Request Quote",
+      variant: "primary",
+      onPress: () => {
+        router.push("/forms");
+      },
+    },
+    {
+      id: "additional-insured",
+      label: "Request Additional Insured",
+      variant: "secondary",
+      onPress: () => {
+        void openPbiaRequestForm("additional-insured-request");
+      },
+    },
+    {
+      id: "coi",
+      label: "Request COI",
+      variant: "secondary",
+      onPress: () => {
+        void handleRequestCoi();
+      },
+    },
+  ];
 
   if (showDashboardSkeleton) {
     return (
@@ -554,19 +690,19 @@ export default function DashboardScreen({
               <Text style={styles.avatarText}>{accountHolderInitials}</Text>
             </View>
             <View style={styles.desktopIdentityCopy}>
-              <Text style={styles.accountLabel}>Account holder</Text>
+              <Text style={styles.accountLabel}>Account Holder</Text>
               <Text style={styles.desktopAccountName}>{accountHolderName}</Text>
               <Text style={styles.accountEmail}>{accountHolderEmail}</Text>
             </View>
           </View>
+          <ContactUsMenu />
         </View>
 
         <View style={styles.desktopGrid}>
           <View style={styles.desktopMainColumn}>
             <View style={styles.card}>
               <SectionHeader
-                title="Company Information"
-                subtitle="License snapshot and compliance status"
+                title="License"
               />
               <View style={styles.desktopSnapshotGrid}>
                 <View style={styles.desktopSnapshotItem}>
@@ -608,13 +744,17 @@ export default function DashboardScreen({
                   )}
                 </View>
                 <View style={styles.desktopSnapshotItem}>
-                  <Text style={styles.desktopSnapshotLabel}>Compliance</Text>
+                  <Text style={styles.desktopSnapshotLabel}>Effective Date</Text>
+                  <Text style={styles.desktopSnapshotValue}>{effectiveDate}</Text>
+                </View>
+                <View style={styles.desktopSnapshotItem}>
+                  <Text style={styles.desktopSnapshotLabel}>Data Current</Text>
                   <Text style={styles.desktopSnapshotValue}>
-                    {complianceState}
+                    {dataCurrentValue}
                   </Text>
                 </View>
                 <View style={styles.desktopSnapshotItem}>
-                  <Text style={styles.desktopSnapshotLabel}>Expiration</Text>
+                  <Text style={styles.desktopSnapshotLabel}>Expiration Date</Text>
                   <Text style={styles.desktopSnapshotValue}>{expiration}</Text>
                 </View>
               </View>
@@ -634,7 +774,7 @@ export default function DashboardScreen({
                     pressed ? styles.pressed : null,
                   ]}
                 >
-                  <Text style={styles.detailLinkButtonText}>View details</Text>
+                  <Text style={styles.detailLinkButtonText}>View Details</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {
@@ -655,24 +795,11 @@ export default function DashboardScreen({
               </View>
             </View>
 
-            <View style={styles.card}>
-              <SectionHeader
-                title="Workspace"
-                subtitle="Forms, notes, tasks, and related details"
-              />
-              <Text style={styles.agentHint}>
-                Continue to use All Intake Forms and Company Details while
-                additional dashboard sections are added.
-              </Text>
-            </View>
           </View>
 
           <View style={styles.desktopSideColumn}>
             <View style={styles.card}>
-              <SectionHeader
-                title="Assigned Agent"
-                subtitle="Support contact for your account"
-              />
+              <SectionHeader title="Assigned Agent" />
               <View style={styles.agentTopRow}>
                 <View style={styles.avatar}>
                   {avatarSource ? (
@@ -701,12 +828,69 @@ export default function DashboardScreen({
                 </View>
                 <View style={styles.agentCopy}>
                   <Text style={styles.agentName}>{resolvedAgent.name}</Text>
-                  <Text style={styles.agentMeta}>
-                    Phone: {resolvedAgent.phone ?? "Not available"}
-                  </Text>
-                  <Text style={styles.agentMeta}>
-                    Email: {resolvedAgent.email ?? "Not available"}
-                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      void openAction(
+                        buildPhoneLink(resolvedAgent.phone),
+                        "Agent phone number is not configured yet.",
+                      );
+                    }}
+                    disabled={!resolvedAgent.phone}
+                    style={({ pressed }) => [
+                      pressed && resolvedAgent.phone ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.agentMeta,
+                        resolvedAgent.phone ? styles.linkText : null,
+                      ]}
+                    >
+                      Phone: {resolvedAgent.phone ?? "Not available"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      void openAction(
+                        buildEmailLink(resolvedAgent.email),
+                        "Agent email is not configured yet.",
+                      );
+                    }}
+                    disabled={!resolvedAgent.email}
+                    style={({ pressed }) => [
+                      pressed && resolvedAgent.email ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.agentMeta,
+                        resolvedAgent.email ? styles.linkText : null,
+                      ]}
+                    >
+                      Email: {resolvedAgent.email ?? "Not available"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      void openAction(
+                        agencyMailingAddressLink,
+                        "Agency mailing address is not configured yet.",
+                      );
+                    }}
+                    disabled={!agencyMailingAddressLink}
+                    style={({ pressed }) => [
+                      pressed && agencyMailingAddressLink ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.agentMeta,
+                        agencyMailingAddressLink ? styles.linkText : null,
+                      ]}
+                    >
+                      Agency Address: {agencyMailingAddress}
+                    </Text>
+                  </Pressable>
                 </View>
               </View>
               <View style={styles.desktopActionList}>
@@ -742,7 +926,6 @@ export default function DashboardScreen({
                       />
                       <View style={styles.desktopActionCopy}>
                         <Text style={styles.actionTitle}>{action.label}</Text>
-                        <Text style={styles.actionMeta}>{action.meta}</Text>
                       </View>
                     </Pressable>
                   );
@@ -758,40 +941,31 @@ export default function DashboardScreen({
 
             <View style={styles.card}>
               <SectionHeader
-                title="Quick actions"
-                subtitle="Portal shortcuts"
+                title="Request Quotes"
+                subtitle="Quote and service requests"
               />
-              <Pressable
-                onPress={() => {
-                  router.push("/forms");
-                }}
-                style={({ pressed }) => [
-                  styles.primaryAction,
-                  pressed ? styles.pressed : null,
-                ]}
-              >
-                <Text style={styles.primaryActionText}>All Intake Forms</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  void openAction(
-                    portalConfig.actions.issueCoiUrl,
-                    "Issue COI link is not configured yet.",
-                  );
-                }}
-                disabled={!portalConfig.actions.issueCoiUrl}
-                style={({ pressed }) => [
-                  styles.secondaryAction,
-                  !portalConfig.actions.issueCoiUrl
-                    ? styles.actionCardDisabled
-                    : null,
-                  pressed && portalConfig.actions.issueCoiUrl
-                    ? styles.pressed
-                    : null,
-                ]}
-              >
-                <Text style={styles.secondaryActionText}>Issue COI</Text>
-              </Pressable>
+              {requestActions.map((action) => (
+                <Pressable
+                  key={action.id}
+                  onPress={action.onPress}
+                  style={({ pressed }) => [
+                    action.variant === "primary"
+                      ? styles.primaryAction
+                      : styles.secondaryAction,
+                    pressed ? styles.pressed : null,
+                  ]}
+                >
+                  <Text
+                    style={
+                      action.variant === "primary"
+                        ? styles.primaryActionText
+                        : styles.secondaryActionText
+                    }
+                  >
+                    {action.label}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
           </View>
         </View>
@@ -804,10 +978,15 @@ export default function DashboardScreen({
       contentContainerStyle={{ paddingBottom: dashboardBottomPadding }}
     >
       <View style={styles.header}>
+        <View style={styles.headerTopRow}>
+          {showHeaderBrandMark ? <BrandMark /> : <View />}
+          <View style={styles.headerMenuRow}>
+            <ContactUsMenu />
+          </View>
+        </View>
         <View style={styles.headerCopy}>
-          {showHeaderBrandMark ? <BrandMark /> : null}
           <View style={styles.accountCard}>
-            <Text style={styles.accountLabel}>Account holder</Text>
+            <Text style={styles.accountLabel}>Account Holder</Text>
             <Text style={styles.accountName}>{accountHolderName}</Text>
             <Text style={styles.accountEmail}>{accountHolderEmail}</Text>
           </View>
@@ -842,12 +1021,69 @@ export default function DashboardScreen({
           </View>
           <View style={styles.agentCopy}>
             <Text style={styles.agentName}>{resolvedAgent.name}</Text>
-            <Text style={styles.agentMeta}>
-              Phone: {resolvedAgent.phone ?? "Not available"}
-            </Text>
-            <Text style={styles.agentMeta}>
-              Email: {resolvedAgent.email ?? "Not available"}
-            </Text>
+            <Pressable
+              onPress={() => {
+                void openAction(
+                  buildPhoneLink(resolvedAgent.phone),
+                  "Agent phone number is not configured yet.",
+                );
+              }}
+              disabled={!resolvedAgent.phone}
+              style={({ pressed }) => [
+                pressed && resolvedAgent.phone ? styles.pressed : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.agentMeta,
+                  resolvedAgent.phone ? styles.linkText : null,
+                ]}
+              >
+                Phone: {resolvedAgent.phone ?? "Not available"}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                void openAction(
+                  buildEmailLink(resolvedAgent.email),
+                  "Agent email is not configured yet.",
+                );
+              }}
+              disabled={!resolvedAgent.email}
+              style={({ pressed }) => [
+                pressed && resolvedAgent.email ? styles.pressed : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.agentMeta,
+                  resolvedAgent.email ? styles.linkText : null,
+                ]}
+              >
+                Email: {resolvedAgent.email ?? "Not available"}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                void openAction(
+                  agencyMailingAddressLink,
+                  "Agency mailing address is not configured yet.",
+                );
+              }}
+              disabled={!agencyMailingAddressLink}
+              style={({ pressed }) => [
+                pressed && agencyMailingAddressLink ? styles.pressed : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.agentMeta,
+                  agencyMailingAddressLink ? styles.linkText : null,
+                ]}
+              >
+                Agency Address: {agencyMailingAddress}
+              </Text>
+            </Pressable>
           </View>
         </View>
         {isLoadingAgent ? (
@@ -886,20 +1122,37 @@ export default function DashboardScreen({
                   color={theme.colors.primary}
                 />
                 <Text style={styles.actionTitle}>{action.label}</Text>
-                <Text style={styles.actionMeta}>{action.meta}</Text>
               </Pressable>
             );
           })}
         </View>
       </View>
 
+      <SectionHeader title="Business Information" />
+      <View style={styles.card}>
+        {businessName ? (
+          <Text style={styles.businessNameText}>{businessName}</Text>
+        ) : null}
+        {businessRows.length > 0 ? (
+          businessRows.map((row) => (
+            <View key={row.label} style={styles.infoRow}>
+              <Text style={styles.infoLabel}>{row.label}</Text>
+              <Text style={styles.infoValue}>{row.value}</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.agentHint}>
+            Business information is not available yet.
+          </Text>
+        )}
+      </View>
+
       <SectionHeader
-        title="Company Information"
-        subtitle="License snapshot and compliance status"
+        title="License"
       />
       <View style={styles.card}>
-        {summaryRows.length > 0 ? (
-          summaryRows.map((row) => (
+        {licenseRows.length > 0 ? (
+          licenseRows.map((row) => (
             <View key={row.label} style={styles.infoRow}>
               <Text style={styles.infoLabel}>{row.label}</Text>
               {row.label === "Status" ? (
@@ -937,7 +1190,7 @@ export default function DashboardScreen({
           ))
         ) : (
           <Text style={styles.agentHint}>
-            Company summary is not available yet.
+            License details are not available yet.
           </Text>
         )}
         {isLoadingCompany ? (
@@ -956,7 +1209,7 @@ export default function DashboardScreen({
               pressed ? styles.pressed : null,
             ]}
           >
-            <Text style={styles.detailLinkButtonText}>View details</Text>
+            <Text style={styles.detailLinkButtonText}>View Details</Text>
           </Pressable>
           <Pressable
             onPress={() => {
@@ -974,38 +1227,30 @@ export default function DashboardScreen({
         </View>
       </View>
 
-      <SectionHeader title="Actions" />
+      <SectionHeader title="Request Quotes" />
       <View style={styles.card}>
-        <Pressable
-          onPress={() => {
-            router.push("/forms");
-          }}
-          style={({ pressed }) => [
-            styles.primaryAction,
-            pressed ? styles.pressed : null,
-          ]}
-        >
-          <Text style={styles.primaryActionText}>All Intake Forms</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => {
-            void openAction(
-              portalConfig.actions.issueCoiUrl,
-              "Issue COI link is not configured yet.",
-            );
-          }}
-          disabled={!portalConfig.actions.issueCoiUrl}
-          style={({ pressed }) => [
-            styles.secondaryAction,
-            !portalConfig.actions.issueCoiUrl
-              ? styles.actionCardDisabled
-              : null,
-            pressed && portalConfig.actions.issueCoiUrl ? styles.pressed : null,
-          ]}
-        >
-          <Text style={styles.secondaryActionText}>Issue COI</Text>
-        </Pressable>
+        {requestActions.map((action) => (
+          <Pressable
+            key={action.id}
+            onPress={action.onPress}
+            style={({ pressed }) => [
+              action.variant === "primary"
+                ? styles.primaryAction
+                : styles.secondaryAction,
+              pressed ? styles.pressed : null,
+            ]}
+          >
+            <Text
+              style={
+                action.variant === "primary"
+                  ? styles.primaryActionText
+                  : styles.secondaryActionText
+              }
+            >
+              {action.label}
+            </Text>
+          </Pressable>
+        ))}
       </View>
     </ScreenContainer>
   );
@@ -1023,7 +1268,8 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     padding: theme.spacing.md,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     gap: theme.spacing.md,
     ...theme.shadows.surface,
   },
@@ -1120,8 +1366,18 @@ const styles = StyleSheet.create({
   header: {
     width: "100%",
   },
-  headerCopy: {
+  headerTopRow: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     gap: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
+  },
+  headerMenuRow: {
+    alignItems: "flex-end",
+  },
+  headerCopy: {
     width: "100%",
   },
   accountCard: {
@@ -1147,6 +1403,11 @@ const styles = StyleSheet.create({
   accountEmail: {
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
+  },
+  businessNameText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: "700",
   },
   card: {
     borderRadius: theme.radius.lg,
@@ -1316,6 +1577,7 @@ const styles = StyleSheet.create({
     ...theme.typography.bodySmall,
     color: theme.colors.white,
     fontWeight: "700",
+    textAlign: "center",
   },
   secondaryAction: {
     minHeight: 46,
@@ -1331,6 +1593,7 @@ const styles = StyleSheet.create({
     ...theme.typography.bodySmall,
     color: theme.colors.textStrong,
     fontWeight: "700",
+    textAlign: "center",
   },
   skeletonBlock: {
     borderRadius: theme.radius.pill,

@@ -44,7 +44,7 @@ export function CslbMomentumSignUpForm() {
 
   return (
     <View style={styles.root}>
-      <Text style={styles.title}>Create your account</Text>
+      <Text style={styles.title}>Create Your Account</Text>
 
       <AppInput
         label="First Name"
@@ -71,7 +71,7 @@ export function CslbMomentumSignUpForm() {
       />
 
       <AppInput
-        label="Email"
+        label="Email Address"
         leftIcon="mail-outline"
         value={form.email}
         onChangeText={(value) => updateField('email', value)}
@@ -148,7 +148,7 @@ export function CslbMomentumSignUpForm() {
 
       {uiState === 'error' && errorMessage ? (
         <View style={styles.errorCard}>
-          <Text style={styles.errorTitle}>Sync failed</Text>
+          <Text style={styles.errorTitle}>Sync Failed</Text>
           <Text testID="sync-error-message" style={styles.errorBody}>
             {errorMessage}
           </Text>

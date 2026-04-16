@@ -18,11 +18,7 @@ const COMPANY_STATUS_CHIP_STYLES: Record<
     backgroundColor: '#EBF9F1',
     textColor: theme.colors.success,
   },
-  Current: {
-    backgroundColor: '#E9F2FF',
-    textColor: '#295E9C',
-  },
-  Inactive: {
+  'Needs Attention': {
     backgroundColor: theme.colors.dangerSoft,
     textColor: theme.colors.danger,
   },
@@ -39,10 +35,9 @@ export default function CompanyDetailScreen({
     isLoadingCompany,
     companyLookupNotice,
     cslbLink,
-    summaryRows,
+    licenseRows,
     statusChips,
     statusFallbackText,
-    dataCurrentAsOf,
     businessName,
     businessRows,
     classifications,
@@ -75,11 +70,26 @@ export default function CompanyDetailScreen({
         </Pressable>
       ) : null}
 
-      <SectionHeader title="Company details" subtitle="Full CSLB profile and compliance records" />
+      {businessName || businessRows.length > 0 ? (
+        <>
+          <SectionHeader title="Business Information" />
+          <View style={styles.card}>
+            {businessName ? <Text style={styles.title}>{businessName}</Text> : null}
+            {businessRows.map((row) => (
+              <View key={row.label} style={styles.infoRow}>
+                <Text style={styles.infoLabel}>{row.label}</Text>
+                <Text style={styles.infoValue}>{row.value}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      ) : null}
+
+      <SectionHeader title="License" subtitle="Details from CSLB website" />
 
       <View style={styles.card}>
-        {summaryRows.length > 0 ? (
-          summaryRows.map((row) => (
+        {licenseRows.length > 0 ? (
+          licenseRows.map((row) => (
             <View key={row.label} style={styles.infoRow}>
               <Text style={styles.infoLabel}>{row.label}</Text>
               {row.label === 'Status' ? (
@@ -105,15 +115,8 @@ export default function CompanyDetailScreen({
             </View>
           ))
         ) : (
-          <Text style={styles.caption}>Company summary is not available yet.</Text>
+          <Text style={styles.caption}>License details are not available yet.</Text>
         )}
-
-        {dataCurrentAsOf ? (
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Data current</Text>
-            <Text style={styles.infoValue}>{dataCurrentAsOf}</Text>
-          </View>
-        ) : null}
 
         {isLoadingCompany ? <Text style={styles.caption}>Loading CSLB details...</Text> : null}
         {companyLookupNotice ? <Text style={styles.caption}>{companyLookupNotice}</Text> : null}
@@ -136,25 +139,10 @@ export default function CompanyDetailScreen({
         <View style={styles.card}>
           <EmptyState
             icon="information-circle-outline"
-            title="No company details available"
-            description="Detailed CSLB records have not been provided for this license yet."
+            title="No business details available"
+            description="Detailed records from the CSLB website have not been provided for this license yet."
           />
         </View>
-      ) : null}
-
-      {businessName || businessRows.length > 0 ? (
-        <>
-          <SectionHeader title="Business profile" />
-          <View style={styles.card}>
-            {businessName ? <Text style={styles.title}>{businessName}</Text> : null}
-            {businessRows.map((row) => (
-              <View key={row.label} style={styles.infoRow}>
-                <Text style={styles.infoLabel}>{row.label}</Text>
-                <Text style={styles.infoValue}>{row.value}</Text>
-              </View>
-            ))}
-          </View>
-        </>
       ) : null}
 
       {classifications.length > 0 ? (
@@ -191,7 +179,7 @@ export default function CompanyDetailScreen({
 
       {workersCompRows.length > 0 ? (
         <>
-          <SectionHeader title="Workers compensation" />
+          <SectionHeader title="Workers' Compensation" />
           <View style={styles.card}>
             {workersCompRows.map((row) => (
               <View key={row.label} style={styles.infoRow}>

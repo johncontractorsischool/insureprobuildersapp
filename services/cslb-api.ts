@@ -2,6 +2,7 @@ import { withApiKeyHeader } from '@/services/api-request-headers';
 
 const DEFAULT_CSLB_API_BASE_URL = 'http://localhost:3000';
 const CSLB_LICENSE_SITE_BASE_URL = 'https://www.cslb.ca.gov';
+const CSLB_LOG_PREFIX = '[CSLB Lookup]';
 
 export type CslbBond = {
   bondType: string | null;
@@ -17,6 +18,10 @@ export type CslbWorkersComp = {
   policyNumber: string | null;
   effectiveDate: string | null;
   expireDate: string | null;
+  status: string | null;
+  exemption: string | null;
+  exception: string | null;
+  notes: string | null;
 };
 
 export type CslbPersonnel = {
@@ -59,6 +64,14 @@ function getCslbApiBaseUrl() {
   );
 }
 
+function logCslbRequest(event: string, details: Record<string, unknown>) {
+  console.log(`${CSLB_LOG_PREFIX} ${event}`, details);
+}
+
+function logCslbWarning(event: string, details: Record<string, unknown>) {
+  console.warn(`${CSLB_LOG_PREFIX} ${event}`, details);
+}
+
 function normalizeText(value: unknown) {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
@@ -68,6 +81,42 @@ function normalizeText(value: unknown) {
 function toObject(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+async function readJsonPayload(response: Response) {
+  if (typeof response.text === 'function') {
+    const rawBody = await response.text();
+    if (!rawBody.trim()) {
+      return {
+        payload: null as unknown,
+        rawBody: null as string | null,
+      };
+    }
+
+    try {
+      return {
+        payload: JSON.parse(rawBody) as unknown,
+        rawBody,
+      };
+    } catch {
+      return {
+        payload: rawBody,
+        rawBody,
+      };
+    }
+  }
+
+  if (typeof response.json === 'function') {
+    return {
+      payload: (await response.json()) as unknown,
+      rawBody: null as string | null,
+    };
+  }
+
+  return {
+    payload: null as unknown,
+    rawBody: null as string | null,
+  };
 }
 
 function mapBusiness(value: unknown): CslbBusiness {
@@ -114,6 +163,10 @@ function mapWorkersComp(value: unknown): CslbWorkersComp | null {
     policyNumber: normalizeText(payload.policyNumber),
     effectiveDate: normalizeText(payload.effectiveDate),
     expireDate: normalizeText(payload.expireDate),
+    status: normalizeText(payload.status),
+    exemption: normalizeText(payload.exemption),
+    exception: normalizeText(payload.exception),
+    notes: normalizeText(payload.notes),
   };
 }
 
@@ -185,15 +238,47 @@ export async function fetchCslbLicenseByInsuredId(insuredId: string): Promise<Cs
   }
 
   const url = `${getCslbApiBaseUrl()}/cslb/${encodeURIComponent(trimmedId)}`;
+  logCslbRequest('Request start', {
+    insuredId: trimmedId,
+    url,
+  });
+
   const response = await fetch(url, {
     method: 'GET',
     headers: withApiKeyHeader({ Accept: 'application/json' }),
   });
 
+  const { payload, rawBody } = await readJsonPayload(response);
+
   if (!response.ok) {
+    logCslbWarning('Request failed', {
+      insuredId: trimmedId,
+      url,
+      status: response.status,
+      body: rawBody ?? payload,
+    });
     throw new Error(`CSLB lookup failed (${response.status}).`);
   }
 
-  const payload: unknown = await response.json();
-  return mapCslbPayload(payload, trimmedId);
+  try {
+    const license = mapCslbPayload(payload, trimmedId);
+    logCslbRequest('Request success', {
+      insuredId: trimmedId,
+      url,
+      status: response.status,
+      licenseNumber: license.licenseNumber,
+      sourceUrl: license.sourceUrl,
+      statusText: license.status,
+    });
+    return license;
+  } catch (error) {
+    logCslbWarning('Payload parse failed', {
+      insuredId: trimmedId,
+      url,
+      status: response.status,
+      body: rawBody ?? payload,
+      error: error instanceof Error ? error.message : 'Unknown parse failure',
+    });
+    throw error;
+  }
 }

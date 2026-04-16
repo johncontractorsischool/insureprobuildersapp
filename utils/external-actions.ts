@@ -1,9 +1,17 @@
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import { Platform } from 'react-native';
 
 type OpenExternalResult = {
   ok: boolean;
   message?: string;
+};
+
+type EmailLinkOptions = {
+  subject?: string | null;
+  body?: string | null;
+  cc?: string | null;
+  bcc?: string | null;
 };
 
 function normalizePhone(value: string | null | undefined) {
@@ -24,10 +32,49 @@ export function buildSmsLink(phone: string | null | undefined) {
   return `sms:${normalized}`;
 }
 
-export function buildEmailLink(email: string | null | undefined) {
+export function buildMapLink(address: string | null | undefined) {
+  const normalized = address?.trim();
+  if (!normalized) return null;
+
+  const encodedAddress = encodeURIComponent(normalized);
+  if (Platform.OS === 'android') {
+    return `geo:0,0?q=${encodedAddress}`;
+  }
+
+  if (Platform.OS === 'ios') {
+    return `http://maps.apple.com/?q=${encodedAddress}`;
+  }
+
+  return `https://maps.apple.com/?q=${encodedAddress}`;
+}
+
+export function buildEmailLink(
+  email: string | null | undefined,
+  options: EmailLinkOptions = {}
+) {
   const normalized = email?.trim().toLowerCase();
   if (!normalized) return null;
-  return `mailto:${normalized}`;
+
+  const params = new URLSearchParams();
+
+  if (options.subject?.trim()) {
+    params.set('subject', options.subject.trim());
+  }
+
+  if (options.body?.trim()) {
+    params.set('body', options.body.trim());
+  }
+
+  if (options.cc?.trim()) {
+    params.set('cc', options.cc.trim());
+  }
+
+  if (options.bcc?.trim()) {
+    params.set('bcc', options.bcc.trim());
+  }
+
+  const query = params.toString();
+  return query ? `mailto:${normalized}?${query}` : `mailto:${normalized}`;
 }
 
 export async function openExternalLink(

@@ -1,7 +1,9 @@
 import { PropsWithChildren, createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import { Customer } from '@/types/customer';
+import { fetchCustomersByEmail } from '@/services/customer-api';
 import { getSupabaseClient } from '@/services/supabase';
+import { CustomerLookupRecord } from '@/types/customer';
 
 const CUSTOMER_TABLE = process.env.EXPO_PUBLIC_SUPABASE_CUSTOMER_TABLE?.trim() || 'portal_customers';
 
@@ -28,6 +30,7 @@ type PortalCustomerRow = {
   commercial_name: string | null;
   first_name: string | null;
   last_name: string | null;
+  source_payload?: Partial<CustomerLookupRecord> | null;
   email: string | null;
   phone: string | null;
   cell_phone: string | null;
@@ -48,16 +51,62 @@ function buildFullName(firstName: string | null, lastName: string | null, commer
   return commercialName?.trim() || null;
 }
 
+function mapCustomerLookupToProfile(customer: CustomerLookupRecord): Customer {
+  return {
+    databaseId: customer.databaseId,
+    commercialName: customer.commercialName,
+    fullName: buildFullName(customer.firstName, customer.lastName, customer.commercialName),
+    firstName: customer.firstName,
+    lastName: customer.lastName,
+    type: customer.type,
+    addressLine1: customer.addressLine1,
+    addressLine2: customer.addressLine2,
+    city: customer.city,
+    stateNameOrAbbreviation: customer.stateNameOrAbbreviation,
+    zipCode: customer.zipCode,
+    email: customer.eMail,
+    phone: customer.phone,
+    cellPhone: customer.cellPhone,
+    smsPhone: customer.smsPhone,
+    description: customer.description,
+    website: customer.website,
+    fein: customer.fein,
+    customerId: customer.customerId,
+    insuredId: customer.insuredId,
+    active: customer.active,
+  };
+}
+
+function pickBestCustomerLookup(customers: CustomerLookupRecord[]) {
+  return customers.find((customer) => customer.active && hasText(customer.insuredId)) ??
+    customers.find((customer) => customer.active) ??
+    customers.find((customer) => hasText(customer.insuredId)) ??
+    customers[0] ??
+    null;
+}
+
 function mapPortalCustomer(row: PortalCustomerRow, loginEmail: string): Customer {
+  const sourcePayload = row.source_payload;
+
   return {
     databaseId: row.database_id,
     commercialName: row.commercial_name,
     fullName: buildFullName(row.first_name, row.last_name, row.commercial_name),
     firstName: row.first_name,
     lastName: row.last_name,
+    type: typeof sourcePayload?.type === 'number' ? sourcePayload.type : null,
+    addressLine1: sourcePayload?.addressLine1 ?? null,
+    addressLine2: sourcePayload?.addressLine2 ?? null,
+    city: sourcePayload?.city ?? null,
+    stateNameOrAbbreviation: sourcePayload?.stateNameOrAbbreviation ?? null,
+    zipCode: sourcePayload?.zipCode ?? null,
     email: row.email ?? loginEmail,
     phone: row.phone,
     cellPhone: row.cell_phone,
+    smsPhone: sourcePayload?.smsPhone ?? null,
+    description: sourcePayload?.description ?? null,
+    website: sourcePayload?.website ?? null,
+    fein: sourcePayload?.fein ?? null,
     customerId: row.customer_id,
     insuredId: row.insured_id,
     active: row.is_active ?? true,
@@ -86,22 +135,35 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     const hydrateCustomerForEmail = async (email: string) => {
       try {
-        const supabase = getSupabaseClient();
         const normalizedEmail = normalizeEmail(email);
 
+        try {
+          const customers = await fetchCustomersByEmail(normalizedEmail);
+          if (!mounted) return;
+
+          const nextCustomer = pickBestCustomerLookup(customers);
+          if (nextCustomer) {
+            setCustomerState(mapCustomerLookupToProfile(nextCustomer));
+            return;
+          }
+        } catch {
+          // Fall back to cached customer data when live lookup is unavailable.
+        }
+
+        const supabase = getSupabaseClient();
         const { data, error } = await supabase
           .from(CUSTOMER_TABLE)
           .select(
-            'database_id, commercial_name, first_name, last_name, email, phone, cell_phone, customer_id, insured_id, is_active'
+            'database_id, commercial_name, first_name, last_name, source_payload, email, phone, cell_phone, customer_id, insured_id, is_active'
           )
           .eq('login_email', normalizedEmail)
           .order('is_active', { ascending: false })
           .order('updated_at', { ascending: false });
 
         if (!mounted || error || !data || data.length === 0) return;
-        const nextCustomer = pickBestPortalCustomer(data as PortalCustomerRow[]);
-        if (!nextCustomer) return;
-        setCustomerState(mapPortalCustomer(nextCustomer, normalizedEmail));
+        const cachedCustomer = pickBestPortalCustomer(data as PortalCustomerRow[]);
+        if (!cachedCustomer) return;
+        setCustomerState(mapPortalCustomer(cachedCustomer, normalizedEmail));
       } catch {
         // Leave customer as-is when hydration fails.
       }
