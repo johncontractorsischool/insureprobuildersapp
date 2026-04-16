@@ -571,7 +571,9 @@ export default function DashboardScreen({
     "expiration",
   ]);
   const dataCurrentValue = lookupSummaryValue(licenseRows, ["data current"]);
-  const agencyMailingAddress = buildAgencyMailingAddress(businessRows);
+  const agencyMailingAddress =
+    normalizeText(portalConfig.agent.mailingAddress) ??
+    buildAgencyMailingAddress(businessRows);
   const agencyMailingAddressLink =
     agencyMailingAddress !== "Not available"
       ? buildMapLink(agencyMailingAddress)

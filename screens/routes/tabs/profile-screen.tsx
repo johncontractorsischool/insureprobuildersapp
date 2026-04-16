@@ -138,7 +138,7 @@ function buildProfileFieldChanges(
     firstName: 'First Name',
     lastName: 'Last Name',
     email: 'Email Address',
-    phone: 'Phone Number',
+    phone: 'Business Number',
     cellPhone: 'Mobile Phone',
   };
 
@@ -465,7 +465,7 @@ export default function ProfileScreen({
             placeholder="you@company.com"
           />
           <AppInput
-            label="Phone Number"
+            label="Business Number"
             value={formState.phone}
             onChangeText={(value) => handleFormChange('phone', value)}
             keyboardType="phone-pad"
@@ -491,7 +491,7 @@ export default function ProfileScreen({
           <DetailRow label="First Name" value={customer?.firstName} />
           <DetailRow label="Last Name" value={customer?.lastName} />
           <DetailRow label="Email Address" value={customer?.email ?? userEmail} valueType="email" />
-          <DetailRow label="Phone Number" value={customer?.phone} valueType="phone" />
+          <DetailRow label="Business Number" value={customer?.phone} valueType="phone" />
           <DetailRow label="Mobile Phone" value={customer?.cellPhone} valueType="phone" />
         </View>
       )}

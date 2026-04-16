@@ -37,15 +37,24 @@ for select
 to authenticated
 using (lower(login_email) = lower(auth.jwt() ->> 'email'));
 
-create policy "Pre-auth insert sync"
+create policy "Authenticated insert own login_email"
 on public.portal_customers
 for insert
-to anon, authenticated
-with check (true);
+to authenticated
+with check (
+  auth.jwt() ->> 'email' is not null
+  and lower(login_email) = lower(auth.jwt() ->> 'email')
+);
 
-create policy "Pre-auth update sync"
+create policy "Authenticated update own login_email"
 on public.portal_customers
 for update
-to anon, authenticated
-using (true)
-with check (true);
+to authenticated
+using (
+  auth.jwt() ->> 'email' is not null
+  and lower(login_email) = lower(auth.jwt() ->> 'email')
+)
+with check (
+  auth.jwt() ->> 'email' is not null
+  and lower(login_email) = lower(auth.jwt() ->> 'email')
+);

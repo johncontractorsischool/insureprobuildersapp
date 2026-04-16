@@ -36,6 +36,7 @@ jest.mock('@/services/portal-config', () => ({
       phone: null,
       email: null,
       smsPhone: null,
+      mailingAddress: '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742',
       scheduleUrl: 'https://calendar.google.com/agent',
     },
     company: {
@@ -131,7 +132,9 @@ describe('DashboardScreen', () => {
     expect(queryByText('Support contact for your account')).toBeNull();
     expect(getByText('Phone: 5551112222')).toBeTruthy();
     expect(getByText('Email: patricia@example.com')).toBeTruthy();
-    expect(getByText('Agency Address: 123 Main St, Los Angeles, CA 90001')).toBeTruthy();
+    expect(
+      getByText('Agency Address: 2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742')
+    ).toBeTruthy();
     expect(getByText('SMS/Text')).toBeTruthy();
 
     fireEvent.press(getByText('Phone: 5551112222'));
@@ -146,9 +149,11 @@ describe('DashboardScreen', () => {
       'Agent email is not configured yet.'
     );
 
-    fireEvent.press(getByText('Agency Address: 123 Main St, Los Angeles, CA 90001'));
+    fireEvent.press(
+      getByText('Agency Address: 2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742')
+    );
     expect(mockOpenExternalLink).toHaveBeenCalledWith(
-      'http://maps.apple.com/?q=123%20Main%20St%2C%20Los%20Angeles%2C%20CA%2090001',
+      'http://maps.apple.com/?q=2865%20Sunrise%20Blvd%20Ste%20110%2C%20Rancho%20Cordova%2C%20CA%2095742',
       'Agency mailing address is not configured yet.'
     );
   });

@@ -15,6 +15,8 @@ describe('getPortalConfig', () => {
     process.env.EXPO_PUBLIC_AGENT_PHONE = ' 5551112222 ';
     process.env.EXPO_PUBLIC_AGENT_EMAIL = ' agent@example.com ';
     process.env.EXPO_PUBLIC_AGENT_SMS_PHONE = ' 5559990000 ';
+    process.env.EXPO_PUBLIC_AGENCY_MAILING_ADDRESS =
+      ' 2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742 ';
     process.env.EXPO_PUBLIC_AGENT_SCHEDULE_URL = 'https://calendar.example.com/agent';
     process.env.EXPO_PUBLIC_COMPANY_LICENSE_NUMBER = ' LIC-123 ';
     process.env.EXPO_PUBLIC_COMPANY_CSLB_URL = 'https://cslb.ca.gov/license';
@@ -28,6 +30,7 @@ describe('getPortalConfig', () => {
         phone: '5551112222',
         email: 'agent@example.com',
         smsPhone: '5559990000',
+        mailingAddress: '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742',
         scheduleUrl: 'https://calendar.example.com/agent',
       },
       company: {
@@ -47,5 +50,14 @@ describe('getPortalConfig', () => {
 
     const { getPortalConfig } = require('@/services/portal-config');
     expect(getPortalConfig().agent.name).toBe('Assigned agent');
+  });
+
+  it('falls back to the default agency mailing address when not configured', () => {
+    delete process.env.EXPO_PUBLIC_AGENCY_MAILING_ADDRESS;
+
+    const { getPortalConfig } = require('@/services/portal-config');
+    expect(getPortalConfig().agent.mailingAddress).toBe(
+      '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742'
+    );
   });
 });
