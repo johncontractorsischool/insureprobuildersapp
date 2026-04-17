@@ -13,9 +13,7 @@ import { useAuth } from '@/context/auth-context';
 const LANDING_VISUAL_IMAGE = require('../../assets/images/imageWorker.png');
 const OFFERINGS = [
   'Commercial General Liability (CGL)',
-  'Contract Bonds',
-  'License & Permit Bonds',
-  'Performance Bonds',
+  'Construction Bonds',
   "Workers' Compensation",
   'Inland Marine Insurance',
   'Excess / Umbrella Coverage',
@@ -30,6 +28,8 @@ export default function LandingScreen() {
   const insets = useSafeAreaInsets();
   const isDesktop = width >= 1080;
   const showMobileVisual = !isDesktop;
+  const isCompactMobileHeight = showMobileVisual && height <= 760;
+  const isVeryCompactMobileHeight = showMobileVisual && height <= 700;
   const isResponsiveWeb = Platform.OS === 'web' && showMobileVisual;
   const maxContentWidth = showMobileVisual ? width : 1280;
   const responsiveWebViewportStyle = isResponsiveWeb ? { height } : null;
@@ -58,6 +58,7 @@ export default function LandingScreen() {
         styles.heroCard,
         isDesktop ? styles.heroCardDesktop : null,
         showMobileVisual ? styles.mobileHeroCard : null,
+        isCompactMobileHeight ? styles.mobileHeroCardCompact : null,
       ]}>
       <View style={styles.heroRule} />
       <Text style={[styles.eyebrow, showMobileVisual ? styles.mobileEyebrow : null]}>
@@ -68,17 +69,29 @@ export default function LandingScreen() {
           styles.title,
           isDesktop ? styles.titleDesktop : null,
           showMobileVisual ? styles.mobileTitle : null,
+          isCompactMobileHeight ? styles.mobileTitleCompact : null,
+          isVeryCompactMobileHeight ? styles.mobileTitleVeryCompact : null,
         ]}>
         Stay insured. Stay compliant. Get to work.
       </Text>
-      <Text style={[styles.subtitle, showMobileVisual ? styles.mobileSubtitle : null]}>
+      <Text
+        style={[
+          styles.subtitle,
+          showMobileVisual ? styles.mobileSubtitle : null,
+          isCompactMobileHeight ? styles.mobileSubtitleCompact : null,
+        ]}>
         Access your policies, download certificates, and manage your coverage anytime.
       </Text>
     </View>
   );
 
   const ctaBlock = (
-    <View style={[styles.cta, showMobileVisual ? styles.mobileCta : null]}>
+    <View
+      style={[
+        styles.cta,
+        showMobileVisual ? styles.mobileCta : null,
+        isCompactMobileHeight ? styles.mobileCtaCompact : null,
+      ]}>
       <AppButton
         label="Access Your Account"
         onPress={() => (isAuthenticated ? router.replace('/(tabs)') : router.push('/(auth)/login'))}
@@ -90,21 +103,53 @@ export default function LandingScreen() {
           onPress={() => router.push({ pathname: '/(auth)/login', params: { mode: 'signup' } })}
         />
       ) : null}
-      <Text style={[styles.caption, showMobileVisual ? styles.mobileCaption : null]}>
+      <Text
+        style={[
+          styles.caption,
+          showMobileVisual ? styles.mobileCaption : null,
+          isCompactMobileHeight ? styles.mobileCaptionCompact : null,
+        ]}>
         One-time verification helps protect your account.
       </Text>
     </View>
   );
 
   const offeringsBlock = (
-    <View style={[styles.offeringsCard, showMobileVisual ? styles.mobileOfferingsCard : null]}>
-      <Text style={[styles.offeringsTitle, showMobileVisual ? styles.mobileOfferingsTitle : null]}>
+    <View
+      style={[
+        styles.offeringsCard,
+        showMobileVisual ? styles.mobileOfferingsCard : null,
+        isCompactMobileHeight ? styles.mobileOfferingsCardCompact : null,
+      ]}>
+      <Text
+        style={[
+          styles.offeringsTitle,
+          showMobileVisual ? styles.mobileOfferingsTitle : null,
+          isCompactMobileHeight ? styles.mobileOfferingsTitleCompact : null,
+        ]}>
         What We Offer
       </Text>
-      <View style={[styles.offeringsGrid, showMobileVisual ? styles.mobileOfferingsGrid : null]}>
+      <View
+        style={[
+          styles.offeringsGrid,
+          showMobileVisual ? styles.mobileOfferingsGrid : null,
+          isCompactMobileHeight ? styles.mobileOfferingsGridCompact : null,
+        ]}>
         {OFFERINGS.map((item) => (
-          <View key={item} style={[styles.offeringPill, showMobileVisual ? styles.mobileOfferingPill : null]}>
-            <Text style={[styles.offeringText, showMobileVisual ? styles.mobileOfferingText : null]}>
+          <View
+            key={item}
+            style={[
+              styles.offeringPill,
+              showMobileVisual ? styles.mobileOfferingPill : null,
+              isCompactMobileHeight ? styles.mobileOfferingPillCompact : null,
+              isVeryCompactMobileHeight ? styles.mobileOfferingPillVeryCompact : null,
+            ]}>
+            <Text
+              style={[
+                styles.offeringText,
+                showMobileVisual ? styles.mobileOfferingText : null,
+                isCompactMobileHeight ? styles.mobileOfferingTextCompact : null,
+              ]}>
               {item}
             </Text>
           </View>
@@ -138,18 +183,23 @@ export default function LandingScreen() {
                 <Image source={LANDING_VISUAL_IMAGE} style={styles.mobileVisualImage} resizeMode="cover" />
                 <View style={styles.visualImageScrim} />
 
-                <View
+                  <View
                   style={[
                     styles.mobileOverlayContent,
+                    isCompactMobileHeight ? styles.mobileOverlayContentCompact : null,
                     {
                       paddingTop: insets.top + theme.spacing.sm,
-                      paddingBottom: insets.bottom + theme.spacing.md,
+                      paddingBottom: insets.bottom + (isCompactMobileHeight ? theme.spacing.sm : theme.spacing.md),
                     },
                   ]}>
-                  <View style={styles.mobileHeader}>
+                  <View style={[styles.mobileHeader, isCompactMobileHeight ? styles.mobileHeaderCompact : null]}>
                     <BrandMark />
                   </View>
-                  <View style={styles.mobileBottomContent}>
+                  <View
+                    style={[
+                      styles.mobileBottomContent,
+                      isCompactMobileHeight ? styles.mobileBottomContentCompact : null,
+                    ]}>
                     {heroCard}
                     {offeringsBlock}
                     {ctaBlock}
@@ -292,6 +342,10 @@ const styles = StyleSheet.create({
     padding: theme.spacing.md,
     gap: theme.spacing.xs,
   },
+  mobileHeroCardCompact: {
+    padding: theme.spacing.sm,
+    gap: 6,
+  },
   heroRule: {
     width: 84,
     height: 5,
@@ -317,6 +371,14 @@ const styles = StyleSheet.create({
     fontSize: 28,
     lineHeight: 33,
   },
+  mobileTitleCompact: {
+    fontSize: 24,
+    lineHeight: 28,
+  },
+  mobileTitleVeryCompact: {
+    fontSize: 22,
+    lineHeight: 26,
+  },
   subtitle: {
     ...theme.typography.body,
     fontWeight: '600',
@@ -327,6 +389,10 @@ const styles = StyleSheet.create({
   },
   mobileSubtitle: {
     color: theme.colors.textStrong,
+  },
+  mobileSubtitleCompact: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   offeringsCard: {
     marginTop: theme.spacing.md,
@@ -344,6 +410,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.16)',
     padding: theme.spacing.sm,
   },
+  mobileOfferingsCardCompact: {
+    padding: theme.spacing.xs,
+    gap: 6,
+  },
   offeringsTitle: {
     ...theme.typography.label,
     color: theme.colors.primaryDeep,
@@ -351,6 +421,10 @@ const styles = StyleSheet.create({
   },
   mobileOfferingsTitle: {
     color: '#FFFFFF',
+  },
+  mobileOfferingsTitleCompact: {
+    fontSize: 12,
+    lineHeight: 14,
   },
   offeringsGrid: {
     flexDirection: 'row',
@@ -360,6 +434,9 @@ const styles = StyleSheet.create({
   },
   mobileOfferingsGrid: {
     gap: 6,
+  },
+  mobileOfferingsGridCompact: {
+    gap: 4,
   },
   offeringPill: {
     width: '48%',
@@ -379,6 +456,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.xs,
     paddingVertical: 6,
   },
+  mobileOfferingPillCompact: {
+    minHeight: 40,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  mobileOfferingPillVeryCompact: {
+    minHeight: 36,
+  },
   offeringText: {
     ...theme.typography.bodySmall,
     color: theme.colors.primaryDeep,
@@ -390,6 +475,10 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 11,
     lineHeight: 14,
+  },
+  mobileOfferingTextCompact: {
+    fontSize: 10,
+    lineHeight: 12,
   },
   cta: {
     marginTop: 'auto',
@@ -406,6 +495,10 @@ const styles = StyleSheet.create({
     padding: theme.spacing.sm,
     gap: theme.spacing.xs,
   },
+  mobileCtaCompact: {
+    padding: theme.spacing.xs,
+    gap: 6,
+  },
   caption: {
     ...theme.typography.bodySmall,
     color: theme.colors.textSubtle,
@@ -414,9 +507,13 @@ const styles = StyleSheet.create({
   mobileCaption: {
     color: 'rgba(255, 255, 255, 0.92)',
   },
+  mobileCaptionCompact: {
+    fontSize: 11,
+    lineHeight: 14,
+  },
   mobileVisualCanvas: {
     flex: 1,
-    minHeight: 640,
+    minHeight: 0,
     borderRadius: theme.radius.xl,
     borderWidth: 1,
     borderColor: '#C9D9D2',
@@ -441,12 +538,22 @@ const styles = StyleSheet.create({
     padding: theme.spacing.md,
     gap: theme.spacing.md,
   },
+  mobileOverlayContentCompact: {
+    padding: theme.spacing.sm,
+    gap: theme.spacing.sm,
+  },
   mobileHeader: {
     marginTop: theme.spacing.xs,
+  },
+  mobileHeaderCompact: {
+    marginTop: 0,
   },
   mobileBottomContent: {
     marginTop: 'auto',
     gap: theme.spacing.sm,
+  },
+  mobileBottomContentCompact: {
+    gap: theme.spacing.xs,
   },
   visualColumn: {
     flex: 1,
