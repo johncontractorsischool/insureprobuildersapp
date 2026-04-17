@@ -60,8 +60,36 @@ describe('LoginScreen', () => {
     await waitFor(() => expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com'));
 
     expect(mockSendEmailSignInCode).toHaveBeenCalledWith('jane@example.com');
-    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('jane@example.com'));
+    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('jane@example.com', 'LIC-123456'));
     await waitFor(() => expect(setCustomer).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith('/(auth)/verify'));
+  });
+
+  it('requires a license number before sending OTP when multiple customers share the same email', async () => {
+    const setPendingEmail = jest.fn();
+    const setCustomer = jest.fn();
+    mockUseAuth.mockReturnValue({ setPendingEmail, setCustomer });
+    mockFetchCustomersByEmail.mockResolvedValue([
+      buildCustomerLookupRecord({ insuredId: 'LIC-111111', commercialName: 'First Builder Co' }),
+      buildCustomerLookupRecord({ insuredId: 'LIC-222222', commercialName: 'Second Builder Co' }),
+    ]);
+    mockSendEmailSignInCode.mockResolvedValue(undefined);
+
+    const { getByPlaceholderText, getByText, findByText } = render(<LoginScreen />);
+
+    fireEvent.changeText(getByPlaceholderText('You@Company.com'), 'jane@example.com');
+    fireEvent.press(getByText('Continue'));
+
+    expect(
+      await findByText('Multiple accounts were found for that email. Enter your license number to continue.')
+    ).toBeTruthy();
+    expect(mockSendEmailSignInCode).not.toHaveBeenCalled();
+
+    fireEvent.changeText(getByPlaceholderText('CSLB License Number'), 'lic-222222');
+    fireEvent.press(getByText('Continue'));
+
+    await waitFor(() => expect(mockSendEmailSignInCode).toHaveBeenCalledWith('jane@example.com'));
+    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('jane@example.com', 'LIC-222222'));
     await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith('/(auth)/verify'));
   });
 
@@ -90,6 +118,7 @@ describe('LoginScreen', () => {
     fireEvent.changeText(getByPlaceholderText('You@Company.com'), 'jane@example.com');
     fireEvent.press(getByText('Continue'));
 
+    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('jane@example.com', 'LIC-123456'));
     await waitFor(() =>
       expect(mockRouter.push).toHaveBeenCalledWith({
         pathname: '/(auth)/verify',

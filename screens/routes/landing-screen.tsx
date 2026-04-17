@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useEffect } from 'react';
-import { Image, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
 import { BrandMark } from '@/components/brand-mark';
@@ -10,14 +11,28 @@ import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 
 const LANDING_VISUAL_IMAGE = require('../../assets/images/imageWorker.png');
+const OFFERINGS = [
+  'Commercial General Liability (CGL)',
+  'Contract Bonds',
+  'License & Permit Bonds',
+  'Performance Bonds',
+  "Workers' Compensation",
+  'Inland Marine Insurance',
+  'Excess / Umbrella Coverage',
+  'Commercial Auto Insurance',
+  'Professional Liability (Errors & Omissions)',
+  'Pollution Liability',
+] as const;
 
 export default function LandingScreen() {
   const { isAuthenticated, isLoadingAuth } = useAuth();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const isDesktop = width >= 1080;
-  const isTablet = width >= 760;
   const showMobileVisual = !isDesktop;
-  const maxContentWidth = isDesktop ? 1280 : isTablet ? 860 : undefined;
+  const isResponsiveWeb = Platform.OS === 'web' && showMobileVisual;
+  const maxContentWidth = showMobileVisual ? width : 1280;
+  const responsiveWebViewportStyle = isResponsiveWeb ? { height } : null;
 
   useEffect(() => {
     if (!isLoadingAuth && isAuthenticated) {
@@ -27,7 +42,11 @@ export default function LandingScreen() {
 
   if (isLoadingAuth) {
     return (
-      <ScreenContainer scroll={false} maxContentWidth={maxContentWidth}>
+      <ScreenContainer
+        scroll={false}
+        maxContentWidth={maxContentWidth}
+        includeTopInset={!showMobileVisual}
+        style={showMobileVisual ? styles.mobileScreenContainer : undefined}>
         <LoadingState title="Restoring session" description="Checking your secure login state..." />
       </ScreenContainer>
     );
@@ -77,31 +96,62 @@ export default function LandingScreen() {
     </View>
   );
 
+  const offeringsBlock = (
+    <View style={[styles.offeringsCard, showMobileVisual ? styles.mobileOfferingsCard : null]}>
+      <Text style={[styles.offeringsTitle, showMobileVisual ? styles.mobileOfferingsTitle : null]}>
+        What We Offer
+      </Text>
+      <View style={[styles.offeringsGrid, showMobileVisual ? styles.mobileOfferingsGrid : null]}>
+        {OFFERINGS.map((item) => (
+          <View key={item} style={[styles.offeringPill, showMobileVisual ? styles.mobileOfferingPill : null]}>
+            <Text style={[styles.offeringText, showMobileVisual ? styles.mobileOfferingText : null]}>
+              {item}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+
   return (
-    <ScreenContainer scroll={false} maxContentWidth={maxContentWidth}>
-      <View style={styles.page}>
-        <View style={[styles.desktopFrame, isDesktop ? styles.desktopFrameActive : null]}>
+    <ScreenContainer
+      scroll={false}
+      maxContentWidth={maxContentWidth}
+      includeTopInset={!showMobileVisual}
+      style={showMobileVisual ? styles.mobileScreenContainer : undefined}>
+      <View style={[styles.page, isResponsiveWeb ? styles.responsiveWebPage : null, responsiveWebViewportStyle]}>
+        <View
+          style={[
+            styles.desktopFrame,
+            isDesktop ? styles.desktopFrameActive : null,
+            isResponsiveWeb ? styles.responsiveWebFrame : null,
+            responsiveWebViewportStyle,
+          ]}>
           <View style={[styles.leftColumn, isDesktop ? styles.leftColumnDesktop : null]}>
             {showMobileVisual ? (
-              <View style={styles.mobileVisualCanvas}>
+              <View
+                style={[
+                  styles.mobileVisualCanvas,
+                  isResponsiveWeb ? styles.responsiveWebVisualCanvas : null,
+                  responsiveWebViewportStyle,
+                ]}>
                 <Image source={LANDING_VISUAL_IMAGE} style={styles.mobileVisualImage} resizeMode="cover" />
                 <View style={styles.visualImageScrim} />
-                <View style={styles.visualGlowTop} />
-                <View style={styles.visualGlowBottom} />
-                <View style={styles.visualGridHorizontal} />
-                <View style={styles.visualGridVertical} />
 
-                <View style={[styles.visualShape, styles.mobileVisualShapeA]} />
-                <View style={[styles.visualShape, styles.mobileVisualShapeB]} />
-
-                <View style={styles.outlineFrame} />
-
-                <View style={styles.mobileOverlayContent}>
+                <View
+                  style={[
+                    styles.mobileOverlayContent,
+                    {
+                      paddingTop: insets.top + theme.spacing.sm,
+                      paddingBottom: insets.bottom + theme.spacing.md,
+                    },
+                  ]}>
                   <View style={styles.mobileHeader}>
                     <BrandMark />
                   </View>
                   <View style={styles.mobileBottomContent}>
                     {heroCard}
+                    {offeringsBlock}
                     {ctaBlock}
                   </View>
                 </View>
@@ -119,6 +169,7 @@ export default function LandingScreen() {
                   {heroCard}
                 </View>
 
+                {offeringsBlock}
                 {ctaBlock}
               </>
             )}
@@ -153,11 +204,22 @@ export default function LandingScreen() {
 }
 
 const styles = StyleSheet.create({
+  mobileScreenContainer: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    gap: 0,
+  },
   page: {
     flex: 1,
   },
+  responsiveWebPage: {
+    overflow: 'hidden',
+  },
   desktopFrame: {
     flex: 1,
+  },
+  responsiveWebFrame: {
+    overflow: 'hidden',
   },
   // On large screens this frame creates a balanced two-column hero instead of a narrow centered stack.
   desktopFrameActive: {
@@ -227,8 +289,8 @@ const styles = StyleSheet.create({
   mobileHeroCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.88)',
     borderColor: 'rgba(211, 223, 217, 0.95)',
-    padding: theme.spacing.lg,
-    gap: theme.spacing.sm,
+    padding: theme.spacing.md,
+    gap: theme.spacing.xs,
   },
   heroRule: {
     width: 84,
@@ -252,8 +314,8 @@ const styles = StyleSheet.create({
     lineHeight: 46,
   },
   mobileTitle: {
-    fontSize: 32,
-    lineHeight: 38,
+    fontSize: 28,
+    lineHeight: 33,
   },
   subtitle: {
     ...theme.typography.body,
@@ -265,6 +327,69 @@ const styles = StyleSheet.create({
   },
   mobileSubtitle: {
     color: theme.colors.textStrong,
+  },
+  offeringsCard: {
+    marginTop: theme.spacing.md,
+    borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.md,
+    gap: theme.spacing.sm,
+    ...theme.shadows.surface,
+  },
+  mobileOfferingsCard: {
+    marginTop: 0,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    padding: theme.spacing.sm,
+  },
+  offeringsTitle: {
+    ...theme.typography.label,
+    color: theme.colors.primaryDeep,
+    textAlign: 'center',
+  },
+  mobileOfferingsTitle: {
+    color: '#FFFFFF',
+  },
+  offeringsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: theme.spacing.xs,
+  },
+  mobileOfferingsGrid: {
+    gap: 6,
+  },
+  offeringPill: {
+    width: '48%',
+    minHeight: 48,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: '#C6D8CF',
+    backgroundColor: '#EAF3EE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 8,
+  },
+  mobileOfferingPill: {
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'rgba(7, 26, 18, 0.26)',
+    paddingHorizontal: theme.spacing.xs,
+    paddingVertical: 6,
+  },
+  offeringText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.primaryDeep,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  mobileOfferingText: {
+    ...theme.typography.bodySmall,
+    color: '#FFFFFF',
+    fontSize: 11,
+    lineHeight: 14,
   },
   cta: {
     marginTop: 'auto',
@@ -278,7 +403,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.24)',
     backgroundColor: 'rgba(7, 26, 18, 0.20)',
-    padding: theme.spacing.md,
+    padding: theme.spacing.sm,
+    gap: theme.spacing.xs,
   },
   caption: {
     ...theme.typography.bodySmall,
@@ -297,6 +423,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#EAF3EE',
     overflow: 'hidden',
   },
+  responsiveWebVisualCanvas: {
+    minHeight: 0,
+    height: '100%',
+    borderRadius: 0,
+    borderWidth: 0,
+  },
   mobileVisualImage: {
     position: 'absolute',
     top: -180,
@@ -306,15 +438,15 @@ const styles = StyleSheet.create({
   },
   mobileOverlayContent: {
     ...StyleSheet.absoluteFillObject,
-    padding: theme.spacing.lg,
-    gap: theme.spacing.lg,
+    padding: theme.spacing.md,
+    gap: theme.spacing.md,
   },
   mobileHeader: {
     marginTop: theme.spacing.xs,
   },
   mobileBottomContent: {
     marginTop: 'auto',
-    gap: theme.spacing.md,
+    gap: theme.spacing.sm,
   },
   visualColumn: {
     flex: 1,

@@ -1,7 +1,7 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
-import { buildCustomer, buildPolicy, buildPolicyFileEntry } from '@/tests/factories';
+import { buildCustomer, buildPolicy } from '@/tests/factories';
 
 const mockRouter = {
   push: jest.fn(),
@@ -12,7 +12,6 @@ const mockRouter = {
 const mockUseLocalSearchParams = jest.fn(() => ({}));
 const mockUseAuth = jest.fn();
 const mockUsePolicies = jest.fn();
-const mockFetchPolicyFilesListByInsuredId = jest.fn();
 const mockFetchPolicyCoveragesByPolicyId = jest.fn();
 const mockUseIsDesktopWebLayout = jest.fn(() => false);
 
@@ -26,9 +25,6 @@ jest.mock('@/context/auth-context', () => ({
 }));
 jest.mock('@/context/policies-context', () => ({
   usePolicies: () => mockUsePolicies(),
-}));
-jest.mock('@/services/policy-files-api', () => ({
-  fetchPolicyFilesListByInsuredId: (...args: unknown[]) => mockFetchPolicyFilesListByInsuredId(...args),
 }));
 jest.mock('@/services/policy-coverages-api', () => ({
   fetchPolicyCoveragesByPolicyId: (...args: unknown[]) => mockFetchPolicyCoveragesByPolicyId(...args),
@@ -61,7 +57,7 @@ describe('PolicyDetailScreen', () => {
     });
   });
 
-  it('renders coverage details and billing updates without the insured item section', async () => {
+  it('renders coverage details and a browse policy files action without inline documents or billing', async () => {
     mockFetchPolicyCoveragesByPolicyId.mockResolvedValue([
       {
         id: 'coverage-1',
@@ -72,29 +68,27 @@ describe('PolicyDetailScreen', () => {
         ],
       },
     ]);
-    mockFetchPolicyFilesListByInsuredId.mockResolvedValue({
-      status: 1,
-      message: null,
-      data: [
-        buildPolicyFileEntry({
-          databaseId: 'file-1',
-          policyId: 'policy-1',
-          policyNumber: 'WC-1001',
-          name: 'April Invoice',
-          fileOrFolder: 'File',
-        }),
-      ],
-    });
 
     const { findByText, getByText, queryByText } = render(<PolicyDetailScreen />);
 
     await waitFor(() => expect(mockFetchPolicyCoveragesByPolicyId).toHaveBeenCalledWith('policy-1'));
-    await waitFor(() => expect(mockFetchPolicyFilesListByInsuredId).toHaveBeenCalledWith('insured-db-1'));
 
     expect(await findByText('Each Accident Limit')).toBeTruthy();
-    expect(getByText('Outstanding Balance')).toBeTruthy();
-    expect(getByText('Invoices')).toBeTruthy();
-    expect(getByText('1 Available in Policy Files')).toBeTruthy();
+    expect(getByText('Browse Policy Files')).toBeTruthy();
+    expect(queryByText('101000937.URBANEDGE CONSTRUCTION INC....pdf')).toBeNull();
     expect(queryByText('Insured item / person')).toBeNull();
+    expect(queryByText('Billing Summary')).toBeNull();
+    expect(queryByText('Outstanding Balance')).toBeNull();
+    expect(queryByText('Invoices')).toBeNull();
+
+    fireEvent.press(getByText('Browse Policy Files'));
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: '/policy-files',
+      params: {
+        insuredId: 'insured-db-1',
+        policyId: 'policy-1',
+        policyNumber: 'WC-1001',
+      },
+    });
   });
 });

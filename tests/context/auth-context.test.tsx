@@ -1,4 +1,5 @@
 import React, { PropsWithChildren } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 
 import { AuthProvider, useAuth } from '@/context/auth-context';
@@ -69,6 +70,10 @@ function wrapper({ children }: PropsWithChildren) {
 }
 
 describe('AuthProvider', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
   it('hydrates the current session from the live customer lookup when it is available', async () => {
     const supabaseMock = createSupabaseMock({
       sessionEmail: 'jane@example.com',
@@ -83,6 +88,7 @@ describe('AuthProvider', () => {
     expect(result.current.isAuthenticated).toBe(true);
     expect(result.current.userEmail).toBe('jane@example.com');
     expect(result.current.pendingEmail).toBe('jane@example.com');
+    expect(result.current.pendingInsuredId).toBe('LIC-123456');
     expect(result.current.customer).toEqual(
       expect.objectContaining({
         databaseId: 'insured-db-1',
@@ -97,6 +103,49 @@ describe('AuthProvider', () => {
       })
     );
     expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com');
+  });
+
+  it('hydrates the preferred customer when a persisted insuredId exists for the signed-in email', async () => {
+    await AsyncStorage.setItem(
+      'portal_selected_customer',
+      JSON.stringify({
+        email: 'jane@example.com',
+        insuredId: 'LIC-222222',
+      })
+    );
+
+    const supabaseMock = createSupabaseMock({
+      sessionEmail: 'jane@example.com',
+    });
+    mockGetSupabaseClient.mockReturnValue(supabaseMock);
+    mockFetchCustomersByEmail.mockResolvedValue([
+      buildCustomerLookupRecord({
+        insuredId: 'LIC-111111',
+        commercialName: 'First Builder Co',
+        firstName: 'Jane',
+        lastName: 'Builder',
+      }),
+      buildCustomerLookupRecord({
+        databaseId: 'insured-db-2',
+        insuredId: 'LIC-222222',
+        commercialName: 'Second Builder Co',
+        firstName: 'John',
+        lastName: 'Builder',
+      }),
+    ]);
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
+
+    expect(result.current.pendingInsuredId).toBe('LIC-222222');
+    expect(result.current.customer).toEqual(
+      expect.objectContaining({
+        databaseId: 'insured-db-2',
+        insuredId: 'LIC-222222',
+        fullName: 'John Builder',
+      })
+    );
   });
 
   it('falls back to cached portal_customers rows when the live customer lookup fails', async () => {
@@ -167,6 +216,7 @@ describe('AuthProvider', () => {
 
     expect(result.current.userEmail).toBe('jane@example.com');
     expect(result.current.pendingEmail).toBe('jane@example.com');
+    expect(result.current.pendingInsuredId).toBe('LIC-123456');
     expect(result.current.customer).toEqual(
       expect.objectContaining({
         email: 'jane@example.com',
@@ -190,6 +240,7 @@ describe('AuthProvider', () => {
     expect(result.current.isAuthenticated).toBe(false);
     expect(result.current.userEmail).toBeNull();
     expect(result.current.pendingEmail).toBe('');
+    expect(result.current.pendingInsuredId).toBe('');
     expect(result.current.customer).toBeNull();
   });
 });

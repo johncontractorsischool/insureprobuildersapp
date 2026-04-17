@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
 
 import { buildCustomer } from '@/tests/factories';
 
@@ -14,6 +15,8 @@ const mockUseCompanyProfile = jest.fn();
 const mockFetchInsuredAgentsByInsuredDatabaseId = jest.fn();
 const mockOpenExternalLink = jest.fn();
 const mockOpenInAppBrowser = jest.fn();
+const mockSendSmtpEmail = jest.fn();
+const mockAlert = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -28,6 +31,9 @@ jest.mock('@/hooks/use-company-profile', () => ({
 jest.mock('@/services/agent-api', () => ({
   fetchInsuredAgentsByInsuredDatabaseId: (...args: unknown[]) =>
     mockFetchInsuredAgentsByInsuredDatabaseId(...args),
+}));
+jest.mock('@/services/smtp-email-api', () => ({
+  sendSmtpEmail: (...args: unknown[]) => mockSendSmtpEmail(...args),
 }));
 jest.mock('@/services/portal-config', () => ({
   getPortalConfig: () => ({
@@ -76,6 +82,11 @@ describe('DashboardScreen', () => {
       customer: buildCustomer({
         databaseId: 'insured-db-1',
         commercialName: 'Builder Co',
+        firstName: 'Jane',
+        lastName: 'Builder',
+        email: 'jane@example.com',
+        phone: '5551112222',
+        insuredId: 'LIC-123456',
       }),
       userEmail: 'jane@example.com',
     });
@@ -109,11 +120,13 @@ describe('DashboardScreen', () => {
     ]);
     mockOpenExternalLink.mockResolvedValue({ ok: true });
     mockOpenInAppBrowser.mockResolvedValue({ ok: true });
+    mockSendSmtpEmail.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
+    mockAlert.mockClear();
   });
 
   it('shows linked agent contact details with the agency mailing address', async () => {
@@ -155,6 +168,70 @@ describe('DashboardScreen', () => {
     expect(mockOpenExternalLink).toHaveBeenCalledWith(
       'http://maps.apple.com/?q=2865%20Sunrise%20Blvd%20Ste%20110%2C%20Rancho%20Cordova%2C%20CA%2095742',
       'Agency mailing address is not configured yet.'
+    );
+  });
+
+  it('sends a COI request email to support and confirms success in the app', async () => {
+    const { findByText, getByText } = render(<DashboardScreen />);
+
+    await waitFor(() =>
+      expect(mockFetchInsuredAgentsByInsuredDatabaseId).toHaveBeenCalledWith('insured-db-1')
+    );
+
+    await act(async () => {
+      jest.runAllTimers();
+      await Promise.resolve();
+    });
+
+    expect(await findByText('Request COI')).toBeTruthy();
+
+    fireEvent.press(getByText('Request COI'));
+
+    expect(mockAlert).toHaveBeenCalledWith(
+      'Request COI',
+      expect.stringContaining('Are you sure you want to request a certificate of insurance?'),
+      expect.any(Array)
+    );
+    expect(mockAlert.mock.calls[0][1]).toContain('An email will be sent to the agency');
+    expect(mockAlert.mock.calls[0][1]).toContain('support@insureprobuilders.com');
+    expect(mockAlert.mock.calls[0][1]).toContain('Business Name: Builder Co');
+    expect(mockAlert.mock.calls[0][1]).toContain('Contact Person: Jane Builder');
+    expect(mockAlert.mock.calls[0][1]).toContain('Email: jane@example.com');
+
+    const confirmationButtons = mockAlert.mock.calls[0][2] as
+      | Array<{ text?: string; onPress?: () => void }>
+      | undefined;
+    const sendRequestButton = confirmationButtons?.find((button) => button.text === 'Send Request');
+
+    await act(async () => {
+      sendRequestButton?.onPress?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(mockSendSmtpEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subject: 'Certificate of Insurance Request',
+          to: ['support@insureprobuilders.com'],
+        })
+      )
+    );
+
+    expect(mockSendSmtpEmail.mock.calls[0][0].html).toContain('This client is requesting a certificate of insurance');
+    expect(mockSendSmtpEmail.mock.calls[0][0].html).toContain('Builder Co');
+    expect(mockSendSmtpEmail.mock.calls[0][0].html).toContain('Jane Builder');
+    expect(mockSendSmtpEmail.mock.calls[0][0].html).toContain('jane@example.com');
+    expect(mockSendSmtpEmail.mock.calls[0][0].html).toContain('5551112222');
+    expect(mockSendSmtpEmail.mock.calls[0][0].html).toContain('insured-db-1');
+    expect(mockSendSmtpEmail.mock.calls[0][0].html).toContain('LIC-123456');
+    expect(mockAlert).toHaveBeenNthCalledWith(
+      2,
+      'Request sent',
+      'Your certificate of insurance request has been sent successfully.'
+    );
+    expect(mockOpenExternalLink).not.toHaveBeenCalledWith(
+      expect.stringContaining('mailto:'),
+      expect.any(String)
     );
   });
 });

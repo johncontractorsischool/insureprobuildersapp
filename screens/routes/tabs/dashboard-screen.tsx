@@ -31,6 +31,7 @@ import {
   InsuredAgentRecord,
 } from "@/services/agent-api";
 import { getPortalConfig } from "@/services/portal-config";
+import { sendSmtpEmail } from "@/services/smtp-email-api";
 import {
   buildEmailLink,
   buildMapLink,
@@ -41,6 +42,8 @@ import {
 } from "@/utils/external-actions";
 import { getNameFromCustomer } from "@/utils/format";
 import { buildPbiaFormPrefillParams } from "@/utils/pbia-form-prefill";
+
+const COI_REQUEST_EMAIL = "support@insureprobuilders.com";
 
 const AGENT_AVATARS: Record<string, number> = {
   ariesapcar: require("../../../assets/images/ariesapcar.jpg"),
@@ -118,6 +121,43 @@ function getInitials(value: string) {
 function normalizeText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function buildCoiRequestEmailHtml({
+  businessName,
+  contactPerson,
+  email,
+  phone,
+  databaseId,
+  insuredId,
+}: {
+  businessName: string;
+  contactPerson: string;
+  email: string;
+  phone: string;
+  databaseId: string;
+  insuredId: string;
+}) {
+  return `
+    <div style="font-family:Arial,sans-serif;color:#1f2933;line-height:1.5;">
+      <p>This client is requesting a certificate of insurance from the Insure Pro Builders app.</p>
+      <p><strong>Business Name:</strong> ${escapeHtml(businessName)}</p>
+      <p><strong>Contact Person:</strong> ${escapeHtml(contactPerson)}</p>
+      <p><strong>Email:</strong> ${escapeHtml(email)}</p>
+      <p><strong>Phone:</strong> ${escapeHtml(phone)}</p>
+      <p><strong>Database ID:</strong> ${escapeHtml(databaseId)}</p>
+      <p><strong>Insured ID:</strong> ${escapeHtml(insuredId)}</p>
+    </div>
+  `.trim();
 }
 
 function toAvatarKey(value: string) {
@@ -256,7 +296,7 @@ function DashboardSkeleton({
 
             <View style={styles.card}>
               <SectionHeader
-                title="Request Quotes"
+                title="Request"
                 subtitle="Quote and service requests"
               />
               <View
@@ -328,7 +368,7 @@ function DashboardSkeleton({
         </View>
       </View>
 
-      <SectionHeader title="Request Quotes" />
+      <SectionHeader title="Request" />
       <View style={styles.card}>
         <View style={[styles.skeletonButton, styles.skeletonButtonPrimary]} />
         <View style={styles.skeletonButton} />
@@ -556,7 +596,15 @@ export default function DashboardScreen({
     getNameFromCustomer(customer, userEmail);
   const accountHolderEmail = customer?.email ?? userEmail ?? "member@email.com";
   const accountHolderInitials = getInitials(accountHolderName);
-  const supportEmail = portalConfig.actions.supportEmail;
+  const coiContactPersonName =
+    normalizeText(getNameFromCustomer(customer, userEmail)) ?? "Not provided";
+  const coiBusinessName = normalizeText(customer?.commercialName) ?? "Not provided";
+  const coiContactEmail =
+    normalizeText(customer?.email) ?? normalizeText(userEmail) ?? "Not provided";
+  const contactPhone =
+    normalizeText(customer?.phone) ?? normalizeText(customer?.cellPhone) ?? "Not provided";
+  const customerDatabaseId = normalizeText(customer?.databaseId) ?? "Not provided";
+  const customerInsuredId = normalizeText(customer?.insuredId) ?? "Not provided";
   const licenseNumber = lookupSummaryValue(licenseRows, [
     "license #",
     "license",
@@ -615,30 +663,58 @@ export default function DashboardScreen({
     });
   };
 
-  const handleRequestCoi = async () => {
-    const target = buildEmailLink(supportEmail, {
-      subject: "Request COI",
-      body: [
-        "Hello Support,",
-        "",
-        "I need to request a certificate of insurance.",
-        "",
-        `Account Holder: ${accountHolderName}`,
-        `Email Address: ${accountHolderEmail}`,
-        customer?.insuredId ? `Insured ID: ${customer.insuredId}` : null,
-        "",
-        "Please contact me with the next steps.",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    });
-    const result = await openExternalLink(
-      target,
-      "Support email is not configured yet.",
-    );
-    if (!result.ok) {
-      Alert.alert("Action unavailable", result.message ?? "Please try again.");
+  const sendCoiRequest = async () => {
+    try {
+      await sendSmtpEmail({
+        subject: "Certificate of Insurance Request",
+        html: buildCoiRequestEmailHtml({
+          businessName: coiBusinessName,
+          contactPerson: coiContactPersonName,
+          email: coiContactEmail,
+          phone: contactPhone,
+          databaseId: customerDatabaseId,
+          insuredId: customerInsuredId,
+        }),
+        to: [COI_REQUEST_EMAIL],
+      });
+
+      Alert.alert(
+        "Request sent",
+        "Your certificate of insurance request has been sent successfully."
+      );
+    } catch (caughtError) {
+      Alert.alert(
+        "Unable to send request",
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : "Please try again."
+      );
     }
+  };
+
+  const handleRequestCoi = () => {
+    Alert.alert(
+      "Request COI",
+      [
+        "Are you sure you want to request a certificate of insurance?",
+        "",
+        `An email will be sent to the agency at ${COI_REQUEST_EMAIL} with the details below:`,
+        "",
+        `Business Name: ${coiBusinessName}`,
+        `Contact Person: ${coiContactPersonName}`,
+        `Email: ${coiContactEmail}`,
+        `Phone: ${contactPhone}`,
+      ].join("\n"),
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Send Request",
+          onPress: () => {
+            void sendCoiRequest();
+          },
+        },
+      ]
+    );
   };
 
   const requestActions: DashboardRequestAction[] = [
@@ -690,9 +766,12 @@ export default function DashboardScreen({
               <Text style={styles.avatarText}>{accountHolderInitials}</Text>
             </View>
             <View style={styles.desktopIdentityCopy}>
-              <Text style={styles.accountLabel}>Account Holder</Text>
+              <Text style={styles.accountLabel}>Business Name</Text>
               <Text style={styles.desktopAccountName}>{accountHolderName}</Text>
-              <Text style={styles.accountEmail}>{accountHolderEmail}</Text>
+              <Text style={styles.accountEmail}>
+                <Text style={styles.accountEmailLabel}>Email: </Text>
+                {accountHolderEmail}
+              </Text>
             </View>
           </View>
           <ContactUsMenu />
@@ -941,7 +1020,7 @@ export default function DashboardScreen({
 
             <View style={styles.card}>
               <SectionHeader
-                title="Request Quotes"
+                title="Request"
                 subtitle="Quote and service requests"
               />
               {requestActions.map((action) => (
@@ -986,9 +1065,12 @@ export default function DashboardScreen({
         </View>
         <View style={styles.headerCopy}>
           <View style={styles.accountCard}>
-            <Text style={styles.accountLabel}>Account Holder</Text>
+            <Text style={styles.accountLabel}>Business Name</Text>
             <Text style={styles.accountName}>{accountHolderName}</Text>
-            <Text style={styles.accountEmail}>{accountHolderEmail}</Text>
+            <Text style={styles.accountEmail}>
+              <Text style={styles.accountEmailLabel}>Email: </Text>
+              {accountHolderEmail}
+            </Text>
           </View>
         </View>
       </View>
@@ -1227,7 +1309,7 @@ export default function DashboardScreen({
         </View>
       </View>
 
-      <SectionHeader title="Request Quotes" />
+      <SectionHeader title="Request" />
       <View style={styles.card}>
         {requestActions.map((action) => (
           <Pressable
@@ -1403,6 +1485,10 @@ const styles = StyleSheet.create({
   accountEmail: {
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
+  },
+  accountEmailLabel: {
+    color: theme.colors.textMuted,
+    fontWeight: "700",
   },
   businessNameText: {
     ...theme.typography.bodySmall,

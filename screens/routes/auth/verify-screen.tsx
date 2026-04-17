@@ -18,7 +18,7 @@ import {
   toUserFacingError,
   verifyEmailSignInCode,
 } from '@/services/auth-flow';
-import { CustomerLookupRecord } from '@/types/customer';
+import { pickPreferredCustomerLookup } from '@/utils/customer-selection';
 
 function maskEmail(email: string) {
   const [name, domain] = email.split('@');
@@ -31,7 +31,7 @@ function maskEmail(email: string) {
 
 export default function VerifyScreen() {
   const { hint } = useLocalSearchParams<{ hint?: string }>();
-  const { pendingEmail, completeSignIn } = useAuth();
+  const { pendingEmail, pendingInsuredId, completeSignIn } = useAuth();
   const { width } = useWindowDimensions();
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -60,10 +60,6 @@ export default function VerifyScreen() {
 
   const maskedEmail = useMemo(() => maskEmail(pendingEmail), [pendingEmail]);
 
-  const pickPrimaryCustomer = (customers: CustomerLookupRecord[]) => {
-    return customers.find((entry) => entry.active) ?? customers[0];
-  };
-
   const handleContinue = async () => {
     if (code.replace(/\D/g, '').length !== 6 || !pendingEmail) return;
     if (submitting) return;
@@ -78,13 +74,15 @@ export default function VerifyScreen() {
       try {
         const customers = await fetchCustomersByEmail(verifiedEmail);
         if (customers.length > 0) {
-          const primaryCustomer = pickPrimaryCustomer(customers);
-          customerProfile = toCustomerProfile(primaryCustomer);
-          try {
-            await persistCustomersForEmail(verifiedEmail, customers);
-          } catch (persistError) {
-            // Keep the fresh customer profile in memory even if the Supabase cache write is blocked.
-            console.warn('Customer cache sync failed after successful OTP verification.', persistError);
+          const primaryCustomer = pickPreferredCustomerLookup(customers, pendingInsuredId);
+          if (primaryCustomer) {
+            customerProfile = toCustomerProfile(primaryCustomer);
+            try {
+              await persistCustomersForEmail(verifiedEmail, customers);
+            } catch (persistError) {
+              // Keep the fresh customer profile in memory even if the Supabase cache write is blocked.
+              console.warn('Customer cache sync failed after successful OTP verification.', persistError);
+            }
           }
         }
       } catch (syncError) {
@@ -92,7 +90,7 @@ export default function VerifyScreen() {
         console.warn('Customer sync failed after successful OTP verification.', syncError);
       }
 
-      completeSignIn(verifiedEmail, customerProfile);
+      completeSignIn(verifiedEmail, customerProfile, customerProfile?.insuredId ?? pendingInsuredId);
       router.replace('/(tabs)');
     } catch (caughtError) {
       setError(toUserFacingError(caughtError, 'Unable to verify code. Please try again.'));

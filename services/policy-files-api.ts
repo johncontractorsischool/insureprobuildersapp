@@ -149,6 +149,26 @@ export async function fetchPolicyFilesListByInsuredId(insuredId: string): Promis
   return requestPolicyFiles(`/getPolicyFilesListByInsuredId?insuredId=${encodeURIComponent(trimmedInsuredId)}`);
 }
 
+type PolicyFilesRootParams = {
+  insuredId: string;
+  policyId: string;
+};
+
+export async function fetchPolicyFilesListByPolicy(
+  params: PolicyFilesRootParams
+): Promise<PolicyFilesListResponse> {
+  const insuredId = params.insuredId.trim();
+  const policyId = params.policyId.trim();
+
+  if (!insuredId || !policyId) {
+    throw new Error('Missing insured id or policy id for policy files lookup.');
+  }
+
+  return requestPolicyFiles(
+    `/getPolicyFilesList?insuredId=${encodeURIComponent(insuredId)}&policyId=${encodeURIComponent(policyId)}`
+  );
+}
+
 type PolicyFilesFolderParams = {
   insuredId: string;
   policyId: string;

@@ -1,13 +1,12 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, Switch, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
 import { AppInput } from '@/components/app-input';
 import { ContactUsMenu } from '@/components/contact-us-menu';
 import { ScreenContainer } from '@/components/screen-container';
-import { SectionHeader } from '@/components/section-header';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { persistCustomersForEmail, toCustomerProfile } from '@/services/auth-flow';
@@ -224,33 +223,6 @@ function DetailRow({
   );
 }
 
-function PreferenceRow({
-  label,
-  detail,
-  value,
-  onChange,
-}: {
-  label: string;
-  detail: string;
-  value: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <View style={styles.preferenceRow}>
-      <View style={styles.preferenceCopy}>
-        <Text style={styles.preferenceLabel}>{label}</Text>
-        <Text style={styles.preferenceDetail}>{detail}</Text>
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onChange}
-        trackColor={{ false: '#D5DDD9', true: '#8ED5B1' }}
-        thumbColor={value ? theme.colors.primary : '#FFFFFF'}
-      />
-    </View>
-  );
-}
-
 type ProfileScreenProps = {
   includeTabBarPadding?: boolean;
   isDesktopLayout?: boolean;
@@ -263,9 +235,6 @@ export default function ProfileScreen({
   const insets = useSafeAreaInsets();
   const { customer, userEmail, setCustomer, signOut } = useAuth();
   const supportEmail = getPortalConfig().actions.supportEmail;
-  const [emailAlerts, setEmailAlerts] = useState(true);
-  const [smsAlerts, setSmsAlerts] = useState(false);
-  const [paperless, setPaperless] = useState(true);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState('');
@@ -498,33 +467,6 @@ export default function ProfileScreen({
     </View>
   );
 
-  const preferencesBlock = (
-    <View style={styles.preferencesBlock}>
-      <SectionHeader title="Contact preferences" subtitle="How we communicate policy updates" />
-
-      <View style={[styles.preferencesCard, isDesktopLayout ? styles.desktopCard : null]}>
-        <PreferenceRow
-          label="Email notifications"
-          detail="Billing reminders and policy notices"
-          value={emailAlerts}
-          onChange={setEmailAlerts}
-        />
-        <PreferenceRow
-          label="SMS alerts"
-          detail="Urgent renewal and payment alerts"
-          value={smsAlerts}
-          onChange={setSmsAlerts}
-        />
-        <PreferenceRow
-          label="Paperless documents"
-          detail="Receive policy documents digitally"
-          value={paperless}
-          onChange={setPaperless}
-        />
-      </View>
-    </View>
-  );
-
   const supportBlock = (
     <View style={styles.sideStack}>
       <View style={[styles.contactCard, isDesktopLayout ? styles.desktopCard : null]}>
@@ -560,18 +502,14 @@ export default function ProfileScreen({
         <ContactUsMenu />
       </View>
       {isDesktopLayout ? (
-        // Desktop keeps profile preferences in a readable primary column with account actions in a calm right rail.
+        // Desktop keeps profile details in a readable primary column with account actions in a calm right rail.
         <View style={styles.desktopLayout}>
-          <View style={styles.desktopMainColumn}>
-            {accountCard}
-            {preferencesBlock}
-          </View>
+          <View style={styles.desktopMainColumn}>{accountCard}</View>
           <View style={styles.desktopSideColumn}>{supportBlock}</View>
         </View>
       ) : (
         <>
           {accountCard}
-          {preferencesBlock}
           {supportBlock}
         </>
       )}
@@ -692,16 +630,6 @@ const styles = StyleSheet.create({
     gap: theme.spacing.xs,
     marginTop: theme.spacing.xs,
   },
-  preferencesBlock: {
-    gap: theme.spacing.sm,
-  },
-  preferencesCard: {
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    ...theme.shadows.surface,
-  },
   contactCard: {
     borderRadius: theme.radius.lg,
     borderWidth: 1,
@@ -718,29 +646,6 @@ const styles = StyleSheet.create({
   contactDetail: {
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
-  },
-  preferenceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-    gap: theme.spacing.md,
-  },
-  preferenceCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  preferenceLabel: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.textStrong,
-    fontWeight: '700',
-  },
-  preferenceDetail: {
-    ...theme.typography.caption,
-    color: theme.colors.textSubtle,
   },
   footer: {
     gap: theme.spacing.sm,

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '@/components/app-button';
@@ -12,10 +12,8 @@ import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { usePolicies } from '@/context/policies-context';
 import { fetchPolicyCoveragesByPolicyId, type PolicyCoverageGroup } from '@/services/policy-coverages-api';
-import { fetchPolicyFilesListByInsuredId } from '@/services/policy-files-api';
 import type { PolicyStatus } from '@/types/policy';
-import { PolicyFileEntry } from '@/types/policy-file';
-import { formatCurrency, formatDate, formatIsoDateTime } from '@/utils/format';
+import { formatCurrency, formatDate } from '@/utils/format';
 
 const DESKTOP_POLICY_MAX_CONTENT_WIDTH = 1260;
 
@@ -40,11 +38,6 @@ const POLICY_STATUS_BADGE_STYLES: Record<
   },
 };
 
-function toPolicyFilesError(error: unknown) {
-  if (error instanceof Error && error.message) return error.message;
-  return 'Unable to load policy files right now.';
-}
-
 function toPolicyCoveragesError(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   return 'Unable to load policy coverage details right now.';
@@ -64,86 +57,13 @@ export default function PolicyDetailScreen({
   const { policies, isLoadingPolicies, policiesError, refreshPolicies } = usePolicies();
   const policy = policies.find((item) => item.id === id);
   const policyFilesInsuredId = customer?.databaseId?.trim() || customer?.insuredId?.trim() || '';
-  const [policyFiles, setPolicyFiles] = useState<PolicyFileEntry[]>([]);
-  const [isLoadingPolicyFiles, setIsLoadingPolicyFiles] = useState(false);
-  const [policyFilesError, setPolicyFilesError] = useState<string | null>(null);
   const [coverageGroups, setCoverageGroups] = useState<PolicyCoverageGroup[]>([]);
   const [isLoadingPolicyCoverages, setIsLoadingPolicyCoverages] = useState(false);
   const [policyCoveragesError, setPolicyCoveragesError] = useState<string | null>(null);
 
-  const filteredPolicyFiles = useMemo(() => {
-    if (!policy) return [];
-    const selectedPolicyId = policy.id.trim();
-    const selectedPolicyNumber = policy.policyNumber.trim();
-
-    const filtered = policyFiles.filter((entry) => {
-      const entryPolicyId = entry.policyId?.trim() || '';
-      const entryPolicyNumber = entry.policyNumber?.trim() || '';
-
-      if (selectedPolicyId && entryPolicyId) {
-        return entryPolicyId === selectedPolicyId;
-      }
-
-      if (selectedPolicyNumber && entryPolicyNumber) {
-        return entryPolicyNumber === selectedPolicyNumber;
-      }
-
-      return false;
-    });
-
-    return filtered.sort((left, right) => {
-      const leftDate = left.changeDate ?? left.createDate ?? '';
-      const rightDate = right.changeDate ?? right.createDate ?? '';
-      return rightDate.localeCompare(leftDate);
-    });
-  }, [policy, policyFiles]);
-
-  const invoiceFiles = useMemo(
-    () =>
-      filteredPolicyFiles.filter(
-        (entry) => entry.fileOrFolder === 'File' && /invoice|statement|bill/i.test(entry.name)
-      ),
-    [filteredPolicyFiles]
-  );
-
   useEffect(() => {
     if (!isAuthenticated) router.replace('/(auth)/login');
   }, [isAuthenticated]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const hydratePolicyFiles = async () => {
-      if (!policy || !policyFilesInsuredId) {
-        setPolicyFiles([]);
-        setPolicyFilesError(null);
-        setIsLoadingPolicyFiles(false);
-        return;
-      }
-
-      setIsLoadingPolicyFiles(true);
-      setPolicyFilesError(null);
-      try {
-        const response = await fetchPolicyFilesListByInsuredId(policyFilesInsuredId);
-        if (!isMounted) return;
-        setPolicyFiles(response.data);
-      } catch (error) {
-        if (!isMounted) return;
-        setPolicyFiles([]);
-        setPolicyFilesError(toPolicyFilesError(error));
-      } finally {
-        if (isMounted) {
-          setIsLoadingPolicyFiles(false);
-        }
-      }
-    };
-
-    void hydratePolicyFiles();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [policy, policyFilesInsuredId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -226,21 +146,6 @@ export default function PolicyDetailScreen({
     router.replace('/(tabs)/policies');
   };
   const statusBadge = POLICY_STATUS_BADGE_STYLES[policy.status];
-  const lastPaymentDateLabel =
-    policy.billing.lastPaymentDate === 'Not billed yet'
-      ? policy.billing.lastPaymentDate
-      : formatDate(policy.billing.lastPaymentDate);
-  const outstandingBalanceLabel =
-    policy.billing.lastPaymentDate === 'Not billed yet' ? 'Not billed yet' : 'Not available';
-  const invoiceSummaryLabel = policyFilesError
-    ? 'Unavailable'
-    : isLoadingPolicyFiles
-      ? 'Loading...'
-      : invoiceFiles.length === 1
-        ? '1 Available in Policy Files'
-        : invoiceFiles.length > 1
-          ? `${invoiceFiles.length} Available in Policy Files`
-          : 'No Invoices Available';
   const desktopSummaryFacts = [
     {
       label: 'Carrier',
@@ -305,61 +210,6 @@ export default function PolicyDetailScreen({
       ) : null}
     </>
   );
-  const billingRows = [
-    {
-      label: 'Plan',
-      value: policy.billing.plan,
-    },
-    {
-      label: 'Monthly Premium',
-      value: formatCurrency(policy.billing.monthlyPremium),
-    },
-    {
-      label: 'Outstanding Balance',
-      value: outstandingBalanceLabel,
-    },
-    {
-      label: 'Invoices',
-      value: invoiceSummaryLabel,
-    },
-    {
-      label: 'Next Due Date',
-      value: formatDate(policy.billing.nextDueDate),
-    },
-    {
-      label: 'Last Payment',
-      value: lastPaymentDateLabel,
-    },
-  ] as const;
-
-  const policyFilesContent = isLoadingPolicyFiles ? (
-    <View style={styles.filesSkeleton}>
-      <View style={[styles.filesSkeletonLine, styles.filesSkeletonWide]} />
-      <View style={[styles.filesSkeletonLine, styles.filesSkeletonMid]} />
-      <View style={[styles.filesSkeletonLine, styles.filesSkeletonNarrow]} />
-    </View>
-  ) : filteredPolicyFiles.length > 0 ? (
-    filteredPolicyFiles.slice(0, 8).map((entry) => (
-      <View key={entry.databaseId} style={styles.fileRow}>
-        <View style={styles.fileIconWrap}>
-          <Ionicons
-            name={entry.fileOrFolder === 'Folder' ? 'folder-open-outline' : 'document-text-outline'}
-            size={16}
-            color={theme.colors.primary}
-          />
-        </View>
-        <View style={styles.fileCopy}>
-          <Text style={styles.fileName}>{entry.name}</Text>
-          <Text style={styles.fileMeta}>
-            {entry.fileOrFolder} • {entry.creatorName ?? 'Unknown'}
-          </Text>
-          <Text style={styles.fileMeta}>Created: {formatIsoDateTime(entry.createDate)}</Text>
-        </View>
-      </View>
-    ))
-  ) : (
-    <Text style={styles.lineLabel}>No policy documents are available for this policy yet.</Text>
-  );
 
   const policyFilesAction = (
     <AppButton
@@ -423,37 +273,12 @@ export default function PolicyDetailScreen({
             </View>
 
             <View style={styles.card}>
-              <SectionHeader title="Documents" subtitle="Policy File Folders and Files" />
-              {policyFilesContent}
-              {policyFilesError ? <Text style={styles.fileError}>{policyFilesError}</Text> : null}
+              <SectionHeader title="Documents" subtitle="Open the policy files screen for available documents." />
               <View style={styles.desktopInlineAction}>{policyFilesAction}</View>
             </View>
           </View>
 
           <View style={styles.desktopSideColumn}>
-            <View style={styles.card}>
-              <SectionHeader title="Billing Summary" subtitle="Billing Status and Invoice Availability" />
-              {billingRows.map((row) => (
-                <View key={row.label} style={styles.lineItem}>
-                  <Text style={styles.lineLabel}>{row.label}</Text>
-                  <Text style={styles.lineValue}>{row.value}</Text>
-                </View>
-              ))}
-              <View
-                style={[
-                  styles.desktopAutopayBadge,
-                  policy.billing.autopayEnabled ? styles.desktopAutopayBadgeOn : null,
-                ]}>
-                <Text
-                  style={[
-                    styles.desktopAutopayLabel,
-                    policy.billing.autopayEnabled ? styles.desktopAutopayLabelOn : null,
-                  ]}>
-                  {policy.billing.autopayEnabled ? 'Autopay enabled' : 'Autopay not enabled'}
-                </Text>
-              </View>
-            </View>
-
             <View style={styles.card}>
               <SectionHeader title="Need Help?" subtitle="Secondary Desktop Actions" />
               <Text style={styles.desktopHelpText}>
@@ -505,20 +330,8 @@ export default function PolicyDetailScreen({
         {coverageDetailsBody}
       </View>
 
-      <SectionHeader title="Billing Summary" />
+      <SectionHeader title="Documents" subtitle="Open the policy files screen for available documents." />
       <View style={styles.card}>
-        {billingRows.map((row) => (
-          <View key={row.label} style={styles.lineItem}>
-            <Text style={styles.lineLabel}>{row.label}</Text>
-            <Text style={styles.lineValue}>{row.value}</Text>
-          </View>
-        ))}
-      </View>
-
-      <SectionHeader title="Documents" subtitle="Policy File Folders and Files" />
-      <View style={styles.card}>
-        {policyFilesContent}
-        {policyFilesError ? <Text style={styles.fileError}>{policyFilesError}</Text> : null}
         <View style={styles.claimButton}>{policyFilesAction}</View>
       </View>
     </ScrollView>
@@ -694,27 +507,6 @@ const styles = StyleSheet.create({
     ...theme.typography.bodySmall,
     color: theme.colors.textStrong,
     fontWeight: '700',
-  },
-  desktopAutopayBadge: {
-    alignSelf: 'flex-start',
-    borderRadius: theme.radius.pill,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surfaceTint,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 6,
-  },
-  desktopAutopayBadgeOn: {
-    borderColor: '#C7DEC6',
-    backgroundColor: '#EBF9F1',
-  },
-  desktopAutopayLabel: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    fontWeight: '700',
-  },
-  desktopAutopayLabelOn: {
-    color: theme.colors.success,
   },
   desktopHelpText: {
     ...theme.typography.bodySmall,

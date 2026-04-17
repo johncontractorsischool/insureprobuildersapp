@@ -53,6 +53,7 @@ describe('VerifyScreen', () => {
     mockUseLocalSearchParams.mockReturnValue({});
     mockUseAuth.mockReturnValue({
       pendingEmail: 'jane@example.com',
+      pendingInsuredId: 'LIC-123456',
       completeSignIn: jest.fn(),
     });
     mockIsOtpRateLimitError.mockReturnValue(false);
@@ -62,6 +63,7 @@ describe('VerifyScreen', () => {
     const completeSignIn = jest.fn();
     mockUseAuth.mockReturnValue({
       pendingEmail: 'jane@example.com',
+      pendingInsuredId: 'LIC-123456',
       completeSignIn,
     });
     mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
@@ -81,15 +83,46 @@ describe('VerifyScreen', () => {
     expect(mockPersistCustomersForEmail).toHaveBeenCalledWith('jane@example.com', [buildCustomerLookupRecord()]);
     expect(completeSignIn).toHaveBeenCalledWith(
       'jane@example.com',
-      expect.objectContaining({ insuredId: 'LIC-123456' })
+      expect.objectContaining({ insuredId: 'LIC-123456' }),
+      'LIC-123456'
     );
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
   });
 
-  it('still completes sign in with the refreshed customer when Supabase cache sync is blocked', async () => {
+  it('uses the pending insuredId to select the correct customer when multiple records share the email', async () => {
     const completeSignIn = jest.fn();
     mockUseAuth.mockReturnValue({
       pendingEmail: 'jane@example.com',
+      pendingInsuredId: 'LIC-222222',
+      completeSignIn,
+    });
+    mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
+    mockFetchCustomersByEmail.mockResolvedValue([
+      buildCustomerLookupRecord({ insuredId: 'LIC-111111', commercialName: 'First Builder Co' }),
+      buildCustomerLookupRecord({ insuredId: 'LIC-222222', commercialName: 'Second Builder Co' }),
+    ]);
+    mockPersistCustomersForEmail.mockResolvedValue(undefined);
+
+    const { getByTestId, getByText } = render(<VerifyScreen />);
+
+    fireEvent.changeText(getByTestId('otp-input'), '123456');
+    fireEvent.press(getByText('Verify and Continue'));
+
+    await waitFor(() =>
+      expect(completeSignIn).toHaveBeenCalledWith(
+        'jane@example.com',
+        expect.objectContaining({ insuredId: 'LIC-222222' }),
+        'LIC-222222'
+      )
+    );
+  });
+
+  it('still completes sign in with the refreshed customer when Supabase cache sync is blocked', async () => {
+    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const completeSignIn = jest.fn();
+    mockUseAuth.mockReturnValue({
+      pendingEmail: 'jane@example.com',
+      pendingInsuredId: 'LIC-123456',
       completeSignIn,
     });
     mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
@@ -104,16 +137,23 @@ describe('VerifyScreen', () => {
     fireEvent.press(getByText('Verify and Continue'));
 
     await waitFor(() => expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com'));
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      'Customer cache sync failed after successful OTP verification.',
+      expect.any(Error)
+    );
     expect(completeSignIn).toHaveBeenCalledWith(
       'jane@example.com',
-      expect.objectContaining({ insuredId: 'LIC-123456' })
+      expect.objectContaining({ insuredId: 'LIC-123456' }),
+      'LIC-123456'
     );
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
+    consoleWarnSpy.mockRestore();
   });
 
   it('redirects back to login when there is no pending email', async () => {
     mockUseAuth.mockReturnValue({
       pendingEmail: '',
+      pendingInsuredId: '',
       completeSignIn: jest.fn(),
     });
 

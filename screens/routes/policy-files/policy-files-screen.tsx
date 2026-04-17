@@ -1,16 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { EmptyState } from '@/components/empty-state';
 import { LoadingState } from '@/components/loading-state';
@@ -18,18 +9,19 @@ import { ScreenContainer } from '@/components/screen-container';
 import { SectionHeader } from '@/components/section-header';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { fetchPolicyFilesList, fetchPolicyFilesListByInsuredId } from '@/services/policy-files-api';
+import {
+  fetchPolicyFilesList,
+  fetchPolicyFilesListByInsuredId,
+  fetchPolicyFilesListByPolicy,
+} from '@/services/policy-files-api';
 import { PolicyFileEntry } from '@/types/policy-file';
 import { openInAppBrowser } from '@/utils/external-actions';
 import { formatIsoDateTime } from '@/utils/format';
-
-type FolderLevel = {
-  id: string;
-  name: string;
-  policyId: string | null;
-  folderId: string | null;
-  items: PolicyFileEntry[];
-};
+import {
+  hasVisiblePolicyDocumentName,
+  matchesSelectedPolicyFile,
+  sortPolicyFilesNewestFirst,
+} from '@/utils/policy-files';
 
 function toUserFacingError(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
@@ -45,6 +37,58 @@ function getFileUrl(item: PolicyFileEntry) {
   return item.fileUrl ?? item.downloadUrl ?? item.url;
 }
 
+async function collectVisibleFilesFromEntries({
+  entries,
+  insuredId,
+  selectedPolicyId,
+  selectedPolicyNumber,
+  visitedFolderIds,
+}: {
+  entries: PolicyFileEntry[];
+  insuredId: string;
+  selectedPolicyId: string;
+  selectedPolicyNumber: string;
+  visitedFolderIds: Set<string>;
+}): Promise<PolicyFileEntry[]> {
+  const visibleFiles = entries.filter(
+    (entry) =>
+      entry.fileOrFolder === 'File' &&
+      hasVisiblePolicyDocumentName(entry.name) &&
+      matchesSelectedPolicyFile(entry, selectedPolicyId, selectedPolicyNumber)
+  );
+
+  const nestedFiles = await Promise.all(
+    entries
+      .filter((entry) => entry.fileOrFolder === 'Folder')
+      .map(async (entry) => {
+        const folderId = entry.databaseId.trim();
+        const folderPolicyId = entry.policyId?.trim() || selectedPolicyId;
+        const folderInsuredId = entry.insuredId?.trim() || insuredId;
+
+        if (!folderId || !folderPolicyId || !folderInsuredId || visitedFolderIds.has(folderId)) {
+          return [];
+        }
+
+        visitedFolderIds.add(folderId);
+        const response = await fetchPolicyFilesList({
+          insuredId: folderInsuredId,
+          policyId: folderPolicyId,
+          folderId,
+        });
+
+        return collectVisibleFilesFromEntries({
+          entries: response.data,
+          insuredId: folderInsuredId,
+          selectedPolicyId: folderPolicyId,
+          selectedPolicyNumber,
+          visitedFolderIds,
+        });
+      })
+  );
+
+  return sortPolicyFilesNewestFirst([...visibleFiles, ...nestedFiles.flat()]);
+}
+
 export default function PolicyFilesScreen() {
   const { insuredId, policyId, policyNumber } = useLocalSearchParams<{
     insuredId?: string | string[];
@@ -52,10 +96,9 @@ export default function PolicyFilesScreen() {
     policyNumber?: string | string[];
   }>();
   const { customer } = useAuth();
-  const [levels, setLevels] = useState<FolderLevel[]>([]);
+  const [files, setFiles] = useState<PolicyFileEntry[]>([]);
   const [isLoadingInitial, setIsLoadingInitial] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [loadingFolderId, setLoadingFolderId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const insuredLookupId = useMemo(() => {
@@ -66,154 +109,71 @@ export default function PolicyFilesScreen() {
     return customer?.insuredId?.trim() || '';
   }, [customer?.databaseId, customer?.insuredId, insuredId]);
   const selectedPolicyId = useMemo(() => readSearchParam(policyId).trim(), [policyId]);
-  const selectedPolicyNumber = useMemo(
-    () => readSearchParam(policyNumber).trim(),
-    [policyNumber]
-  );
+  const selectedPolicyNumber = useMemo(() => readSearchParam(policyNumber).trim(), [policyNumber]);
 
-  const filterEntriesForPolicy = useCallback(
-    (entries: PolicyFileEntry[]) => {
-      if (!selectedPolicyId && !selectedPolicyNumber) return entries;
-
-      return entries.filter((entry) => {
-        const entryPolicyId = entry.policyId?.trim() || '';
-        const entryPolicyNumber = entry.policyNumber?.trim() || '';
-
-        if (selectedPolicyId && entryPolicyId) {
-          return entryPolicyId === selectedPolicyId;
-        }
-
-        if (selectedPolicyNumber && entryPolicyNumber) {
-          return entryPolicyNumber === selectedPolicyNumber;
-        }
-
-        return false;
-      });
-    },
-    [selectedPolicyId, selectedPolicyNumber]
-  );
-
-  const currentLevel = levels[levels.length - 1] ?? null;
-  const currentItems = currentLevel?.items ?? [];
-
-  const loadRoot = useCallback(async () => {
+  const loadFiles = useCallback(async () => {
     if (!insuredLookupId) {
-      setLevels([]);
+      setFiles([]);
       setError('No insured id is available for this account.');
       setIsLoadingInitial(false);
       return;
     }
 
-    setIsLoadingInitial(true);
     setError(null);
-    try {
-      const response = await fetchPolicyFilesListByInsuredId(insuredLookupId);
-      const filteredRootItems = filterEntriesForPolicy(response.data);
-      setLevels([
-        {
-          id: 'root',
-          name: 'Root',
-          policyId: null,
-          folderId: null,
-          items: filteredRootItems,
-        },
-      ]);
-    } catch (nextError) {
-      setLevels([]);
-      setError(toUserFacingError(nextError));
-    } finally {
-      setIsLoadingInitial(false);
-    }
-  }, [filterEntriesForPolicy, insuredLookupId]);
+
+    const rootResponse = selectedPolicyId
+      ? await fetchPolicyFilesListByPolicy({
+          insuredId: insuredLookupId,
+          policyId: selectedPolicyId,
+        })
+      : await fetchPolicyFilesListByInsuredId(insuredLookupId);
+
+    const visibleFiles = await collectVisibleFilesFromEntries({
+      entries: rootResponse.data,
+      insuredId: insuredLookupId,
+      selectedPolicyId,
+      selectedPolicyNumber,
+      visitedFolderIds: new Set<string>(),
+    });
+
+    setFiles(visibleFiles);
+  }, [insuredLookupId, selectedPolicyId, selectedPolicyNumber]);
 
   useEffect(() => {
-    void loadRoot();
-  }, [loadRoot]);
+    let isMounted = true;
 
-  const openFolder = useCallback(
-    async (item: PolicyFileEntry) => {
-      const folderId = item.databaseId.trim();
-      const policyId = item.policyId?.trim() || '';
-      const folderInsuredId = item.insuredId?.trim() || insuredLookupId;
-
-      if (!folderId || !policyId || !folderInsuredId) {
-        Alert.alert('Folder unavailable', 'This folder is missing required identifiers.');
-        return;
-      }
-
-      setLoadingFolderId(item.databaseId);
-      setError(null);
+    const hydrateFiles = async () => {
+      setIsLoadingInitial(true);
       try {
-        const response = await fetchPolicyFilesList({
-          insuredId: folderInsuredId,
-          policyId,
-          folderId,
-        });
-        setLevels((previous) => [
-          ...previous,
-          {
-            id: item.databaseId,
-            name: item.name,
-            policyId,
-            folderId,
-            items: response.data,
-          },
-        ]);
+        await loadFiles();
       } catch (nextError) {
-        Alert.alert('Unable to open folder', toUserFacingError(nextError));
+        if (!isMounted) return;
+        setFiles([]);
+        setError(toUserFacingError(nextError));
       } finally {
-        setLoadingFolderId(null);
+        if (isMounted) {
+          setIsLoadingInitial(false);
+        }
       }
-    },
-    [insuredLookupId]
-  );
+    };
 
-  const refreshCurrentLevel = useCallback(async () => {
+    void hydrateFiles();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [loadFiles]);
+
+  const refreshFiles = useCallback(async () => {
     if (!insuredLookupId) return;
 
     setIsRefreshing(true);
     setError(null);
     try {
-      if (!currentLevel || currentLevel.id === 'root') {
-        const response = await fetchPolicyFilesListByInsuredId(insuredLookupId);
-        const filteredRootItems = filterEntriesForPolicy(response.data);
-        setLevels([
-          {
-            id: 'root',
-            name: 'Root',
-            policyId: null,
-            folderId: null,
-            items: filteredRootItems,
-          },
-        ]);
-      } else {
-        const folderId = currentLevel.folderId?.trim() || currentLevel.id;
-        const policyId = currentLevel.policyId?.trim() || '';
-        if (!folderId || !policyId) {
-          throw new Error('This folder is missing required identifiers.');
-        }
-
-        const response = await fetchPolicyFilesList({
-          insuredId: insuredLookupId,
-          policyId,
-          folderId,
-        });
-
-        setLevels((previous) => {
-          if (previous.length === 0) return previous;
-          return previous.map((level, index) =>
-            index === previous.length - 1
-              ? {
-                  ...level,
-                  items: response.data,
-                }
-              : level
-          );
-        });
-      }
+      await loadFiles();
     } catch (nextError) {
       const message = toUserFacingError(nextError);
-      if (currentItems.length === 0) {
+      if (files.length === 0) {
         setError(message);
       } else {
         Alert.alert('Unable to refresh', message);
@@ -221,17 +181,7 @@ export default function PolicyFilesScreen() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [currentItems.length, currentLevel, filterEntriesForPolicy, insuredLookupId]);
-
-  const jumpToLevel = (index: number) => {
-    setLevels((previous) => previous.slice(0, index + 1));
-    setError(null);
-  };
-
-  const goBackLevel = () => {
-    setLevels((previous) => previous.slice(0, previous.length - 1));
-    setError(null);
-  };
+  }, [files.length, insuredLookupId, loadFiles]);
 
   const handleFilePress = useCallback(async (item: PolicyFileEntry) => {
     const fileUrl = getFileUrl(item);
@@ -247,43 +197,25 @@ export default function PolicyFilesScreen() {
   }, []);
 
   const renderRow = ({ item }: { item: PolicyFileEntry }) => {
-    const isFolder = item.fileOrFolder === 'Folder';
-    const isOpeningFolder = loadingFolderId === item.databaseId;
     const createdAtLabel = formatIsoDateTime(item.createDate);
 
     return (
       <Pressable
         onPress={() => {
-          if (isFolder) {
-            void openFolder(item);
-            return;
-          }
           void handleFilePress(item);
         }}
         style={({ pressed }) => [styles.itemCard, pressed ? styles.pressed : null]}>
         <View style={styles.itemTop}>
           <View style={styles.itemIconWrap}>
-            <Ionicons
-              name={isFolder ? 'folder-open-outline' : 'document-text-outline'}
-              size={20}
-              color={theme.colors.primary}
-            />
+            <Ionicons name="document-text-outline" size={20} color={theme.colors.primary} />
           </View>
           <View style={styles.itemCopy}>
             <Text style={styles.itemName}>{item.name}</Text>
-            <Text style={styles.itemMeta}>Policy #: {item.policyNumber ?? 'Not provided'}</Text>
+            {item.policyNumber ? <Text style={styles.itemMeta}>Policy #: {item.policyNumber}</Text> : null}
             <Text style={styles.itemMeta}>By: {item.creatorName ?? 'Unknown'}</Text>
             <Text style={styles.itemMeta}>Created: {createdAtLabel}</Text>
           </View>
-          {isFolder ? (
-            isOpeningFolder ? (
-              <ActivityIndicator color={theme.colors.primary} />
-            ) : (
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.textSubtle} />
-            )
-          ) : (
-            <Ionicons name="document-attach-outline" size={18} color={theme.colors.textSubtle} />
-          )}
+          <Ionicons name="document-attach-outline" size={18} color={theme.colors.textSubtle} />
         </View>
       </Pressable>
     );
@@ -301,15 +233,15 @@ export default function PolicyFilesScreen() {
     );
   }
 
-  if (isLoadingInitial && !currentLevel) {
+  if (isLoadingInitial) {
     return (
       <ScreenContainer>
-        <LoadingState title="Loading policy files" description="Retrieving folders and file records." />
+        <LoadingState title="Loading policy files" description="Retrieving available policy documents." />
       </ScreenContainer>
     );
   }
 
-  if (error && !currentLevel) {
+  if (error && files.length === 0) {
     return (
       <ScreenContainer>
         <EmptyState
@@ -318,7 +250,7 @@ export default function PolicyFilesScreen() {
           description={error}
           actionLabel="Retry"
           onAction={() => {
-            void loadRoot();
+            void refreshFiles();
           }}
         />
       </ScreenContainer>
@@ -328,59 +260,35 @@ export default function PolicyFilesScreen() {
   return (
     <ScreenContainer scroll={false}>
       <SectionHeader
-        title="Policy files"
+        title="Policy Files"
         subtitle={
-          currentLevel
-            ? `Browsing: ${currentLevel.name}${selectedPolicyNumber ? ` • Policy ${selectedPolicyNumber}` : ''}`
-            : 'Browse folders and policy files'
+          selectedPolicyNumber
+            ? `Available documents for policy ${selectedPolicyNumber}`
+            : 'Available policy documents'
         }
       />
-
-      <View style={styles.breadcrumbWrap}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.breadcrumbScroll}>
-          {levels.map((level, index) => (
-            <Pressable
-              key={`${level.id}-${index}`}
-              onPress={() => jumpToLevel(index)}
-              style={({ pressed }) => [styles.crumb, pressed ? styles.pressed : null]}>
-              <Text style={[styles.crumbText, index === levels.length - 1 ? styles.crumbTextActive : null]}>
-                {level.name}
-              </Text>
-              {index < levels.length - 1 ? (
-                <Ionicons name="chevron-forward" size={14} color={theme.colors.textSubtle} />
-              ) : null}
-            </Pressable>
-          ))}
-        </ScrollView>
-        {levels.length > 1 ? (
-          <Pressable onPress={goBackLevel} style={({ pressed }) => [styles.backButton, pressed ? styles.pressed : null]}>
-            <Ionicons name="arrow-back" size={15} color={theme.colors.primary} />
-            <Text style={styles.backButtonText}>Back</Text>
-          </Pressable>
-        ) : null}
-      </View>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <View style={styles.listCard}>
         <FlatList
-          data={currentItems}
+          data={files}
           keyExtractor={(item) => item.databaseId}
           renderItem={renderRow}
           onRefresh={() => {
-            void refreshCurrentLevel();
+            void refreshFiles();
           }}
           refreshing={isRefreshing}
-          contentContainerStyle={currentItems.length === 0 ? styles.emptyListContent : styles.listContent}
+          contentContainerStyle={files.length === 0 ? styles.emptyListContent : styles.listContent}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <EmptyState
-              icon="folder-open-outline"
-              title="No files found"
-              description="There are no files or folders available at this level yet."
+              icon="document-text-outline"
+              title="No documents available"
+              description="There are no visible policy documents available for this policy yet."
               actionLabel="Refresh"
               onAction={() => {
-                void refreshCurrentLevel();
+                void refreshFiles();
               }}
             />
           }
@@ -391,52 +299,6 @@ export default function PolicyFilesScreen() {
 }
 
 const styles = StyleSheet.create({
-  breadcrumbWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-  breadcrumbScroll: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-    paddingRight: theme.spacing.xs,
-  },
-  crumb: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderRadius: theme.radius.pill,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 7,
-  },
-  crumbText: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-  },
-  crumbTextActive: {
-    color: theme.colors.primary,
-    fontWeight: '700',
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderRadius: theme.radius.pill,
-    borderWidth: 1,
-    borderColor: theme.colors.borderStrong,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 7,
-    backgroundColor: theme.colors.surface,
-  },
-  backButtonText: {
-    ...theme.typography.caption,
-    color: theme.colors.primary,
-    fontWeight: '700',
-  },
   errorText: {
     ...theme.typography.caption,
     color: theme.colors.danger,

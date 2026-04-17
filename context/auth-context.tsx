@@ -1,11 +1,14 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PropsWithChildren, createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import { Customer } from '@/types/customer';
 import { fetchCustomersByEmail } from '@/services/customer-api';
 import { getSupabaseClient } from '@/services/supabase';
 import { CustomerLookupRecord } from '@/types/customer';
+import { matchesCustomerInsuredId, pickPreferredCustomerLookup } from '@/utils/customer-selection';
 
 const CUSTOMER_TABLE = process.env.EXPO_PUBLIC_SUPABASE_CUSTOMER_TABLE?.trim() || 'portal_customers';
+const SELECTED_CUSTOMER_STORAGE_KEY = 'portal_selected_customer';
 
 type AuthContextValue = {
   isLoadingAuth: boolean;
@@ -13,9 +16,11 @@ type AuthContextValue = {
   userEmail: string | null;
   customer: Customer | null;
   pendingEmail: string;
-  setPendingEmail: (email: string) => void;
+  pendingInsuredId: string;
+  setPendingEmail: (email: string, insuredId?: string | null) => void;
+  setPendingInsuredId: (insuredId: string) => void;
   setCustomer: (customer: Customer | null) => void;
-  completeSignIn: (email: string, customerData?: Customer | null) => void;
+  completeSignIn: (email: string, customerData?: Customer | null, insuredId?: string | null) => void;
   signOut: () => Promise<void>;
 };
 
@@ -24,6 +29,11 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
+
+type PersistedCustomerSelection = {
+  email: string;
+  insuredId: string;
+};
 
 type PortalCustomerRow = {
   database_id: string | null;
@@ -41,6 +51,44 @@ type PortalCustomerRow = {
 
 function hasText(value: string | null | undefined) {
   return Boolean(value?.trim());
+}
+
+async function readPersistedCustomerSelection() {
+  try {
+    const raw = await AsyncStorage.getItem(SELECTED_CUSTOMER_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<PersistedCustomerSelection>;
+    if (typeof parsed.email !== 'string' || typeof parsed.insuredId !== 'string') {
+      return null;
+    }
+
+    const email = normalizeEmail(parsed.email);
+    const insuredId = parsed.insuredId.trim();
+    if (!email || !insuredId) return null;
+
+    return { email, insuredId };
+  } catch {
+    return null;
+  }
+}
+
+async function persistSelectedCustomer(email: string, insuredId: string | null | undefined) {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedInsuredId = insuredId?.trim() ?? '';
+
+  if (!normalizedEmail || !normalizedInsuredId) {
+    await AsyncStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
+    return;
+  }
+
+  await AsyncStorage.setItem(
+    SELECTED_CUSTOMER_STORAGE_KEY,
+    JSON.stringify({
+      email: normalizedEmail,
+      insuredId: normalizedInsuredId,
+    } satisfies PersistedCustomerSelection)
+  );
 }
 
 function buildFullName(firstName: string | null, lastName: string | null, commercialName: string | null) {
@@ -77,14 +125,6 @@ function mapCustomerLookupToProfile(customer: CustomerLookupRecord): Customer {
   };
 }
 
-function pickBestCustomerLookup(customers: CustomerLookupRecord[]) {
-  return customers.find((customer) => customer.active && hasText(customer.insuredId)) ??
-    customers.find((customer) => customer.active) ??
-    customers.find((customer) => hasText(customer.insuredId)) ??
-    customers[0] ??
-    null;
-}
-
 function mapPortalCustomer(row: PortalCustomerRow, loginEmail: string): Customer {
   const sourcePayload = row.source_payload;
 
@@ -113,8 +153,9 @@ function mapPortalCustomer(row: PortalCustomerRow, loginEmail: string): Customer
   };
 }
 
-function pickBestPortalCustomer(rows: PortalCustomerRow[]) {
+function pickBestPortalCustomer(rows: PortalCustomerRow[], preferredInsuredId?: string | null) {
   return (
+    rows.find((row) => matchesCustomerInsuredId(row.insured_id, preferredInsuredId)) ??
     rows.find((row) => row.is_active !== false && hasText(row.insured_id)) ??
     rows.find((row) => row.is_active !== false) ??
     rows.find((row) => hasText(row.insured_id)) ??
@@ -128,12 +169,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [customer, setCustomerState] = useState<Customer | null>(null);
   const [pendingEmail, setPendingEmailState] = useState('');
+  const [pendingInsuredId, setPendingInsuredIdState] = useState('');
 
   useEffect(() => {
     let mounted = true;
     let unsubscribe: () => void = () => {};
 
-    const hydrateCustomerForEmail = async (email: string) => {
+    const hydrateCustomerForEmail = async (email: string, preferredInsuredId?: string | null) => {
       try {
         const normalizedEmail = normalizeEmail(email);
 
@@ -141,9 +183,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
           const customers = await fetchCustomersByEmail(normalizedEmail);
           if (!mounted) return;
 
-          const nextCustomer = pickBestCustomerLookup(customers);
+          const nextCustomer = pickPreferredCustomerLookup(customers, preferredInsuredId);
           if (nextCustomer) {
             setCustomerState(mapCustomerLookupToProfile(nextCustomer));
+            const nextInsuredId = nextCustomer.insuredId?.trim() ?? '';
+            setPendingInsuredIdState(nextInsuredId);
+            void persistSelectedCustomer(normalizedEmail, nextInsuredId);
             return;
           }
         } catch {
@@ -161,9 +206,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
           .order('updated_at', { ascending: false });
 
         if (!mounted || error || !data || data.length === 0) return;
-        const cachedCustomer = pickBestPortalCustomer(data as PortalCustomerRow[]);
+        const cachedCustomer = pickBestPortalCustomer(data as PortalCustomerRow[], preferredInsuredId);
         if (!cachedCustomer) return;
         setCustomerState(mapPortalCustomer(cachedCustomer, normalizedEmail));
+        const nextInsuredId = cachedCustomer.insured_id?.trim() ?? '';
+        setPendingInsuredIdState(nextInsuredId);
       } catch {
         // Leave customer as-is when hydration fails.
       }
@@ -176,23 +223,37 @@ export function AuthProvider({ children }: PropsWithChildren) {
         if (!mounted) return;
 
         const sessionEmail = data.session?.user?.email ?? null;
+        const persistedSelection = await readPersistedCustomerSelection();
+        if (!mounted) return;
+        const preferredInsuredId =
+          sessionEmail && persistedSelection?.email === normalizeEmail(sessionEmail)
+            ? persistedSelection.insuredId
+            : '';
         setUserEmail(sessionEmail);
         if (sessionEmail) setPendingEmailState(sessionEmail);
+        setPendingInsuredIdState(preferredInsuredId);
         if (sessionEmail) {
-          void hydrateCustomerForEmail(sessionEmail);
+          void hydrateCustomerForEmail(sessionEmail, preferredInsuredId);
         }
         setIsLoadingAuth(false);
 
-        const authListener = supabase.auth.onAuthStateChange((_event, session) => {
+        const authListener = supabase.auth.onAuthStateChange(async (_event, session) => {
           const nextEmail = session?.user?.email ?? null;
           setUserEmail(nextEmail);
           if (!nextEmail) {
             setPendingEmailState('');
+            setPendingInsuredIdState('');
             setCustomerState(null);
+            void AsyncStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
             return;
           }
+          const nextSelection = await readPersistedCustomerSelection();
+          if (!mounted) return;
+          const nextInsuredId =
+            nextSelection?.email === normalizeEmail(nextEmail) ? nextSelection.insuredId : '';
           setPendingEmailState(nextEmail);
-          void hydrateCustomerForEmail(nextEmail);
+          setPendingInsuredIdState(nextInsuredId);
+          void hydrateCustomerForEmail(nextEmail, nextInsuredId);
         });
         unsubscribe = () => authListener.data.subscription.unsubscribe();
       } catch {
@@ -210,22 +271,30 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const setPendingEmail = (email: string) => {
+  const setPendingEmail = (email: string, insuredId?: string | null) => {
     setPendingEmailState(normalizeEmail(email));
+    setPendingInsuredIdState(insuredId?.trim() ?? '');
+  };
+
+  const setPendingInsuredId = (insuredId: string) => {
+    setPendingInsuredIdState(insuredId.trim());
   };
 
   const setCustomer = (nextCustomer: Customer | null) => {
     setCustomerState(nextCustomer);
   };
 
-  const completeSignIn = (email: string, customerData?: Customer | null) => {
+  const completeSignIn = (email: string, customerData?: Customer | null, insuredId?: string | null) => {
     const normalized = normalizeEmail(email);
+    const normalizedInsuredId = insuredId?.trim() ?? customerData?.insuredId?.trim() ?? '';
     setUserEmail(normalized);
     setPendingEmailState(normalized);
+    setPendingInsuredIdState(normalizedInsuredId);
     setCustomerState({
       email: normalized,
       ...(customerData ?? {}),
     });
+    void persistSelectedCustomer(normalized, normalizedInsuredId);
   };
 
   const signOut = async () => {
@@ -235,7 +304,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
     } finally {
       setUserEmail(null);
       setPendingEmailState('');
+      setPendingInsuredIdState('');
       setCustomerState(null);
+      await AsyncStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
     }
   };
 
@@ -246,12 +317,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
       userEmail,
       customer,
       pendingEmail,
+      pendingInsuredId,
       setPendingEmail,
+      setPendingInsuredId,
       setCustomer,
       completeSignIn,
       signOut,
     }),
-    [customer, isLoadingAuth, pendingEmail, userEmail]
+    [customer, isLoadingAuth, pendingEmail, pendingInsuredId, userEmail]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

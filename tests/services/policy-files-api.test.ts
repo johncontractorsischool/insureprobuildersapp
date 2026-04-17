@@ -1,6 +1,7 @@
 import {
   fetchPolicyFilesList,
   fetchPolicyFilesListByInsuredId,
+  fetchPolicyFilesListByPolicy,
 } from '@/services/policy-files-api';
 
 describe('policy-files api', () => {
@@ -69,6 +70,45 @@ describe('policy-files api', () => {
     expect(response.data[0].name).toBe('Declarations');
   });
 
+  it('loads policy-specific root files from the strict policy endpoint', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: 1,
+        data: {
+          number: 'GL-1001',
+          files: [
+            {
+              databaseId: 'file-3',
+              name: '101000937.URBANEDGE CONSTRUCTION INC....pdf',
+              fileOrFolder: 'File',
+              createDate: '2026-04-17T11:16:00.000Z',
+            },
+          ],
+          currentFolderId: 'folder-root',
+        },
+      }),
+    });
+
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const response = await fetchPolicyFilesListByPolicy({
+      insuredId: 'insured-db-1',
+      policyId: 'policy-1',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/getPolicyFilesList?insuredId=insured-db-1&policyId=policy-1',
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(response.data).toEqual([
+      expect.objectContaining({
+        databaseId: 'file-3',
+        name: '101000937.URBANEDGE CONSTRUCTION INC....pdf',
+      }),
+    ]);
+  });
+
   it('rejects folder requests that are missing required ids', async () => {
     await expect(
       fetchPolicyFilesList({
@@ -77,5 +117,14 @@ describe('policy-files api', () => {
         folderId: 'folder-1',
       })
     ).rejects.toThrow('Missing insured id, policy id, or folder id for policy files lookup.');
+  });
+
+  it('rejects policy root requests that are missing required ids', async () => {
+    await expect(
+      fetchPolicyFilesListByPolicy({
+        insuredId: 'insured-db-1',
+        policyId: '',
+      })
+    ).rejects.toThrow('Missing insured id or policy id for policy files lookup.');
   });
 });
