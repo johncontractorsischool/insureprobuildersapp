@@ -25,6 +25,11 @@ describe('getPortalConfig', () => {
 
     const { getPortalConfig } = require('@/services/portal-config');
     expect(getPortalConfig()).toEqual({
+      demo: {
+        enabled: false,
+        profile: null,
+        data: null,
+      },
       agent: {
         name: 'Senior Agent',
         phone: '5551112222',
@@ -50,6 +55,20 @@ describe('getPortalConfig', () => {
 
     const { getPortalConfig } = require('@/services/portal-config');
     expect(getPortalConfig().agent.name).toBe('Assigned agent');
+  });
+
+  it('loads the configured demo profile when demo mode is enabled', () => {
+    process.env.EXPO_PUBLIC_DEMO_ACCOUNT = 'true';
+    process.env.EXPO_PUBLIC_DEMO_PROFILE = 'marketing';
+
+    const { getPortalConfig } = require('@/services/portal-config');
+    const config = getPortalConfig();
+
+    expect(config.demo.enabled).toBe(true);
+    expect(config.demo.profile).toBe('marketing');
+    expect(config.demo.data?.customer.commercialName).toBe('UrbanEdge Construction Inc.');
+    expect(config.agent.name).toBe('Emily Carter');
+    expect(config.company.licenseNumber).toBe('101000937');
   });
 
   it('falls back to the default agency mailing address when not configured', () => {

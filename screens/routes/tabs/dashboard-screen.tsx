@@ -48,6 +48,7 @@ const COI_REQUEST_EMAIL = "support@insureprobuilders.com";
 const AGENT_AVATARS: Record<string, number> = {
   ariesapcar: require("../../../assets/images/ariesapcar.jpg"),
   cindycardenas: require("../../../assets/images/cindycardenas.jpg"),
+  emilycarter: require("../../../assets/images/emilycarter.png"),
   markflorea: require("../../../assets/images/markflorea.jpg"),
   patricianegrete: require("../../../assets/images/patricianegrete.jpg"),
 };
@@ -392,6 +393,11 @@ export default function DashboardScreen({
   const insets = useSafeAreaInsets();
   const { customer, userEmail } = useAuth();
   const portalConfig = useMemo(() => getPortalConfig(), []);
+  const demoProfile = portalConfig.demo.data;
+  const isDemoMode = portalConfig.demo.enabled && Boolean(demoProfile);
+  const demoUi = demoProfile?.ui;
+  const resolvedCustomer = demoProfile?.customer ?? customer;
+  const resolvedUserEmail = demoProfile?.customer.email ?? userEmail;
   const [agent, setAgent] = useState<InsuredAgentRecord | null>(null);
   const [isLoadingAgent, setIsLoadingAgent] = useState(false);
   const [agentLookupNotice, setAgentLookupNotice] = useState<string | null>(
@@ -412,15 +418,22 @@ export default function DashboardScreen({
   } = useCompanyProfile();
   // `/insuredAgents?insuredId=` expects the insured *database* id (UUID from `databaseId`).
   const insuredLookupId = useMemo(() => {
-    const insuredDatabaseId = customer?.databaseId?.trim();
+    const insuredDatabaseId = resolvedCustomer?.databaseId?.trim();
     if (insuredDatabaseId) return insuredDatabaseId;
-    return customer?.insuredId?.trim() || "";
-  }, [customer?.databaseId, customer?.insuredId]);
+    return resolvedCustomer?.insuredId?.trim() || "";
+  }, [resolvedCustomer?.databaseId, resolvedCustomer?.insuredId]);
 
   useEffect(() => {
     let isMounted = true;
 
     const hydrateAgent = async () => {
+      if (isDemoMode) {
+        setAgent(null);
+        setAgentLookupNotice(null);
+        setIsLoadingAgent(false);
+        return;
+      }
+
       if (!insuredLookupId) {
         setAgent(null);
         setAgentLookupNotice(null);
@@ -460,7 +473,7 @@ export default function DashboardScreen({
     return () => {
       isMounted = false;
     };
-  }, [insuredLookupId]);
+  }, [insuredLookupId, isDemoMode]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -567,10 +580,23 @@ export default function DashboardScreen({
     [agentActions],
   );
 
+  const showDemoUnavailableAlert = () => {
+    Alert.alert(
+      "Demo mode",
+      demoUi?.disabledMessage ??
+        "This action is disabled while the marketing demo profile is active.",
+    );
+  };
+
   const openAction = async (
     target: string | null,
     unavailableMessage: string,
   ) => {
+    if (demoUi?.disableExternalActions) {
+      showDemoUnavailableAlert();
+      return;
+    }
+
     const result = await openExternalLink(target, unavailableMessage);
     if (!result.ok) {
       Alert.alert("Action unavailable", result.message ?? unavailableMessage);
@@ -580,6 +606,11 @@ export default function DashboardScreen({
     target: string | null,
     unavailableMessage: string,
   ) => {
+    if (demoUi?.disableExternalActions) {
+      showDemoUnavailableAlert();
+      return;
+    }
+
     const result = await openInAppBrowser(target, unavailableMessage);
     if (!result.ok) {
       Alert.alert("Action unavailable", result.message ?? unavailableMessage);
@@ -592,19 +623,28 @@ export default function DashboardScreen({
   const showDashboardSkeleton =
     isMinimumSkeletonVisible || isLoadingAgent || isLoadingCompany;
   const accountHolderName =
-    normalizeText(customer?.commercialName) ??
-    getNameFromCustomer(customer, userEmail);
-  const accountHolderEmail = customer?.email ?? userEmail ?? "member@email.com";
+    normalizeText(resolvedCustomer?.commercialName) ??
+    getNameFromCustomer(resolvedCustomer, resolvedUserEmail);
+  const accountHolderEmail =
+    resolvedCustomer?.email ?? resolvedUserEmail ?? "member@email.com";
   const accountHolderInitials = getInitials(accountHolderName);
   const coiContactPersonName =
-    normalizeText(getNameFromCustomer(customer, userEmail)) ?? "Not provided";
-  const coiBusinessName = normalizeText(customer?.commercialName) ?? "Not provided";
+    normalizeText(getNameFromCustomer(resolvedCustomer, resolvedUserEmail)) ??
+    "Not provided";
+  const coiBusinessName =
+    normalizeText(resolvedCustomer?.commercialName) ?? "Not provided";
   const coiContactEmail =
-    normalizeText(customer?.email) ?? normalizeText(userEmail) ?? "Not provided";
+    normalizeText(resolvedCustomer?.email) ??
+    normalizeText(resolvedUserEmail) ??
+    "Not provided";
   const contactPhone =
-    normalizeText(customer?.phone) ?? normalizeText(customer?.cellPhone) ?? "Not provided";
-  const customerDatabaseId = normalizeText(customer?.databaseId) ?? "Not provided";
-  const customerInsuredId = normalizeText(customer?.insuredId) ?? "Not provided";
+    normalizeText(resolvedCustomer?.phone) ??
+    normalizeText(resolvedCustomer?.cellPhone) ??
+    "Not provided";
+  const customerDatabaseId =
+    normalizeText(resolvedCustomer?.databaseId) ?? "Not provided";
+  const customerInsuredId =
+    normalizeText(resolvedCustomer?.insuredId) ?? "Not provided";
   const licenseNumber = lookupSummaryValue(licenseRows, [
     "license #",
     "license",
@@ -631,6 +671,11 @@ export default function DashboardScreen({
   // into the existing PBIA intake forms or a prefilled support email.
   const openPbiaRequestForm = async (slug: PbiaFormSlug) => {
     if (Platform.OS !== "web") {
+      if (demoUi?.disableExternalActions) {
+        showDemoUnavailableAlert();
+        return;
+      }
+
       const form = findPbiaFormBySlug(slug);
       if (!form) {
         Alert.alert("Form unavailable", "Please try again.");
@@ -641,8 +686,8 @@ export default function DashboardScreen({
         form,
         createPbiaInstanceId(),
         buildPbiaFormPrefillParams(form.slug, {
-          customer,
-          userEmail,
+          customer: resolvedCustomer,
+          userEmail: resolvedUserEmail,
           cslbLicense,
           fallbackLicenseNumber: portalConfig.company.licenseNumber,
         }),
@@ -664,6 +709,11 @@ export default function DashboardScreen({
   };
 
   const sendCoiRequest = async () => {
+    if (demoUi?.disableRequestEmails) {
+      showDemoUnavailableAlert();
+      return;
+    }
+
     try {
       await sendSmtpEmail({
         subject: "Certificate of Insurance Request",

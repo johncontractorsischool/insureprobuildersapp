@@ -1,4 +1,12 @@
+import { DEFAULT_DEMO_PROFILE_ID, getDemoProfileById } from '@/data/demo-profiles';
+import type { DemoProfile } from '@/data/demo-profiles';
+
 type PortalConfig = {
+  demo: {
+    enabled: boolean;
+    profile: string | null;
+    data: DemoProfile | null;
+  };
   agent: {
     name: string;
     phone: string | null;
@@ -23,6 +31,11 @@ function normalizeText(value: string | undefined) {
   return normalized ? normalized : null;
 }
 
+function normalizeBooleanFlag(value: string | undefined) {
+  if (!value) return false;
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
 function normalizeHttpUrl(value: string | undefined) {
   const normalized = normalizeText(value);
   if (!normalized) return null;
@@ -35,20 +48,32 @@ function normalizeHttpUrl(value: string | undefined) {
 }
 
 export function getPortalConfig(): PortalConfig {
+  const isDemoModeEnabled = normalizeBooleanFlag(process.env.EXPO_PUBLIC_DEMO_ACCOUNT);
+  const requestedDemoProfile = normalizeText(process.env.EXPO_PUBLIC_DEMO_PROFILE);
+  const demoProfile = isDemoModeEnabled
+    ? getDemoProfileById(requestedDemoProfile ?? DEFAULT_DEMO_PROFILE_ID)
+    : null;
+
   return {
+    demo: {
+      enabled: Boolean(demoProfile),
+      profile: demoProfile?.id ?? requestedDemoProfile,
+      data: demoProfile,
+    },
     agent: {
-      name: normalizeText(process.env.EXPO_PUBLIC_AGENT_NAME) ?? 'Assigned agent',
-      phone: normalizeText(process.env.EXPO_PUBLIC_AGENT_PHONE),
-      email: normalizeText(process.env.EXPO_PUBLIC_AGENT_EMAIL),
-      smsPhone: normalizeText(process.env.EXPO_PUBLIC_AGENT_SMS_PHONE),
+      name: demoProfile?.agent.name ?? normalizeText(process.env.EXPO_PUBLIC_AGENT_NAME) ?? 'Assigned agent',
+      phone: demoProfile?.agent.phone ?? normalizeText(process.env.EXPO_PUBLIC_AGENT_PHONE),
+      email: demoProfile?.agent.email ?? normalizeText(process.env.EXPO_PUBLIC_AGENT_EMAIL),
+      smsPhone: demoProfile?.agent.smsPhone ?? normalizeText(process.env.EXPO_PUBLIC_AGENT_SMS_PHONE),
       mailingAddress:
+        demoProfile?.agent.mailingAddress ??
         normalizeText(process.env.EXPO_PUBLIC_AGENCY_MAILING_ADDRESS) ??
         '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742',
-      scheduleUrl: normalizeHttpUrl(process.env.EXPO_PUBLIC_AGENT_SCHEDULE_URL),
+      scheduleUrl: demoProfile?.agent.scheduleUrl ?? normalizeHttpUrl(process.env.EXPO_PUBLIC_AGENT_SCHEDULE_URL),
     },
     company: {
-      licenseNumber: normalizeText(process.env.EXPO_PUBLIC_COMPANY_LICENSE_NUMBER),
-      cslbUrl: normalizeHttpUrl(process.env.EXPO_PUBLIC_COMPANY_CSLB_URL),
+      licenseNumber: demoProfile?.company.licenseNumber ?? normalizeText(process.env.EXPO_PUBLIC_COMPANY_LICENSE_NUMBER),
+      cslbUrl: demoProfile?.company.cslbUrl ?? normalizeHttpUrl(process.env.EXPO_PUBLIC_COMPANY_CSLB_URL),
     },
     actions: {
       intakeFormsUrl: normalizeHttpUrl(process.env.EXPO_PUBLIC_INTAKE_FORMS_URL),

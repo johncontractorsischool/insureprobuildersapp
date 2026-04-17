@@ -26,11 +26,17 @@ jest.mock('@/services/portal-config', () => ({
 describe('useCompanyProfile', () => {
   beforeEach(() => {
     mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: false,
+        profile: null,
+        data: null,
+      },
       agent: {
         name: 'Fallback Agent',
         phone: null,
         email: null,
         smsPhone: null,
+        mailingAddress: null,
         scheduleUrl: null,
       },
       company: {
@@ -40,6 +46,7 @@ describe('useCompanyProfile', () => {
       actions: {
         intakeFormsUrl: null,
         issueCoiUrl: null,
+        supportEmail: 'support@insureprobuilders.com',
       },
     });
   });
@@ -176,5 +183,82 @@ describe('useCompanyProfile', () => {
       { label: 'Status', value: 'Exempt' },
       { label: 'Details', value: 'No employees reported' },
     ]);
+  });
+
+  it('returns configured demo company data without hitting the CSLB api', async () => {
+    mockUseAuth.mockReturnValue({
+      customer: buildCustomer({ insuredId: 'REAL-LIVE-ID', active: true }),
+    });
+    mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: true,
+        profile: 'marketing',
+        data: {
+          id: 'marketing',
+          label: 'Marketing Demo',
+          customer: buildCustomer({
+            commercialName: 'UrbanEdge Construction Inc.',
+            insuredId: '101000937',
+          }),
+          agent: {
+            name: 'Emily Carter',
+            phone: '916-555-0123',
+            email: 'emily.carter@insureprobuilders.com',
+            smsPhone: '916-555-0188',
+            mailingAddress: '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742',
+            scheduleUrl: null,
+          },
+          company: {
+            licenseNumber: '101000937',
+            cslbUrl: 'https://www.cslb.ca.gov/license',
+            companyLookupNotice: 'Marketing demo profile is active. Live CSLB data is disabled.',
+            businessName: 'UrbanEdge Construction Inc.',
+            businessRows: [{ label: 'Street', value: '2865 Sunrise Blvd Ste 110' }],
+            licenseRows: [{ label: 'License #', value: '101000937' }],
+            statusChips: ['Active'],
+            statusFallbackText: 'Active',
+            classifications: ['B - General Building Contractor'],
+            bonding: [],
+            workersCompRows: [{ label: 'Carrier', value: 'Demo Carrier' }],
+            personnel: [],
+          },
+          ui: {
+            disableExternalActions: true,
+            disableRequestEmails: true,
+            disabledMessage: 'This action is disabled in demo mode.',
+          },
+        },
+      },
+      agent: {
+        name: 'Emily Carter',
+        phone: '916-555-0123',
+        email: 'emily.carter@insureprobuilders.com',
+        smsPhone: '916-555-0188',
+        mailingAddress: '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742',
+        scheduleUrl: null,
+      },
+      company: {
+        licenseNumber: '101000937',
+        cslbUrl: 'https://www.cslb.ca.gov/license',
+      },
+      actions: {
+        intakeFormsUrl: null,
+        issueCoiUrl: null,
+        supportEmail: 'support@insureprobuilders.com',
+      },
+    });
+
+    const { result } = renderHook(() => useCompanyProfile());
+
+    await waitFor(() => expect(result.current.isLoadingCompany).toBe(false));
+
+    expect(mockFetchCslbLicenseByInsuredId).not.toHaveBeenCalled();
+    expect(result.current.companyLookupNotice).toBe(
+      'Marketing demo profile is active. Live CSLB data is disabled.'
+    );
+    expect(result.current.businessName).toBe('UrbanEdge Construction Inc.');
+    expect(result.current.licenseRows).toEqual([{ label: 'License #', value: '101000937' }]);
+    expect(result.current.statusChips).toEqual(['Active']);
+    expect(result.current.workersCompRows).toEqual([{ label: 'Carrier', value: 'Demo Carrier' }]);
   });
 });

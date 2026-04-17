@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '@/context/auth-context';
+import type { DemoCompanyData } from '@/data/demo-profiles/types';
 import {
   CslbLicense,
   CslbWorkersComp,
@@ -203,19 +204,50 @@ function buildWorkersCompRows(workersComp: CslbWorkersComp | null) {
   ]);
 }
 
+function normalizeDemoRows(rows: Array<{ label: string; value: string }>) {
+  return toRows(rows);
+}
+
+function normalizeDemoGroups(groups: DemoCompanyData['bonding'] | DemoCompanyData['personnel']) {
+  return groups.reduce<CompanyInfoGroup[]>((result, group) => {
+    const rows = toRows(group.rows);
+    if (rows.length === 0 && !normalizeDisplayValue(group.title)) {
+      return result;
+    }
+
+    result.push({
+      id: group.id,
+      title: normalizeDisplayValue(group.title) ?? group.title,
+      rows,
+    });
+    return result;
+  }, []);
+}
+
 export function useCompanyProfile() {
   const { customer } = useAuth();
   const portalConfig = useMemo(() => getPortalConfig(), []);
+  const demoCompany = portalConfig.demo.data?.company ?? null;
   const [cslbLicense, setCslbLicense] = useState<CslbLicense | null>(null);
   const [isLoadingCompany, setIsLoadingCompany] = useState(false);
   const [companyLookupNotice, setCompanyLookupNotice] = useState<string | null>(null);
 
-  const cslbInsuredId = useMemo(() => customer?.insuredId?.trim() || '', [customer?.insuredId]);
+  const cslbInsuredId = useMemo(
+    () => demoCompany?.licenseNumber ?? (customer?.insuredId?.trim() || ''),
+    [customer?.insuredId, demoCompany?.licenseNumber]
+  );
 
   useEffect(() => {
     let isMounted = true;
 
     const hydrateCompany = async () => {
+      if (demoCompany) {
+        setCslbLicense(null);
+        setCompanyLookupNotice(null);
+        setIsLoadingCompany(false);
+        return;
+      }
+
       if (!cslbInsuredId) {
         setCslbLicense(null);
         setCompanyLookupNotice('No CSLB license number is available for this account.');
@@ -250,20 +282,26 @@ export function useCompanyProfile() {
     return () => {
       isMounted = false;
     };
-  }, [cslbInsuredId]);
+  }, [cslbInsuredId, demoCompany]);
 
   const cslbLink = useMemo(() => {
+    if (demoCompany?.cslbUrl) return demoCompany.cslbUrl;
     if (cslbInsuredId) return buildCslbLicenseUrl(cslbInsuredId);
     return cslbLicense?.sourceUrl ?? portalConfig.company.cslbUrl;
-  }, [cslbInsuredId, cslbLicense?.sourceUrl, portalConfig.company.cslbUrl]);
+  }, [cslbInsuredId, cslbLicense?.sourceUrl, demoCompany?.cslbUrl, portalConfig.company.cslbUrl]);
 
   const companyLicenseNumber =
+    normalizeDisplayValue(demoCompany?.licenseNumber) ||
     normalizeDisplayValue(cslbLicense?.licenseNumber) ||
     normalizeDisplayValue(cslbInsuredId) ||
     normalizeDisplayValue(portalConfig.company.licenseNumber);
 
-  const statusFallbackText = toDisplayStatus(cslbLicense?.status, customer?.active);
-  const statusChips = useMemo(() => buildStatusChips(statusFallbackText), [statusFallbackText]);
+  const statusFallbackText =
+    demoCompany?.statusFallbackText ?? toDisplayStatus(cslbLicense?.status, customer?.active);
+  const statusChips = useMemo(() => {
+    if (demoCompany?.statusChips.length) return demoCompany.statusChips;
+    return buildStatusChips(statusFallbackText);
+  }, [demoCompany?.statusChips, statusFallbackText]);
 
   const companyEffectiveDate = normalizeDisplayValue(cslbLicense?.issueDate);
   const companyExpirationDate = normalizeDisplayValue(cslbLicense?.expireDate);
@@ -271,45 +309,63 @@ export function useCompanyProfile() {
 
   const licenseRows = useMemo(
     () =>
-      toRows([
-        { label: 'License #', value: companyLicenseNumber },
-        { label: 'Status', value: statusFallbackText },
-        { label: 'Effective Date', value: companyEffectiveDate },
-        { label: 'Expiration Date', value: companyExpirationDate },
-        { label: 'Data Current', value: dataCurrentAsOf },
-      ]),
-    [companyEffectiveDate, companyExpirationDate, companyLicenseNumber, dataCurrentAsOf, statusFallbackText]
+      demoCompany?.licenseRows.length
+        ? normalizeDemoRows(demoCompany.licenseRows)
+        : toRows([
+            { label: 'License #', value: companyLicenseNumber },
+            { label: 'Status', value: statusFallbackText },
+            { label: 'Effective Date', value: companyEffectiveDate },
+            { label: 'Expiration Date', value: companyExpirationDate },
+            { label: 'Data Current', value: dataCurrentAsOf },
+          ]),
+    [
+      companyEffectiveDate,
+      companyExpirationDate,
+      companyLicenseNumber,
+      dataCurrentAsOf,
+      demoCompany?.licenseRows,
+      statusFallbackText,
+    ]
   );
 
-  const businessName = normalizeDisplayValue(cslbLicense?.business.businessName);
+  const businessName =
+    normalizeDisplayValue(demoCompany?.businessName) ??
+    normalizeDisplayValue(cslbLicense?.business.businessName);
 
   const businessRows = useMemo(
     () =>
-      toRows([
-        { label: 'DBA', value: cslbLicense?.business.dba },
-        { label: 'Street', value: cslbLicense?.business.street },
-        { label: 'City/State/ZIP', value: cslbLicense?.business.cityStateZip },
-        { label: 'Phone', value: cslbLicense?.business.phone },
-        { label: 'Entity', value: formatEntityDisplay(cslbLicense?.entity) },
-      ]),
+      demoCompany?.businessRows.length
+        ? normalizeDemoRows(demoCompany.businessRows)
+        : toRows([
+            { label: 'DBA', value: cslbLicense?.business.dba },
+            { label: 'Street', value: cslbLicense?.business.street },
+            { label: 'City/State/ZIP', value: cslbLicense?.business.cityStateZip },
+            { label: 'Phone', value: cslbLicense?.business.phone },
+            { label: 'Entity', value: formatEntityDisplay(cslbLicense?.entity) },
+          ]),
     [
       cslbLicense?.business.cityStateZip,
       cslbLicense?.business.dba,
       cslbLicense?.business.phone,
       cslbLicense?.business.street,
       cslbLicense?.entity,
+      demoCompany?.businessRows,
     ]
   );
 
   const classifications = useMemo(
     () =>
-      (cslbLicense?.classifications ?? [])
+      (demoCompany?.classifications ?? cslbLicense?.classifications ?? [])
         .map((classification) => normalizeDisplayValue(classification))
         .filter((classification): classification is string => Boolean(classification)),
-    [cslbLicense?.classifications]
+    [cslbLicense?.classifications, demoCompany?.classifications]
   );
 
   const bonding = useMemo(() => {
+    if (demoCompany?.bonding.length) {
+      return normalizeDemoGroups(demoCompany.bonding);
+    }
+
     return (cslbLicense?.bonding ?? []).reduce<CompanyInfoGroup[]>((groups, bond, index) => {
       const rows = toRows([
         { label: 'Carrier', value: bond.carrierName },
@@ -330,10 +386,13 @@ export function useCompanyProfile() {
 
       return groups;
     }, []);
-  }, [cslbLicense?.bonding]);
+  }, [cslbLicense?.bonding, demoCompany?.bonding]);
 
   const workersCompRows = useMemo(
-    () => buildWorkersCompRows(cslbLicense?.workersComp ?? null),
+    () =>
+      demoCompany?.workersCompRows.length
+        ? normalizeDemoRows(demoCompany.workersCompRows)
+        : buildWorkersCompRows(cslbLicense?.workersComp ?? null),
     [
       cslbLicense?.workersComp?.carrierName,
       cslbLicense?.workersComp?.effectiveDate,
@@ -343,10 +402,15 @@ export function useCompanyProfile() {
       cslbLicense?.workersComp?.notes,
       cslbLicense?.workersComp?.policyNumber,
       cslbLicense?.workersComp?.status,
+      demoCompany?.workersCompRows,
     ]
   );
 
   const personnel = useMemo(() => {
+    if (demoCompany?.personnel.length) {
+      return normalizeDemoGroups(demoCompany.personnel);
+    }
+
     return (cslbLicense?.personnel ?? []).reduce<CompanyInfoGroup[]>((groups, member, index) => {
       const rows = toRows([
         { label: 'Title', value: member.title },
@@ -365,7 +429,7 @@ export function useCompanyProfile() {
 
       return groups;
     }, []);
-  }, [cslbLicense?.personnel]);
+  }, [cslbLicense?.personnel, demoCompany?.personnel]);
 
   const hasDetailContent =
     licenseRows.length > 0 ||
@@ -377,8 +441,8 @@ export function useCompanyProfile() {
     personnel.length > 0;
 
   return {
-    isLoadingCompany,
-    companyLookupNotice,
+    isLoadingCompany: demoCompany ? false : isLoadingCompany,
+    companyLookupNotice: demoCompany?.companyLookupNotice ?? companyLookupNotice,
     cslbLink,
     cslbLicense,
     licenseRows,

@@ -16,6 +16,7 @@ const mockFetchInsuredAgentsByInsuredDatabaseId = jest.fn();
 const mockOpenExternalLink = jest.fn();
 const mockOpenInAppBrowser = jest.fn();
 const mockSendSmtpEmail = jest.fn();
+const mockGetPortalConfig = jest.fn();
 const mockAlert = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
 
 jest.mock('expo-router', () => ({
@@ -36,25 +37,7 @@ jest.mock('@/services/smtp-email-api', () => ({
   sendSmtpEmail: (...args: unknown[]) => mockSendSmtpEmail(...args),
 }));
 jest.mock('@/services/portal-config', () => ({
-  getPortalConfig: () => ({
-    agent: {
-      name: 'Fallback Agent',
-      phone: null,
-      email: null,
-      smsPhone: null,
-      mailingAddress: '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742',
-      scheduleUrl: 'https://calendar.google.com/agent',
-    },
-    company: {
-      licenseNumber: null,
-      cslbUrl: null,
-    },
-    actions: {
-      intakeFormsUrl: null,
-      issueCoiUrl: null,
-      supportEmail: 'support@insureprobuilders.com',
-    },
-  }),
+  getPortalConfig: () => mockGetPortalConfig(),
 }));
 jest.mock('@/components/brand-mark', () => ({
   BrandMark: () => null,
@@ -77,6 +60,30 @@ describe('DashboardScreen', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.resetAllMocks();
+    mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: false,
+        profile: null,
+        data: null,
+      },
+      agent: {
+        name: 'Fallback Agent',
+        phone: null,
+        email: null,
+        smsPhone: null,
+        mailingAddress: '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742',
+        scheduleUrl: 'https://calendar.google.com/agent',
+      },
+      company: {
+        licenseNumber: null,
+        cslbUrl: null,
+      },
+      actions: {
+        intakeFormsUrl: null,
+        issueCoiUrl: null,
+        supportEmail: 'support@insureprobuilders.com',
+      },
+    });
 
     mockUseAuth.mockReturnValue({
       customer: buildCustomer({
@@ -103,6 +110,11 @@ describe('DashboardScreen', () => {
         { label: 'Street', value: '123 Main St' },
         { label: 'City/State/ZIP', value: 'Los Angeles, CA 90001' },
       ],
+      classifications: [],
+      bonding: [],
+      workersCompRows: [],
+      personnel: [],
+      hasDetailContent: true,
     });
     mockFetchInsuredAgentsByInsuredDatabaseId.mockResolvedValue([
       {
@@ -232,6 +244,131 @@ describe('DashboardScreen', () => {
     expect(mockOpenExternalLink).not.toHaveBeenCalledWith(
       expect.stringContaining('mailto:'),
       expect.any(String)
+    );
+  });
+
+  it('uses the demo profile and blocks side-effect actions when demo mode is enabled', async () => {
+    mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: true,
+        profile: 'marketing',
+        data: {
+          id: 'marketing',
+          label: 'Marketing Demo',
+          customer: buildCustomer({
+            databaseId: 'demo-insured-db-urbanedge',
+            commercialName: 'UrbanEdge Construction Inc.',
+            firstName: 'Daniel',
+            lastName: 'Reyes',
+            email: 'demo@insureprobuilders.com',
+            phone: '916-555-0148',
+            insuredId: '101000937',
+          }),
+          agent: {
+            name: 'Emily Carter',
+            phone: '916-555-0123',
+            email: 'emily.carter@insureprobuilders.com',
+            smsPhone: '916-555-0188',
+            mailingAddress: '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742',
+            scheduleUrl: null,
+          },
+          company: {
+            licenseNumber: '101000937',
+            cslbUrl: 'https://www.cslb.ca.gov/license',
+            companyLookupNotice: 'Marketing demo profile is active. Live CSLB data is disabled.',
+            businessName: 'UrbanEdge Construction Inc.',
+            businessRows: [
+              { label: 'Street', value: '2865 Sunrise Blvd Ste 110' },
+              { label: 'City/State/ZIP', value: 'Rancho Cordova, CA 95742' },
+            ],
+            licenseRows: [{ label: 'License #', value: '101000937' }],
+            statusChips: ['Active'],
+            statusFallbackText: 'Active',
+            classifications: [],
+            bonding: [],
+            workersCompRows: [],
+            personnel: [],
+          },
+          ui: {
+            disableExternalActions: true,
+            disableRequestEmails: true,
+            disabledMessage: 'This action is disabled while the marketing demo profile is active.',
+          },
+        },
+      },
+      agent: {
+        name: 'Emily Carter',
+        phone: '916-555-0123',
+        email: 'emily.carter@insureprobuilders.com',
+        smsPhone: '916-555-0188',
+        mailingAddress: '2865 Sunrise Blvd Ste 110, Rancho Cordova, CA 95742',
+        scheduleUrl: null,
+      },
+      company: {
+        licenseNumber: '101000937',
+        cslbUrl: 'https://www.cslb.ca.gov/license',
+      },
+      actions: {
+        intakeFormsUrl: null,
+        issueCoiUrl: null,
+        supportEmail: 'support@insureprobuilders.com',
+      },
+    });
+    mockUseCompanyProfile.mockReturnValue({
+      isLoadingCompany: false,
+      companyLookupNotice: 'Marketing demo profile is active. Live CSLB data is disabled.',
+      cslbLink: 'https://www.cslb.ca.gov/license',
+      cslbLicense: null,
+      licenseRows: [{ label: 'License #', value: '101000937' }],
+      statusChips: ['Active'],
+      statusFallbackText: 'Active',
+      businessName: 'UrbanEdge Construction Inc.',
+      businessRows: [
+        { label: 'Street', value: '2865 Sunrise Blvd Ste 110' },
+        { label: 'City/State/ZIP', value: 'Rancho Cordova, CA 95742' },
+      ],
+      classifications: [],
+      bonding: [],
+      workersCompRows: [],
+      personnel: [],
+      hasDetailContent: true,
+    });
+
+    const { findAllByText, getByText } = render(<DashboardScreen />);
+
+    await act(async () => {
+      jest.runAllTimers();
+      await Promise.resolve();
+    });
+
+    expect(mockFetchInsuredAgentsByInsuredDatabaseId).not.toHaveBeenCalled();
+    expect((await findAllByText('UrbanEdge Construction Inc.')).length).toBeGreaterThan(0);
+    expect(getByText('Email: demo@insureprobuilders.com')).toBeTruthy();
+    expect(getByText('Emily Carter')).toBeTruthy();
+
+    fireEvent.press(getByText('Phone: 916-555-0123'));
+    expect(mockAlert).toHaveBeenCalledWith(
+      'Demo mode',
+      'This action is disabled while the marketing demo profile is active.'
+    );
+    expect(mockOpenExternalLink).not.toHaveBeenCalled();
+
+    fireEvent.press(getByText('Request COI'));
+    const latestAlertCall = mockAlert.mock.calls[mockAlert.mock.calls.length - 1];
+    const confirmationButtons = latestAlertCall?.[2] as
+      | Array<{ text?: string; onPress?: () => void }>
+      | undefined;
+    const sendRequestButton = confirmationButtons?.find((button) => button.text === 'Send Request');
+
+    await act(async () => {
+      sendRequestButton?.onPress?.();
+      await Promise.resolve();
+    });
+
+    expect(mockSendSmtpEmail).not.toHaveBeenCalled();
+    expect(mockAlert).toHaveBeenLastCalledWith(
+      'Demo mode',
+      'This action is disabled while the marketing demo profile is active.'
     );
   });
 });
