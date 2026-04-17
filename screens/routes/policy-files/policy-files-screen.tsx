@@ -260,7 +260,7 @@ export default function PolicyFilesScreen() {
   return (
     <ScreenContainer scroll={false}>
       <SectionHeader
-        title="Policy Files"
+        title="Documents"
         subtitle={
           selectedPolicyNumber
             ? `Available documents for policy ${selectedPolicyNumber}`
