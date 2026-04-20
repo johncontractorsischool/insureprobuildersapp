@@ -12,13 +12,13 @@ import { useAuth } from '@/context/auth-context';
 
 const LANDING_VISUAL_IMAGE = require('../../assets/images/imageWorker.png');
 const OFFERINGS = [
-  'Commercial General Liability (CGL)',
+  'Commercial General Liability',
   'Construction Bonds',
   "Workers' Compensation",
   'Inland Marine Insurance',
   'Excess / Umbrella Coverage',
   'Commercial Auto Insurance',
-  'Professional Liability (Errors & Omissions)',
+  'Professional Liability',
   'Pollution Liability',
 ] as const;
 
@@ -92,25 +92,21 @@ export default function LandingScreen() {
         showMobileVisual ? styles.mobileCta : null,
         isCompactMobileHeight ? styles.mobileCtaCompact : null,
       ]}>
-      <AppButton
-        label="Access Your Account"
-        onPress={() => (isAuthenticated ? router.replace('/(tabs)') : router.push('/(auth)/login'))}
-      />
-      {!isAuthenticated ? (
+      <View style={styles.ctaButtonWrap}>
         <AppButton
-          label="Sign Up"
-          variant="secondary"
-          onPress={() => router.push({ pathname: '/(auth)/login', params: { mode: 'signup' } })}
+          label="Access Your Account"
+          onPress={() => (isAuthenticated ? router.replace('/(tabs)') : router.push('/(auth)/login'))}
         />
+      </View>
+      {!isAuthenticated ? (
+        <View style={styles.ctaButtonWrap}>
+          <AppButton
+            label="Sign Up"
+            variant="secondary"
+            onPress={() => router.push({ pathname: '/(auth)/login', params: { mode: 'signup' } })}
+          />
+        </View>
       ) : null}
-      <Text
-        style={[
-          styles.caption,
-          showMobileVisual ? styles.mobileCaption : null,
-          isCompactMobileHeight ? styles.mobileCaptionCompact : null,
-        ]}>
-        One-time verification helps protect your account.
-      </Text>
     </View>
   );
 
@@ -483,11 +479,15 @@ const styles = StyleSheet.create({
   cta: {
     marginTop: 'auto',
     gap: theme.spacing.sm,
-    paddingBottom: theme.spacing.lg,
+    padding: theme.spacing.md,
+  },
+  ctaButtonWrap: {
+    width: '100%',
+    maxWidth: 360,
+    alignSelf: 'center',
   },
   mobileCta: {
     marginTop: 0,
-    paddingBottom: 0,
     borderRadius: theme.radius.lg,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.24)',
@@ -498,18 +498,6 @@ const styles = StyleSheet.create({
   mobileCtaCompact: {
     padding: theme.spacing.xs,
     gap: 6,
-  },
-  caption: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.textSubtle,
-    textAlign: 'center',
-  },
-  mobileCaption: {
-    color: 'rgba(255, 255, 255, 0.92)',
-  },
-  mobileCaptionCompact: {
-    fontSize: 11,
-    lineHeight: 14,
   },
   mobileVisualCanvas: {
     flex: 1,
