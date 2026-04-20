@@ -18,6 +18,7 @@ import {
   toUserFacingError,
   verifyEmailSignInCode,
 } from '@/services/auth-flow';
+import { getPortalConfig } from '@/services/portal-config';
 import { pickPreferredCustomerLookup } from '@/utils/customer-selection';
 
 function maskEmail(email: string) {
@@ -32,6 +33,7 @@ function maskEmail(email: string) {
 export default function VerifyScreen() {
   const { hint } = useLocalSearchParams<{ hint?: string }>();
   const { pendingEmail, pendingInsuredId, completeSignIn } = useAuth();
+  const portalConfig = getPortalConfig();
   const { width } = useWindowDimensions();
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -47,10 +49,16 @@ export default function VerifyScreen() {
   }, [pendingEmail]);
 
   useEffect(() => {
+    if (hint === 'apple-review' && portalConfig.review.enabled) {
+      setNotice(`Enter code ${portalConfig.review.code} to continue`);
+      setSecondsRemaining(0);
+      return;
+    }
+
     if (hint !== 'rate-limited') return;
     setNotice('Use your latest verification code, or wait before requesting another email.');
     setSecondsRemaining(60);
-  }, [hint]);
+  }, [hint, portalConfig.review.code, portalConfig.review.enabled]);
 
   useEffect(() => {
     if (secondsRemaining <= 0) return;
@@ -61,7 +69,10 @@ export default function VerifyScreen() {
   const maskedEmail = useMemo(() => maskEmail(pendingEmail), [pendingEmail]);
 
   const handleContinue = async () => {
-    if (code.replace(/\D/g, '').length !== 6 || !pendingEmail) return;
+    const normalizedCode = code.replace(/\D/g, '');
+    const isAppleReviewDemoEmail = portalConfig.review.enabled && pendingEmail === portalConfig.review.email;
+
+    if (normalizedCode.length !== 6 || !pendingEmail) return;
     if (submitting) return;
 
     setSubmitting(true);
@@ -69,6 +80,25 @@ export default function VerifyScreen() {
     setNotice('');
 
     try {
+      if (isAppleReviewDemoEmail) {
+        if (normalizedCode !== portalConfig.review.code) {
+          setError('Invalid review code. Use the Apple review code to continue.');
+          return;
+        }
+
+        const customers = await fetchCustomersByEmail(pendingEmail);
+        const primaryCustomer = pickPreferredCustomerLookup(customers, pendingInsuredId);
+
+        if (!primaryCustomer) {
+          throw new Error('No account was found for that email address.');
+        }
+
+        const reviewCustomer = toCustomerProfile(primaryCustomer);
+        completeSignIn(pendingEmail, reviewCustomer, reviewCustomer.insuredId ?? pendingInsuredId);
+        router.replace('/(tabs)');
+        return;
+      }
+
       const verifiedEmail = await verifyEmailSignInCode(pendingEmail, code);
       let customerProfile;
       try {
@@ -100,10 +130,18 @@ export default function VerifyScreen() {
   };
 
   const handleResend = async () => {
+    const isAppleReviewDemoEmail = portalConfig.review.enabled && pendingEmail === portalConfig.review.email;
+
     if (!pendingEmail || secondsRemaining > 0) return;
 
     setError('');
     setNotice('');
+
+    if (isAppleReviewDemoEmail) {
+      setNotice(`Enter code ${portalConfig.review.code} to continue`);
+      return;
+    }
+
     try {
       await sendEmailSignInCode(pendingEmail);
       setSecondsRemaining(60);

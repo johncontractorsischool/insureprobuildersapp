@@ -30,6 +30,11 @@ describe('getPortalConfig', () => {
         profile: null,
         data: null,
       },
+      review: {
+        enabled: false,
+        email: null,
+        code: null,
+      },
       agent: {
         name: 'Senior Agent',
         phone: '5551112222',
@@ -67,8 +72,24 @@ describe('getPortalConfig', () => {
     expect(config.demo.enabled).toBe(true);
     expect(config.demo.profile).toBe('marketing');
     expect(config.demo.data?.customer.commercialName).toBe('UrbanEdge Construction Inc.');
+    expect(config.review.enabled).toBe(false);
     expect(config.agent.name).toBe('Emily Carter');
     expect(config.company.licenseNumber).toBe('101000937');
+  });
+
+  it('enables the Apple review demo flow without forcing full demo mode', () => {
+    process.env.EXPO_PUBLIC_APPLE_REVIEW_DEMO_LOGIN = 'true';
+
+    const { getPortalConfig } = require('@/services/portal-config');
+    const config = getPortalConfig();
+
+    expect(config.demo.enabled).toBe(false);
+    expect(config.demo.data).toBeNull();
+    expect(config.review).toEqual({
+      enabled: true,
+      email: 'demo@insureprobuilders.com',
+      code: '111111',
+    });
   });
 
   it('falls back to the default agency mailing address when not configured', () => {

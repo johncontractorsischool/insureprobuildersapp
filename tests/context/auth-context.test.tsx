@@ -7,6 +7,18 @@ import { buildCustomerLookupRecord } from '@/tests/factories';
 
 const mockGetSupabaseClient = jest.fn();
 const mockFetchCustomersByEmail = jest.fn();
+const mockGetPortalConfig = jest.fn(() => ({
+  demo: {
+    enabled: false,
+    profile: null,
+    data: null,
+  },
+  review: {
+    enabled: false,
+    email: null,
+    code: null,
+  },
+}));
 
 jest.mock('@/services/supabase', () => ({
   getSupabaseClient: () => mockGetSupabaseClient(),
@@ -14,13 +26,16 @@ jest.mock('@/services/supabase', () => ({
 jest.mock('@/services/customer-api', () => ({
   fetchCustomersByEmail: (...args: unknown[]) => mockFetchCustomersByEmail(...args),
 }));
+jest.mock('@/services/portal-config', () => ({
+  getPortalConfig: () => mockGetPortalConfig(),
+}));
 
 function createSupabaseMock({
   sessionEmail = null,
   portalRows = [],
 }: {
   sessionEmail?: string | null;
-  portalRows?: Array<Record<string, unknown>>;
+  portalRows?: Record<string, unknown>[];
 }) {
   const signOut = jest.fn().mockResolvedValue(undefined);
   const unsubscribe = jest.fn();
@@ -72,6 +87,18 @@ function wrapper({ children }: PropsWithChildren) {
 describe('AuthProvider', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
+    mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: false,
+        profile: null,
+        data: null,
+      },
+      review: {
+        enabled: false,
+        email: null,
+        code: null,
+      },
+    });
   });
 
   it('hydrates the current session from the live customer lookup when it is available', async () => {
@@ -223,6 +250,54 @@ describe('AuthProvider', () => {
         insuredId: 'LIC-123456',
       })
     );
+  });
+
+  it('restores the Apple review demo session when no Supabase session exists', async () => {
+    await AsyncStorage.setItem(
+      'portal_review_session',
+      JSON.stringify({
+        email: 'demo@insureprobuilders.com',
+        insuredId: '101000937',
+      })
+    );
+
+    mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: false,
+        profile: null,
+        data: null,
+      },
+      review: {
+        enabled: true,
+        email: 'demo@insureprobuilders.com',
+        code: '111111',
+      },
+    });
+    mockGetSupabaseClient.mockReturnValue(createSupabaseMock({}));
+    mockFetchCustomersByEmail.mockResolvedValue([
+      buildCustomerLookupRecord({
+        eMail: 'demo@insureprobuilders.com',
+        insuredId: '101000937',
+        commercialName: 'UrbanEdge Construction Inc.',
+      }),
+    ]);
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+
+    expect(result.current.isLoadingAuth).toBe(false);
+    expect(result.current.userEmail).toBe('demo@insureprobuilders.com');
+    expect(result.current.pendingEmail).toBe('demo@insureprobuilders.com');
+    expect(result.current.pendingInsuredId).toBe('101000937');
+    expect(result.current.customer).toEqual(
+      expect.objectContaining({
+        commercialName: 'UrbanEdge Construction Inc.',
+        email: 'demo@insureprobuilders.com',
+        insuredId: '101000937',
+      })
+    );
+    expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('demo@insureprobuilders.com');
   });
 
   it('signOut clears the local auth state even if Supabase resolves normally', async () => {

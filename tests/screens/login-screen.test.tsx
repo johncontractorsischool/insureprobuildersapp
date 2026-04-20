@@ -15,6 +15,18 @@ const mockFetchCustomersByEmail = jest.fn();
 const mockSendEmailSignInCode = jest.fn();
 const mockIsOtpRateLimitError = jest.fn();
 const mockToUserFacingError = jest.fn((error: Error, fallback: string) => error.message || fallback);
+const mockGetPortalConfig = jest.fn(() => ({
+  demo: {
+    enabled: false,
+    profile: null,
+    data: null,
+  },
+  review: {
+    enabled: false,
+    email: null,
+    code: null,
+  },
+}));
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -32,6 +44,9 @@ jest.mock('@/services/auth-flow', () => ({
   isOtpRateLimitError: (...args: unknown[]) => mockIsOtpRateLimitError(...args),
   toUserFacingError: (...args: unknown[]) => mockToUserFacingError(...args),
 }));
+jest.mock('@/services/portal-config', () => ({
+  getPortalConfig: () => mockGetPortalConfig(),
+}));
 
 const LoginScreen = require('@/app/(auth)/login').default;
 
@@ -43,6 +58,18 @@ describe('LoginScreen', () => {
     });
     mockUseLocalSearchParams.mockReturnValue({});
     mockIsOtpRateLimitError.mockReturnValue(false);
+    mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: false,
+        profile: null,
+        data: null,
+      },
+      review: {
+        enabled: false,
+        email: null,
+        code: null,
+      },
+    });
   });
 
   it('sends a sign-in code and routes to verify when the email exists', async () => {
@@ -125,5 +152,43 @@ describe('LoginScreen', () => {
         params: { hint: 'rate-limited' },
       })
     );
+  });
+
+  it('routes the Apple review demo email directly to verify without sending OTP when review mode is enabled', async () => {
+    const setPendingEmail = jest.fn();
+    const setCustomer = jest.fn();
+    mockUseAuth.mockReturnValue({ setPendingEmail, setCustomer });
+    mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: false,
+        profile: null,
+        data: null,
+      },
+      review: {
+        enabled: true,
+        email: 'demo@insureprobuilders.com',
+        code: '111111',
+      },
+    });
+    mockFetchCustomersByEmail.mockResolvedValue([
+      buildCustomerLookupRecord({
+        eMail: 'demo@insureprobuilders.com',
+        insuredId: '101000937',
+      }),
+    ]);
+
+    const { getByPlaceholderText, getByText } = render(<LoginScreen />);
+
+    fireEvent.changeText(getByPlaceholderText('You@Company.com'), 'Demo@InsureProBuilders.com');
+    fireEvent.press(getByText('Continue'));
+
+    await waitFor(() => expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('demo@insureprobuilders.com'));
+    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('demo@insureprobuilders.com', '101000937'));
+    expect(mockSendEmailSignInCode).not.toHaveBeenCalled();
+    expect(setCustomer).toHaveBeenCalledWith(null);
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: '/(auth)/verify',
+      params: { hint: 'apple-review' },
+    });
   });
 });

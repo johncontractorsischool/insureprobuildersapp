@@ -12,6 +12,7 @@ import { useAuth } from '@/context/auth-context';
 import { CslbMomentumSignUpForm } from '@/screens/routes/auth/cslb-momentum-sign-up-form';
 import { fetchCustomersByEmail } from '@/services/customer-api';
 import { isOtpRateLimitError, sendEmailSignInCode, toUserFacingError } from '@/services/auth-flow';
+import { getPortalConfig } from '@/services/portal-config';
 import { matchesCustomerInsuredId } from '@/utils/customer-selection';
 
 function isEmailValid(value: string) {
@@ -30,6 +31,7 @@ function getAuthModeFromParam(value: string | string[] | undefined): AuthMode {
 export default function LoginScreen() {
   const params = useLocalSearchParams<{ mode?: string | string[] }>();
   const { setPendingEmail, setCustomer } = useAuth();
+  const portalConfig = getPortalConfig();
   const { width } = useWindowDimensions();
   const [mode, setMode] = useState<AuthMode>(getAuthModeFromParam(params.mode));
   const [email, setEmail] = useState('');
@@ -91,6 +93,13 @@ export default function LoginScreen() {
       } else {
         setRequiresLicenseNumber(false);
         selectedInsuredId = customers[0]?.insuredId?.trim() ?? '';
+      }
+
+      if (portalConfig.review.enabled && normalizedEmail === portalConfig.review.email) {
+        setPendingEmail(normalizedEmail, selectedInsuredId);
+        setCustomer(null);
+        router.push({ pathname: '/(auth)/verify', params: { hint: 'apple-review' } });
+        return;
       }
 
       await sendEmailSignInCode(normalizedEmail);

@@ -7,6 +7,11 @@ type PortalConfig = {
     profile: string | null;
     data: DemoProfile | null;
   };
+  review: {
+    enabled: boolean;
+    email: string | null;
+    code: string | null;
+  };
   agent: {
     name: string;
     phone: string | null;
@@ -31,6 +36,11 @@ function normalizeText(value: string | undefined) {
   return normalized ? normalized : null;
 }
 
+function normalizeEmail(value: string | undefined) {
+  const normalized = normalizeText(value);
+  return normalized ? normalized.toLowerCase() : null;
+}
+
 function normalizeBooleanFlag(value: string | undefined) {
   if (!value) return false;
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
@@ -49,16 +59,23 @@ function normalizeHttpUrl(value: string | undefined) {
 
 export function getPortalConfig(): PortalConfig {
   const isDemoModeEnabled = normalizeBooleanFlag(process.env.EXPO_PUBLIC_DEMO_ACCOUNT);
+  const isAppleReviewModeEnabled = normalizeBooleanFlag(process.env.EXPO_PUBLIC_APPLE_REVIEW_DEMO_LOGIN);
   const requestedDemoProfile = normalizeText(process.env.EXPO_PUBLIC_DEMO_PROFILE);
-  const demoProfile = isDemoModeEnabled
-    ? getDemoProfileById(requestedDemoProfile ?? DEFAULT_DEMO_PROFILE_ID)
-    : null;
+  const demoProfile = isDemoModeEnabled ? getDemoProfileById(requestedDemoProfile ?? DEFAULT_DEMO_PROFILE_ID) : null;
+  const appleReviewEmail =
+    normalizeEmail(process.env.EXPO_PUBLIC_APPLE_REVIEW_EMAIL) ?? 'demo@insureprobuilders.com';
+  const appleReviewCode = normalizeText(process.env.EXPO_PUBLIC_APPLE_REVIEW_CODE) ?? '111111';
 
   return {
     demo: {
       enabled: Boolean(demoProfile),
       profile: demoProfile?.id ?? requestedDemoProfile,
       data: demoProfile,
+    },
+    review: {
+      enabled: isAppleReviewModeEnabled,
+      email: isAppleReviewModeEnabled ? appleReviewEmail : null,
+      code: isAppleReviewModeEnabled ? appleReviewCode : null,
     },
     agent: {
       name: demoProfile?.agent.name ?? normalizeText(process.env.EXPO_PUBLIC_AGENT_NAME) ?? 'Assigned agent',
