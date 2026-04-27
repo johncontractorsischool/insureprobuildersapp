@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "insureprobuilders",
+    "name": "Pro-Builders Insurance Agency",
     "slug": "insureprobuilders",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/Logo2.png",
+    "icon": "./assets/images/pbialogo.png",
     "scheme": "insureprobuilders",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -18,7 +18,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/Logo2.png",
+        "foregroundImage": "./assets/images/pbialogo.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
@@ -27,15 +27,15 @@
       "package": "com.johncontractorsischool.insureprobuilders"
     },
     "web": {
-      "output": "static",
-      "favicon": "./assets/images/Logo2.png"
+      "output": "single",
+      "favicon": "./assets/images/pbialogo.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/Logo2.png",
+          "image": "./assets/images/pbialogo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",

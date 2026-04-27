@@ -1,6 +1,7 @@
 import { withApiKeyHeader } from '@/services/api-request-headers';
 
 const DEFAULT_CSLB_MOMENTUM_API_BASE_URL = 'http://localhost:3000';
+const CSLB_MOMENTUM_SYNC_LOG_PREFIX = '[Signup Sync]';
 
 export type CslbMomentumSyncRequest = {
   firstName: string;
@@ -24,6 +25,23 @@ export type CslbMomentumSyncSuccessResponse = {
   ok: true;
   result: CslbMomentumSyncResult;
 };
+
+function maskEmail(value: string) {
+  const [name, domain] = value.split('@');
+  if (!name || !domain) return value;
+  const first = name.charAt(0);
+  const last = name.charAt(name.length - 1);
+  const middle = '*'.repeat(Math.max(2, name.length - 2));
+  return `${first}${middle}${last}@${domain}`;
+}
+
+function logSignupSync(event: string, details: Record<string, unknown>) {
+  console.log(`${CSLB_MOMENTUM_SYNC_LOG_PREFIX} ${event}`, details);
+}
+
+function logSignupSyncWarning(event: string, details: Record<string, unknown>) {
+  console.warn(`${CSLB_MOMENTUM_SYNC_LOG_PREFIX} ${event}`, details);
+}
 
 function getCslbMomentumApiBaseUrl() {
   return (
@@ -109,6 +127,15 @@ export async function syncCslbMomentum(
   request: CslbMomentumSyncRequest
 ): Promise<CslbMomentumSyncSuccessResponse> {
   const endpoint = `${getCslbMomentumApiBaseUrl()}/api/cslb-momentum/sync`;
+  const emailMasked = maskEmail(request.email);
+
+  logSignupSync('request_started', {
+    endpoint,
+    emailMasked,
+    hasLicenseNumber: Boolean(request.licenseNumber),
+    hasAppFeeNumber: Boolean(request.appFeeNumber),
+    hasAgentName: Boolean(request.agentName),
+  });
 
   let response: Response;
   try {
@@ -121,14 +148,37 @@ export async function syncCslbMomentum(
       body: JSON.stringify(request),
     });
   } catch {
+    logSignupSyncWarning('request_network_failed', {
+      endpoint,
+      emailMasked,
+    });
     throw new Error('Unable to reach sync service. Check your connection and try again.');
   }
 
   const payload = await parseJsonResponse(response);
+  logSignupSync('response_received', {
+    endpoint,
+    emailMasked,
+    httpStatus: response.status,
+    ok: response.ok,
+  });
 
   if (!response.ok) {
+    logSignupSyncWarning('request_http_failed', {
+      endpoint,
+      emailMasked,
+      httpStatus: response.status,
+      payload,
+    });
     throw new Error(buildHttpErrorMessage(response, payload));
   }
 
-  return parseSyncSuccessPayload(payload);
+  const parsed = parseSyncSuccessPayload(payload);
+  logSignupSync('request_succeeded', {
+    endpoint,
+    emailMasked,
+    syncStatus: parsed.result.status,
+    syncMessage: parsed.result.message,
+  });
+  return parsed;
 }

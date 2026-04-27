@@ -74,6 +74,22 @@ This file gives human and automated coding agents the minimum context needed to 
 - Run targeted verification after changes when possible.
 - If a requested change depends on unclear product behavior, call out the assumption in your final summary.
 
+## Codex Subagents
+
+- Senior-role Codex subagents live in `.codex/agents/`.
+- These agents share one repository and one working tree; treat existing changes as user or agent work and do not revert unrelated edits.
+- Use subagents only when explicitly asked by the user.
+- Keep diffs small, focused, and directly tied to the requested scope.
+- Run lint, tests, builds, or targeted manual verification where applicable. If verification cannot be run, explain the blocker and recommend the next best check.
+- Summaries should include evidence gathered, unresolved risks, and concrete next actions.
+- Mobile agents should be used only when the repo contains iOS, Android, React Native, Flutter, Capacitor, Expo, or other mobile app code.
+- Use `senior-devops-platform-engineer` for web/mobile deployments, Expo web/mobile builds, React Native builds, iOS/Android builds, CI/CD, hosting, environment variables, secrets, Docker, cloud deployment, monitoring, rollback planning, and release automation.
+- `senior-devops-platform-engineer` must not deploy to production unless explicitly instructed.
+- `senior-devops-platform-engineer` must protect secrets, signing credentials, provisioning profiles, keystores, tokens, and private environment values.
+- `senior-devops-platform-engineer` should validate builds and release steps before claiming success.
+- Playwright QA should be used when a running app can be tested in a browser or when E2E tests need to be created or reviewed.
+- No agent should claim work is done without evidence.
+
 ## Verification Expectations
 
 - Minimum verification for most changes: `npm run lint`

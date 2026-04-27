@@ -15,6 +15,7 @@ import {
 import { upsertSignupAccount } from '@/services/signup-account';
 
 const AGENT_NAME_STORAGE_KEY = 'cslb-momentum-sync-agent-name-v1';
+const SIGNUP_FLOW_LOG_PREFIX = '[Signup Flow]';
 export type SignupIdentifierType = 'license' | 'appFee';
 
 export type CslbMomentumSyncForm = {
@@ -45,6 +46,23 @@ export const CSLB_MOMENTUM_SYNC_DEFAULT_FORM: CslbMomentumSyncForm = {
 
 function isEmailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function maskEmail(value: string) {
+  const [name, domain] = value.split('@');
+  if (!name || !domain) return value;
+  const first = name.charAt(0);
+  const last = name.charAt(name.length - 1);
+  const middle = '*'.repeat(Math.max(2, name.length - 2));
+  return `${first}${middle}${last}@${domain}`;
+}
+
+function logSignupFlow(event: string, details: Record<string, unknown>) {
+  console.log(`${SIGNUP_FLOW_LOG_PREFIX} ${event}`, details);
+}
+
+function logSignupFlowWarning(event: string, details: Record<string, unknown>) {
+  console.warn(`${SIGNUP_FLOW_LOG_PREFIX} ${event}`, details);
 }
 
 export function normalizeCslbMomentumSyncForm(form: CslbMomentumSyncForm): CslbMomentumSyncForm {
@@ -268,6 +286,11 @@ export function useCslbMomentumSync() {
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) {
+      logSignupFlowWarning('validation_blocked', {
+        identifierType,
+        emailMasked: normalizedFormWithAgent.email ? maskEmail(normalizedFormWithAgent.email) : null,
+        fieldsWithErrors: Object.keys(validationErrors),
+      });
       setResponse(null);
       return null;
     }
@@ -279,9 +302,26 @@ export function useCslbMomentumSync() {
     setResponse(null);
     setLastRequest(request);
 
+    let currentStep: 'sync' | 'signup_save' | 'otp_send' = 'sync';
+    const emailMasked = maskEmail(normalizedFormWithAgent.email);
+
+    logSignupFlow('start', {
+      emailMasked,
+      identifierType,
+      hasLicenseNumber: Boolean(normalizedFormWithAgent.licenseNumber),
+      hasAppFeeNumber: Boolean(normalizedFormWithAgent.appFeeNumber),
+      hasAgentName: Boolean(normalizedFormWithAgent.agentName),
+    });
+
     try {
       const nextResponse = await syncCslbMomentum(request);
+      logSignupFlow('sync_completed', {
+        emailMasked,
+        syncStatus: nextResponse.result.status,
+        syncMessage: nextResponse.result.message,
+      });
 
+      currentStep = 'signup_save';
       await upsertSignupAccount({
         firstName: normalizedFormWithAgent.firstName,
         lastName: normalizedFormWithAgent.lastName,
@@ -290,6 +330,10 @@ export function useCslbMomentumSync() {
         appFeeNumber: normalizedFormWithAgent.appFeeNumber,
         agentName: normalizedFormWithAgent.agentName,
         syncResponse: nextResponse,
+      });
+      logSignupFlow('signup_profile_saved', {
+        emailMasked,
+        syncStatus: nextResponse.result.status,
       });
 
       try {
@@ -306,10 +350,14 @@ export function useCslbMomentumSync() {
 
       setSavedAgentName(getNextRoundRobinAgentName(resolvedAgentName));
 
+      currentStep = 'otp_send';
       try {
         await sendEmailSignInCode(normalizedFormWithAgent.email);
       } catch (caughtError) {
         if (isOtpRateLimitError(caughtError)) {
+          logSignupFlowWarning('otp_rate_limited', {
+            emailMasked,
+          });
           setResponse(nextResponse);
           return {
             email: normalizedFormWithAgent.email,
@@ -318,12 +366,20 @@ export function useCslbMomentumSync() {
         }
         throw caughtError;
       }
+      logSignupFlow('otp_sent', {
+        emailMasked,
+      });
       setResponse(nextResponse);
       return {
         email: normalizedFormWithAgent.email,
         rateLimited: false,
       };
     } catch (caughtError) {
+      logSignupFlowWarning('failed', {
+        step: currentStep,
+        emailMasked,
+        error: caughtError instanceof Error ? caughtError.message : 'Unknown signup error',
+      });
       setResponse(null);
       if (caughtError instanceof Error && caughtError.message) {
         setErrorMessage(caughtError.message);
@@ -334,7 +390,7 @@ export function useCslbMomentumSync() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [form, isSubmitting, savedAgentName]);
+  }, [form, identifierType, isSubmitting, savedAgentName]);
 
   const reset = useCallback(() => {
     setForm({
