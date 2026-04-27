@@ -101,3 +101,5 @@ This file gives human and automated coding agents the minimum context needed to 
 - This repository currently has user changes in progress at times; do not revert unrelated edits.
 - There is no dedicated automated test suite configured yet beyond linting, so be cautious with behavioral changes.
 - Prefer adding documentation here when new workflows, environments, or deployment steps are introduced.
+
+- Updated 4/27
