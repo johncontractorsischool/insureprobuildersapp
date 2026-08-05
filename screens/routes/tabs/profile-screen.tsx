@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppButton } from '@/components/app-button';
 import { AppInput } from '@/components/app-input';
 import { ContactUsMenu } from '@/components/contact-us-menu';
+import { DigitalCardEntryPanel } from '@/components/digital-card/digital-card-entry-panel';
 import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
@@ -504,12 +505,16 @@ export default function ProfileScreen({
       {isDesktopLayout ? (
         // Desktop keeps profile details in a readable primary column with account actions in a calm right rail.
         <View style={styles.desktopLayout}>
-          <View style={styles.desktopMainColumn}>{accountCard}</View>
+          <View style={styles.desktopMainColumn}>
+            {accountCard}
+            <DigitalCardEntryPanel isDesktopLayout />
+          </View>
           <View style={styles.desktopSideColumn}>{supportBlock}</View>
         </View>
       ) : (
         <>
           {accountCard}
+          <DigitalCardEntryPanel />
           {supportBlock}
         </>
       )}

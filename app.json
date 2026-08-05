@@ -33,6 +33,18 @@
     "plugins": [
       "expo-router",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Insure Probuilders to use a profile photo or company logo on your digital business card."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow Insure Probuilders to open a prefilled contact form from a digital business card."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/pbialogo.png",
