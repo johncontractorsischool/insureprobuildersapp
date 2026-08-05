@@ -9,6 +9,7 @@ This `docs/` folder is the project's documentation home. It is organized so a ne
 - [Integrations and Environment](architecture/integrations-and-env.md): env vars, APIs, Supabase usage, AsyncStorage keys, and external actions
 - [Testing and Validation](architecture/testing-and-validation.md): Jest setup, test folder strategy, coverage workflow, and maintenance expectations
 - [Repository Map](reference/repository-map.md): every tracked folder and file with its purpose and current role
+- [Digital Business Card Handoff](handoffs/digital-business-card.md): implementation specification for the Expo card builder, public QR landing page, contact sharing, and wallet integrations
 
 ## Documentation Rules
 

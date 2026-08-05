@@ -15,6 +15,8 @@ const mockUpdateInsuredProfile = jest.fn();
 const mockPersistCustomersForEmail = jest.fn();
 const mockToCustomerProfile = jest.fn();
 const mockSendSmtpEmail = jest.fn();
+const mockRefreshDigitalCard = jest.fn();
+const mockRefreshDigitalCardDraftStatus = jest.fn();
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -22,6 +24,19 @@ jest.mock('expo-router', () => ({
 }));
 jest.mock('@/context/auth-context', () => ({
   useAuth: () => mockUseAuth(),
+}));
+jest.mock('@/context/digital-card-context', () => ({
+  useDigitalCard: () => ({
+    card: null,
+    hasDraft: false,
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    refresh: mockRefreshDigitalCard,
+    refreshDraftStatus: mockRefreshDigitalCardDraftStatus,
+    publish: jest.fn(),
+    update: jest.fn(),
+  }),
 }));
 jest.mock('@/services/customer-api', () => ({
   fetchCustomersByEmail: (...args: unknown[]) => mockFetchCustomersByEmail(...args),
