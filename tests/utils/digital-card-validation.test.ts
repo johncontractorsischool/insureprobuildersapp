@@ -5,10 +5,15 @@ import {
   normalizeHexColor,
 } from '@/utils/digital-card-branding';
 import {
+  buildDigitalCardInsuranceSummary,
+  normalizeDigitalCardInsuranceSummary,
+} from '@/utils/digital-card-insurance';
+import {
   buildInitialDigitalCardDraft,
   getDigitalCardOwnerId,
   validateDigitalCardDraft,
 } from '@/utils/digital-card-validation';
+import { buildPolicy } from '@/tests/factories';
 
 describe('digital card prefill', () => {
   it('prefills from the selected customer with fallback contact values', () => {
@@ -34,6 +39,7 @@ describe('digital card prefill', () => {
     expect(draft.email).toBe('jane@example.com');
     expect(draft.serviceArea).toBe('Fresno, CA');
     expect(draft.primaryColor).toBe('#0B5B47');
+    expect(draft.insuranceSummary).toEqual([]);
   });
 
   it('uses stable account identifiers for draft isolation', () => {
@@ -63,6 +69,7 @@ describe('digital card validation', () => {
       primaryColor: 'not-a-color',
       cslbLicenseNumber: '',
       licenseClassification: '',
+      insuranceSummary: [],
     });
 
     expect(result.isValid).toBe(false);
@@ -83,6 +90,37 @@ describe('digital card validation', () => {
   it('builds public card URLs from the configured origin', () => {
     process.env.EXPO_PUBLIC_DIGITAL_CARD_BASE_URL = 'https://cards.example.com/';
     expect(buildDigitalCardPublicUrl('acme-a1b2')).toBe('https://cards.example.com/card/acme-a1b2');
+  });
+});
+
+describe('digital card insurance summary', () => {
+  it('summarizes only active policy lines for public display', () => {
+    expect(
+      buildDigitalCardInsuranceSummary([
+        buildPolicy({ productName: 'General Liability', status: 'Active' }),
+        buildPolicy({ id: 'policy-2', productName: 'Workers Compensation', status: 'Active' }),
+        buildPolicy({ id: 'policy-3', productName: 'Commercial Auto', status: 'Pending' }),
+      ])
+    ).toEqual([
+      { label: 'General Liability', detail: 'Active policy on file' },
+      { label: 'Workers Compensation', detail: 'Active policy on file' },
+    ]);
+  });
+
+  it('deduplicates active policy lines and normalizes persisted summaries', () => {
+    expect(
+      buildDigitalCardInsuranceSummary([
+        buildPolicy({ productName: 'GL', status: 'Active' }),
+        buildPolicy({ id: 'policy-2', productName: 'General Liability', status: 'Active' }),
+      ])
+    ).toEqual([{ label: 'General Liability', detail: 'Active policy on file' }]);
+
+    expect(
+      normalizeDigitalCardInsuranceSummary([
+        { label: ' General Liability ', detail: ' Active policy on file ' },
+        { label: '', detail: 'Missing label' },
+      ])
+    ).toEqual([{ label: 'General Liability', detail: 'Active policy on file' }]);
   });
 });
 

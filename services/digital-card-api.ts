@@ -1,11 +1,13 @@
 import { getSupabaseClient } from '@/services/supabase';
 import type {
   DigitalBusinessCard,
+  DigitalCardInsuranceSummary,
   DigitalCardDraft,
   DigitalCardPrimaryAction,
   DigitalCardStatus,
 } from '@/types/digital-card';
 import { getDigitalCardPrimaryColor } from '@/utils/digital-card-branding';
+import { normalizeDigitalCardInsuranceSummary } from '@/utils/digital-card-insurance';
 
 const DEFAULT_TABLE = 'digital_business_cards';
 const DEFAULT_BUCKET = 'digital-card-media';
@@ -29,6 +31,7 @@ type DigitalBusinessCardRow = {
   primary_color?: string | null;
   cslb_license_number?: string | null;
   license_classification?: string | null;
+  insurance_summary?: DigitalCardInsuranceSummary[] | null;
   published_at: string | null;
   updated_at: string;
 };
@@ -122,6 +125,7 @@ function mapRowToCard(row: DigitalBusinessCardRow): DigitalBusinessCard {
     primaryColor: getDigitalCardPrimaryColor(row.primary_color),
     cslbLicenseNumber: row.cslb_license_number ?? '',
     licenseClassification: row.license_classification ?? '',
+    insuranceSummary: normalizeDigitalCardInsuranceSummary(row.insurance_summary),
     publishedAt: row.published_at,
     updatedAt: row.updated_at,
   };
@@ -208,6 +212,7 @@ async function saveDigitalBusinessCard(draft: DigitalCardDraft, options: SaveCar
     primary_color: getDigitalCardPrimaryColor(draft.primaryColor),
     cslb_license_number: draft.cslbLicenseNumber,
     license_classification: draft.licenseClassification,
+    insurance_summary: normalizeDigitalCardInsuranceSummary(draft.insuranceSummary),
     published_at: status === 'published' ? existing?.published_at ?? timestamp : existing?.published_at ?? null,
     updated_at: timestamp,
   };

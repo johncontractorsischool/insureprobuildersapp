@@ -17,6 +17,7 @@ create table if not exists public.digital_business_cards (
   primary_color text not null default '#0B5B47' check (primary_color ~ '^#[0-9A-Fa-f]{6}$'),
   cslb_license_number text not null default '',
   license_classification text not null default '',
+  insurance_summary jsonb not null default '[]'::jsonb,
   published_at timestamptz null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -31,6 +32,9 @@ alter table public.digital_business_cards
 
 alter table public.digital_business_cards
   add column if not exists license_classification text not null default '';
+
+alter table public.digital_business_cards
+  add column if not exists insurance_summary jsonb not null default '[]'::jsonb;
 
 create unique index if not exists digital_business_cards_one_per_owner
   on public.digital_business_cards(owner_id);

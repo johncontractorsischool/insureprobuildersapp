@@ -4,6 +4,11 @@ export type DigitalCardStatus = 'draft' | 'published';
 
 export type DigitalCardTemplateId = 'insurepro-classic';
 
+export type DigitalCardInsuranceSummary = {
+  label: string;
+  detail: string;
+};
+
 export type DigitalBusinessCard = {
   id: string;
   ownerId: string;
@@ -23,6 +28,7 @@ export type DigitalBusinessCard = {
   primaryColor: string;
   cslbLicenseNumber: string;
   licenseClassification: string;
+  insuranceSummary: DigitalCardInsuranceSummary[];
   publishedAt: string | null;
   updatedAt: string;
 };

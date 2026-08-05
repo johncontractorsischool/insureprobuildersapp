@@ -122,6 +122,27 @@ function TrustDetails({ card }: { card: PreviewCard }) {
   );
 }
 
+function InsuranceDetails({ card }: { card: PreviewCard }) {
+  if (card.insuranceSummary.length === 0) return null;
+
+  return (
+    <View style={styles.insuranceSection}>
+      <View style={styles.insuranceHeader}>
+        <Ionicons name="shield-checkmark-outline" size={18} color={theme.colors.primary} />
+        <Text style={styles.insuranceTitle}>Insurance on file</Text>
+      </View>
+      <View style={styles.insuranceRows}>
+        {card.insuranceSummary.map((summary) => (
+          <View key={`${summary.label}-${summary.detail}`} style={styles.insuranceRow}>
+            <Text style={styles.insuranceLabel}>{summary.label}</Text>
+            <Text style={styles.insuranceDetail}>{summary.detail}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 export function DigitalCardPreview({
   card,
   interactive = false,
@@ -181,6 +202,8 @@ export function DigitalCardPreview({
       {card.bio ? <Text style={styles.bio}>{card.bio}</Text> : null}
 
       <TrustDetails card={card} />
+
+      <InsuranceDetails card={card} />
 
       <View style={styles.quickActions}>
         {shouldShowQuickCall ? (
@@ -373,6 +396,45 @@ const styles = StyleSheet.create({
   trustText: {
     ...theme.typography.caption,
     color: theme.colors.primaryDeep,
+  },
+  insuranceSection: {
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    marginHorizontal: theme.spacing.lg,
+    marginTop: theme.spacing.md,
+    paddingTop: theme.spacing.md,
+    gap: theme.spacing.sm,
+  },
+  insuranceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+  },
+  insuranceTitle: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: '800',
+  },
+  insuranceRows: {
+    gap: theme.spacing.xs,
+  },
+  insuranceRow: {
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceTint,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    gap: 2,
+  },
+  insuranceLabel: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: '800',
+  },
+  insuranceDetail: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
   },
   quickActions: {
     flexDirection: 'row',

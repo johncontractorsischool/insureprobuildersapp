@@ -14,10 +14,12 @@ import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useDigitalCard } from '@/context/digital-card-context';
+import { usePolicies } from '@/context/policies-context';
 import { useDigitalCardDraft } from '@/hooks/use-digital-card-draft';
 import { isDigitalCardBackendConfigured } from '@/services/digital-card-api';
 import type { DigitalBusinessCard, DigitalCardDraft, DigitalCardPrimaryAction } from '@/types/digital-card';
 import { getDigitalCardPrimaryColor } from '@/utils/digital-card-branding';
+import { buildDigitalCardInsuranceSummary } from '@/utils/digital-card-insurance';
 import { buildDigitalCardPublicUrl, isDigitalCardPublishingConfigured } from '@/utils/digital-card-links';
 import {
   buildInitialDigitalCardDraft,
@@ -48,6 +50,7 @@ function draftFromCard(card: DigitalBusinessCard): DigitalCardDraft {
     primaryColor: card.primaryColor,
     cslbLicenseNumber: card.cslbLicenseNumber,
     licenseClassification: card.licenseClassification,
+    insuranceSummary: card.insuranceSummary,
   };
 }
 
@@ -98,6 +101,7 @@ function PrimaryActionPicker({
 
 export default function DigitalCardScreen() {
   const { customer, userEmail, isAuthenticated, isLoadingAuth } = useAuth();
+  const { policies, isLoadingPolicies } = usePolicies();
   const { width } = useWindowDimensions();
   const { card, isSaving, publish, update, refreshDraftStatus } = useDigitalCard();
   const [step, setStep] = useState<DigitalCardStep>(card ? 'share' : 'template');
@@ -115,6 +119,7 @@ export default function DigitalCardScreen() {
   const isPublicUrlConfigured = isDigitalCardPublishingConfigured();
   const isBackendConfigured = isDigitalCardBackendConfigured();
   const publishingBlocked = !isPublicUrlConfigured || !isBackendConfigured;
+  const insuranceSummary = useMemo(() => buildDigitalCardInsuranceSummary(policies), [policies]);
 
   useEffect(() => {
     if (card) {
@@ -219,7 +224,11 @@ export default function DigitalCardScreen() {
       return;
     }
 
-    const nextCard = card ? await update(result.draft) : await publish(result.draft);
+    const publishDraft = {
+      ...result.draft,
+      insuranceSummary,
+    };
+    const nextCard = card ? await update(publishDraft) : await publish(publishDraft);
     await clearDraft();
     await refreshDraftStatus();
     setDraft(draftFromCard(nextCard));
@@ -361,6 +370,30 @@ export default function DigitalCardScreen() {
             onChange={(primaryAction) => updateDraft({ primaryAction })}
           />
         </View>
+      </Section>
+
+      <Section title="Insurance shown publicly">
+        {isLoadingPolicies ? (
+          <Text style={styles.insuranceMutedText}>Loading active policy details...</Text>
+        ) : insuranceSummary.length > 0 ? (
+          <>
+            <Text style={styles.insuranceMutedText}>
+              These active policy lines will appear on the public card. Policy numbers, premiums, and carriers stay private.
+            </Text>
+            <View style={styles.insuranceList}>
+              {insuranceSummary.map((summary) => (
+                <View key={summary.label} style={styles.insuranceRow}>
+                  <Text style={styles.insuranceLabel}>{summary.label}</Text>
+                  <Text style={styles.insuranceDetail}>{summary.detail}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        ) : (
+          <Text style={styles.insuranceMutedText}>
+            No active policy lines are available to show on this public card.
+          </Text>
+        )}
       </Section>
 
       <View style={styles.stickyActions}>
@@ -529,6 +562,30 @@ const styles = StyleSheet.create({
   },
   segmentTextSelected: {
     color: theme.colors.primaryDeep,
+  },
+  insuranceMutedText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textMuted,
+  },
+  insuranceList: {
+    gap: theme.spacing.xs,
+  },
+  insuranceRow: {
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceTint,
+    padding: theme.spacing.sm,
+    gap: theme.spacing.xxs,
+  },
+  insuranceLabel: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: '800',
+  },
+  insuranceDetail: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
   },
   stickyActions: {
     gap: theme.spacing.xs,

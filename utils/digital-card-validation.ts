@@ -1,6 +1,7 @@
 import type { Customer } from '@/types/customer';
 import type { DigitalCardDraft, DigitalCardValidationResult } from '@/types/digital-card';
 import { getDigitalCardPrimaryColor, normalizeHexColor } from '@/utils/digital-card-branding';
+import { normalizeDigitalCardInsuranceSummary } from '@/utils/digital-card-insurance';
 import { normalizeWebsiteUrl } from '@/utils/digital-card-links';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -49,6 +50,7 @@ export function buildInitialDigitalCardDraft(customer: Customer | null, userEmai
     primaryColor: getDigitalCardPrimaryColor(null),
     cslbLicenseNumber: '',
     licenseClassification: '',
+    insuranceSummary: [],
   };
 }
 
@@ -72,6 +74,7 @@ export function normalizeDigitalCardDraft(draft: DigitalCardDraft): DigitalCardD
     primaryColor: getDigitalCardPrimaryColor(draft.primaryColor),
     cslbLicenseNumber: trimmed(draft.cslbLicenseNumber),
     licenseClassification: trimmed(draft.licenseClassification),
+    insuranceSummary: normalizeDigitalCardInsuranceSummary(draft.insuranceSummary),
   };
 }
 
