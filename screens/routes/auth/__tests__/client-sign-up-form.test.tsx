@@ -57,14 +57,17 @@ function mockHookState(overrides: Record<string, unknown> = {}) {
 
 describe('ClientSignUpForm', () => {
   const mockSetPendingEmail = jest.fn();
+  const mockSetPendingSignup = jest.fn();
   const mockSetCustomer = jest.fn();
 
   beforeEach(() => {
     mockedRouterPush.mockReset();
     mockSetPendingEmail.mockReset();
+    mockSetPendingSignup.mockReset();
     mockSetCustomer.mockReset();
     mockedUseAuth.mockReturnValue({
       setPendingEmail: mockSetPendingEmail,
+      setPendingSignup: mockSetPendingSignup,
       setCustomer: mockSetCustomer,
     });
   });
@@ -121,9 +124,23 @@ describe('ClientSignUpForm', () => {
   });
 
   it('navigates to verify when create account submit succeeds', async () => {
+    const request = {
+      legalName: 'Builder Co',
+      email: 'john@example.com',
+      status: 'PROSPECT' as const,
+      licenseNumber: '1144038',
+      primaryContactFirstName: 'John',
+      primaryContactLastName: 'Builder',
+      addressLine1: '123 Main St',
+      city: 'Los Angeles',
+      state: 'CA',
+      zipCode: '90001',
+    };
     const submit = jest.fn().mockResolvedValue({
       email: 'john@example.com',
+      request,
       rateLimited: false,
+      otpDeliveryFailed: false,
     });
     mockHookState({ submit });
 
@@ -133,6 +150,7 @@ describe('ClientSignUpForm', () => {
 
     await waitFor(() => {
       expect(mockSetPendingEmail).toHaveBeenCalledWith('john@example.com');
+      expect(mockSetPendingSignup).toHaveBeenCalledWith(request);
       expect(mockSetCustomer).toHaveBeenCalledWith(null);
       expect(mockedRouterPush).toHaveBeenCalledWith('/(auth)/verify');
     });

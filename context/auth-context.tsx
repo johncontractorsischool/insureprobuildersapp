@@ -1,15 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
+import type { ClientSignupRequest } from '@/services/client-signup-api';
 import { fetchAccountByBusinessEmail } from '@/services/customer-api';
-import { getPortalConfig } from '@/services/portal-config';
 import { getSupabaseClient } from '@/services/supabase';
 import type { Customer, CustomerLookupRecord } from '@/types/customer';
 import { matchesCustomerInsuredId } from '@/utils/customer-selection';
 
 const CUSTOMER_TABLE = process.env.EXPO_PUBLIC_SUPABASE_CUSTOMER_TABLE?.trim() || 'portal_customers';
 const SELECTED_CUSTOMER_STORAGE_KEY = 'portal_selected_customer';
-const REVIEW_SESSION_STORAGE_KEY = 'portal_review_session';
 
 type AuthContextValue = {
   isLoadingAuth: boolean;
@@ -18,8 +17,11 @@ type AuthContextValue = {
   customer: Customer | null;
   pendingEmail: string;
   pendingInsuredId: string;
+  pendingSignup: ClientSignupRequest | null;
   setPendingEmail: (email: string, insuredId?: string | null) => void;
   setPendingInsuredId: (insuredId: string) => void;
+  setPendingSignup: (signup: ClientSignupRequest) => void;
+  clearPendingSignup: () => void;
   setCustomer: (customer: Customer | null) => void;
   completeSignIn: (email: string, customerData?: Customer | null, insuredId?: string | null) => void;
   signOut: () => Promise<void>;
@@ -32,11 +34,6 @@ function normalizeEmail(email: string) {
 }
 
 type PersistedCustomerSelection = {
-  email: string;
-  insuredId: string;
-};
-
-type PersistedReviewSession = {
   email: string;
   insuredId: string;
 };
@@ -94,44 +91,6 @@ async function persistSelectedCustomer(email: string, insuredId: string | null |
       email: normalizedEmail,
       insuredId: normalizedInsuredId,
     } satisfies PersistedCustomerSelection)
-  );
-}
-
-async function readPersistedReviewSession() {
-  try {
-    const raw = await AsyncStorage.getItem(REVIEW_SESSION_STORAGE_KEY);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw) as Partial<PersistedReviewSession>;
-    if (typeof parsed.email !== 'string' || typeof parsed.insuredId !== 'string') {
-      return null;
-    }
-
-    const email = normalizeEmail(parsed.email);
-    const insuredId = parsed.insuredId.trim();
-    if (!email || !insuredId) return null;
-
-    return { email, insuredId };
-  } catch {
-    return null;
-  }
-}
-
-async function persistReviewSession(email: string, insuredId: string | null | undefined) {
-  const normalizedEmail = normalizeEmail(email);
-  const normalizedInsuredId = insuredId?.trim() ?? '';
-
-  if (!normalizedEmail || !normalizedInsuredId) {
-    await AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
-    return;
-  }
-
-  await AsyncStorage.setItem(
-    REVIEW_SESSION_STORAGE_KEY,
-    JSON.stringify({
-      email: normalizedEmail,
-      insuredId: normalizedInsuredId,
-    } satisfies PersistedReviewSession)
   );
 }
 
@@ -225,14 +184,12 @@ function pickBestPortalCustomer(rows: PortalCustomerRow[], preferredInsuredId?: 
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
-  const portalConfig = getPortalConfig();
-  const appleReviewEnabled = portalConfig.review.enabled;
-  const appleReviewEmail = portalConfig.review.email;
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [customer, setCustomerState] = useState<Customer | null>(null);
   const [pendingEmail, setPendingEmailState] = useState('');
   const [pendingInsuredId, setPendingInsuredIdState] = useState('');
+  const [pendingSignup, setPendingSignupState] = useState<ClientSignupRequest | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -286,7 +243,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
         const sessionEmail = data.session?.user?.email ?? null;
         const persistedSelection = await readPersistedCustomerSelection();
-        const reviewSession = appleReviewEnabled ? await readPersistedReviewSession() : null;
         if (!mounted) return;
         const preferredInsuredId =
           sessionEmail && persistedSelection?.email === normalizeEmail(sessionEmail)
@@ -297,11 +253,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
         setPendingInsuredIdState(preferredInsuredId);
         if (sessionEmail) {
           void hydrateCustomerForEmail(sessionEmail, preferredInsuredId);
-        } else if (appleReviewEnabled && reviewSession?.email === appleReviewEmail) {
-          setUserEmail(reviewSession.email);
-          setPendingEmailState(reviewSession.email);
-          setPendingInsuredIdState(reviewSession.insuredId);
-          void hydrateCustomerForEmail(reviewSession.email, reviewSession.insuredId);
         }
         setIsLoadingAuth(false);
 
@@ -309,20 +260,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
           const nextEmail = session?.user?.email ?? null;
           setUserEmail(nextEmail);
           if (!nextEmail) {
-            const storedReviewSession = appleReviewEnabled ? await readPersistedReviewSession() : null;
-            if (mounted && appleReviewEnabled && storedReviewSession?.email === appleReviewEmail) {
-              setUserEmail(storedReviewSession.email);
-              setPendingEmailState(storedReviewSession.email);
-              setPendingInsuredIdState(storedReviewSession.insuredId);
-              void hydrateCustomerForEmail(storedReviewSession.email, storedReviewSession.insuredId);
-              return;
-            }
-
             setPendingEmailState('');
             setPendingInsuredIdState('');
+            setPendingSignupState(null);
             setCustomerState(null);
             void AsyncStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
-            void AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
             return;
           }
           const nextSelection = await readPersistedCustomerSelection();
@@ -331,7 +273,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
             nextSelection?.email === normalizeEmail(nextEmail) ? nextSelection.insuredId : '';
           setPendingEmailState(nextEmail);
           setPendingInsuredIdState(nextInsuredId);
-          void AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
           void hydrateCustomerForEmail(nextEmail, nextInsuredId);
         });
         unsubscribe = () => authListener.data.subscription.unsubscribe();
@@ -348,7 +289,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       mounted = false;
       unsubscribe();
     };
-  }, [appleReviewEmail, appleReviewEnabled]);
+  }, []);
 
   const setPendingEmail = (email: string, insuredId?: string | null) => {
     setPendingEmailState(normalizeEmail(email));
@@ -359,6 +300,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setPendingInsuredIdState(insuredId.trim());
   };
 
+  const setPendingSignup = (signup: ClientSignupRequest) => {
+    setPendingSignupState(signup);
+  };
+
+  const clearPendingSignup = () => {
+    setPendingSignupState(null);
+  };
+
   const setCustomer = (nextCustomer: Customer | null) => {
     setCustomerState(nextCustomer);
   };
@@ -366,7 +315,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const completeSignIn = useCallback((email: string, customerData?: Customer | null, insuredId?: string | null) => {
     const normalized = normalizeEmail(email);
     const normalizedInsuredId = insuredId?.trim() ?? customerData?.insuredId?.trim() ?? '';
-    const isAppleReviewSession = appleReviewEnabled && normalized === appleReviewEmail;
     setUserEmail(normalized);
     setPendingEmailState(normalized);
     setPendingInsuredIdState(normalizedInsuredId);
@@ -374,11 +322,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
       email: normalized,
       ...(customerData ?? {}),
     });
+    setPendingSignupState(null);
     void persistSelectedCustomer(normalized, normalizedInsuredId);
-    void (isAppleReviewSession
-      ? persistReviewSession(normalized, normalizedInsuredId)
-      : AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY));
-  }, [appleReviewEmail, appleReviewEnabled]);
+  }, []);
 
   const signOut = async () => {
     try {
@@ -388,9 +334,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
       setUserEmail(null);
       setPendingEmailState('');
       setPendingInsuredIdState('');
+      setPendingSignupState(null);
       setCustomerState(null);
       await AsyncStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
-      await AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
     }
   };
 
@@ -402,13 +348,24 @@ export function AuthProvider({ children }: PropsWithChildren) {
       customer,
       pendingEmail,
       pendingInsuredId,
+      pendingSignup,
       setPendingEmail,
       setPendingInsuredId,
+      setPendingSignup,
+      clearPendingSignup,
       setCustomer,
       completeSignIn,
       signOut,
     }),
-    [completeSignIn, customer, isLoadingAuth, pendingEmail, pendingInsuredId, userEmail]
+    [
+      completeSignIn,
+      customer,
+      isLoadingAuth,
+      pendingEmail,
+      pendingInsuredId,
+      pendingSignup,
+      userEmail,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

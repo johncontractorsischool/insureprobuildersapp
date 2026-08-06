@@ -161,6 +161,16 @@ export default function PaymentScreen({
     () => payableRecords.find((record) => getRecordKey(record) === selectedRecordKey) ?? null,
     [payableRecords, selectedRecordKey]
   );
+  const selectedConvenienceFee = selectedRecord
+    ? paymentMethod === 'CARD'
+      ? selectedRecord.cardConvenienceFee
+      : selectedRecord.achConvenienceFee
+    : null;
+  const selectedTotalAmount = selectedRecord
+    ? paymentMethod === 'CARD'
+      ? selectedRecord.cardTotalAmount
+      : selectedRecord.achTotalAmount
+    : null;
 
   useFocusEffect(
     useCallback(() => {
@@ -302,6 +312,14 @@ export default function PaymentScreen({
     };
 
     if (paymentMethod === 'CARD') {
+      if (
+        selectedRecord.cardConvenienceFee === null ||
+        selectedRecord.cardTotalAmount === null
+      ) {
+        return {
+          error: 'Card payments are unavailable until the Input1 convenience fee is confirmed.',
+        };
+      }
       if (!/^\d{12,19}$/.test(cardNumber)) {
         return { error: 'Enter a valid 12–19 digit card number.' };
       }
@@ -329,6 +347,14 @@ export default function PaymentScreen({
       };
     }
 
+    if (
+      selectedRecord.achConvenienceFee === null ||
+      selectedRecord.achTotalAmount === null
+    ) {
+      return {
+        error: 'ACH payments are unavailable until the Input1 convenience fee is confirmed.',
+      };
+    }
     if (!achBankName.trim() || achBankName.trim().length > 100) {
       return { error: 'Enter a bank name of 100 characters or fewer.' };
     }
@@ -366,6 +392,10 @@ export default function PaymentScreen({
     }
     if (
       Math.round(record.amountDue * 100) !== Math.round(current.amountDue * 100) ||
+      record.cardConvenienceFee !== current.cardConvenienceFee ||
+      record.cardTotalAmount !== current.cardTotalAmount ||
+      record.achConvenienceFee !== current.achConvenienceFee ||
+      record.achTotalAmount !== current.achTotalAmount ||
       record.purpose !== current.purpose
     ) {
       await refreshPaymentEligibility();
@@ -497,7 +527,29 @@ export default function PaymentScreen({
             <Ionicons name="checkmark-circle" size={42} color={theme.colors.success} />
           </View>
           <Text style={styles.cardTitle}>Payment successful</Text>
-          <Text style={styles.successAmount}>{formatCurrency(successfulPayment.amount)}</Text>
+          <Text style={styles.successAmount}>
+            {formatCurrency(successfulPayment.totalCharged ?? successfulPayment.amount)}
+          </Text>
+          <ReviewRow label="Payment amount" value={formatCurrency(successfulPayment.amount)} />
+          {successfulPayment.convenienceFee !== null ? (
+            <ReviewRow
+              label="Convenience fee"
+              value={formatCurrency(successfulPayment.convenienceFee)}
+            />
+          ) : null}
+          {successfulPayment.addOnConvenienceFee !== null &&
+          successfulPayment.addOnConvenienceFee > 0 ? (
+            <ReviewRow
+              label="Additional convenience fee"
+              value={formatCurrency(successfulPayment.addOnConvenienceFee)}
+            />
+          ) : null}
+          {successfulPayment.totalCharged !== null ? (
+            <ReviewRow
+              label="Total charged"
+              value={formatCurrency(successfulPayment.totalCharged)}
+            />
+          ) : null}
           <Text style={styles.cardSubtitle}>A receipt was sent to {userEmail}.</Text>
           {successfulPayment.receiptId ? (
             <View style={styles.receiptRow}>
@@ -779,7 +831,26 @@ export default function PaymentScreen({
                 <View style={styles.reviewCard}>
                   <Text style={styles.sectionTitle}>Confirm Payment</Text>
                   <ReviewRow label="Record" value={buildPaymentRecordLabel(selectedRecord)} />
-                  <ReviewRow label="Amount" value={formatCurrency(selectedRecord.amountDue)} />
+                  <ReviewRow
+                    label="Payment amount"
+                    value={formatCurrency(selectedRecord.amountDue)}
+                  />
+                  {selectedConvenienceFee !== null ? (
+                    <ReviewRow
+                      label={
+                        paymentMethod === 'CARD'
+                          ? 'Card convenience fee'
+                          : 'ACH convenience fee'
+                      }
+                      value={formatCurrency(selectedConvenienceFee)}
+                    />
+                  ) : null}
+                  {selectedTotalAmount !== null ? (
+                    <ReviewRow
+                      label="Total charged"
+                      value={formatCurrency(selectedTotalAmount)}
+                    />
+                  ) : null}
                   <ReviewRow
                     label="Purpose"
                     value={getPaymentPurposeLabel(selectedRecord.purpose)}
@@ -793,7 +864,11 @@ export default function PaymentScreen({
                     }
                   />
                   <Text style={styles.confirmationText}>
-                    By confirming, you authorize PBIA to submit this payment through Input1. An email receipt is required.
+                    By confirming, you authorize PBIA to submit this payment through Input1
+                    {selectedTotalAmount !== null
+                      ? ` for a total charge of ${formatCurrency(selectedTotalAmount)}, including the displayed convenience fee.`
+                      : '.'}{' '}
+                    An email receipt is required.
                   </Text>
                   <AppButton label="Confirm Payment" onPress={() => void handleSubmitPayment()} loading={isSubmitting} />
                   <AppButton label="Edit Payment" variant="secondary" onPress={() => setIsReviewing(false)} disabled={isSubmitting} />
@@ -833,6 +908,20 @@ export default function PaymentScreen({
               label="Purpose"
               value={getPaymentPurposeLabel(selectedRecord.purpose)}
             />
+            {selectedConvenienceFee !== null ? (
+              <ReviewRow
+                label={
+                  paymentMethod === 'CARD' ? 'Card convenience fee' : 'ACH convenience fee'
+                }
+                value={formatCurrency(selectedConvenienceFee)}
+              />
+            ) : null}
+            {selectedTotalAmount !== null ? (
+              <ReviewRow
+                label={paymentMethod === 'CARD' ? 'Card total' : 'ACH total'}
+                value={formatCurrency(selectedTotalAmount)}
+              />
+            ) : null}
             <ReviewRow
               label="Due date"
               value={formatDemandDueDate(selectedRecord.dueDate)}

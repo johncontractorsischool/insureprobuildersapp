@@ -37,8 +37,8 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
   - `GET /client/documents`
   - `GET /client/policies/:policyId/documents`
   - `POST /client/contact-requests`
-- Every request includes `X-Client-Email`. When a matching Supabase session exists, the request also includes its bearer token so a trusted gateway can validate the user.
-- Signup and initial account discovery run before a Supabase session exists. Sign-in discovery uses the singular primary-email-only `GET /client/account/by-business-email` contract; it does not search secondary or contact emails.
+- Every request requires the current Supabase access token as `Authorization: Bearer <token>`. The shared transport rejects missing sessions and rejects a requested email that differs from the verified session email. It does not send `X-Client-Email` or `X-API-Key`.
+- Sign-in sends and verifies the Supabase OTP before account discovery. Signup details remain in memory until OTP verification succeeds, then `POST /client/signup` runs with the authenticated session before the singular primary-email account lookup.
 - Profile change, support, feedback, and COI requests use `POST /client/contact-requests`; the app no longer calls an SMTP relay directly.
 - PBIA document responses currently provide metadata but no download URL. The app lists the documents and marks download as unavailable rather than constructing a legacy URL.
 - Local Android emulator note: `localhost` API base URLs are translated to `10.0.2.2` at runtime so the emulator can reach services running on the Mac host.
@@ -52,12 +52,12 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
   - `GET /client/payment-eligibility/:demandId`
   - `POST /client/payment-eligibility/:demandId/payments`
 - Context: `PaymentsProvider` loads visible agent-published demands for the selected `accountId`. PBIA omits drafts, hidden, processing, paid, and cancelled demands.
-- Every request derives `X-Client-Email` from the authenticated Supabase session and includes the Supabase access token as `Authorization: Bearer <token>`. Demand reload and submission also include `X-Client-Account-Id`.
-- The payment form treats the server `amountDue` and `purpose` as read-only and submits them exactly as published by the agent.
+- Every request includes the Supabase access token as `Authorization: Bearer <token>` and requires the supplied app email to match the session email. Demand reload and submission also include `X-Client-Account-Id`.
+- The payment form treats the server `amountDue` and `purpose` as read-only and submits them exactly as published by the agent. Card review requires `cardConvenienceFee` and `cardTotalAmount`; ACH review requires `achConvenienceFee` and `achTotalAmount`. The app displays the selected method's fee and total before confirmation, while still submitting only `amountDue` so Input1 does not apply its fee twice. PBIA currently supplies a percentage-based card preview and a fixed $3.00 ACH preview.
 - The configured base URL must use HTTPS outside local development. Loopback HTTP is allowed only for local Expo development; production must use the trusted HTTPS gateway URL.
-- For Expo web, the gateway must allow the app origin plus `GET`, `POST`, `Authorization`, `Content-Type`, `X-Client-Email`, `X-Client-Account-Id`, and `Idempotency-Key` in its CORS policy.
-- The gateway must validate the signed-in Supabase session before public payment deployment.
-- Only a response with `status: "SUCCEEDED"` is treated as a confirmed payment.
+- For Expo web, PBIA must allow the exact app origin plus `GET`, `POST`, `Authorization`, `Content-Type`, `X-Client-Account-Id`, and `Idempotency-Key` in its CORS policy.
+- PBIA validates every bearer token with the same Supabase Auth project and derives the account-scoping email server-side.
+- Only a response with `status: "SUCCEEDED"` is treated as a confirmed payment. The success screen displays Input1's normalized actual `convenienceFee`, optional `addOnConvenienceFee`, and `totalCharged` when receipt details are immediately available.
 - A `502` is treated as an unconfirmed attempt and is never automatically retried.
 - Card and ACH fields remain local to the mounted payment screen, are never persisted, and are cleared after success, failure, or cancellation.
 - Native payment screens block screenshots and screen recordings with `expo-screen-capture`; iOS app-switcher previews are also protected.
@@ -89,7 +89,7 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
   - `updated_at`
 - Policies:
   - authenticated users can read rows whose `login_email` matches the auth JWT email
-  - inserts and updates are allowed for pre-auth sync scenarios
+  - inserts and updates require an authenticated JWT whose email matches `login_email`
 
 ## Local Persistence
 

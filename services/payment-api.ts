@@ -100,7 +100,6 @@ async function buildHeaders(
   return {
     Accept: 'application/json',
     Authorization: `Bearer ${accessToken}`,
-    'X-Client-Email': sessionEmail,
     ...additionalHeaders,
   };
 }
@@ -144,6 +143,20 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
     typeof record.premium === 'number' &&
     typeof record.paidAmount === 'number' &&
     typeof record.amountDue === 'number' &&
+    (record.cardConvenienceFee === null || typeof record.cardConvenienceFee === 'number') &&
+    (record.cardTotalAmount === null || typeof record.cardTotalAmount === 'number') &&
+    ((record.cardConvenienceFee === null && record.cardTotalAmount === null) ||
+      (typeof record.cardConvenienceFee === 'number' &&
+        record.cardConvenienceFee >= 0 &&
+        typeof record.cardTotalAmount === 'number' &&
+        record.cardTotalAmount >= record.amountDue)) &&
+    (record.achConvenienceFee === null || typeof record.achConvenienceFee === 'number') &&
+    (record.achTotalAmount === null || typeof record.achTotalAmount === 'number') &&
+    ((record.achConvenienceFee === null && record.achTotalAmount === null) ||
+      (typeof record.achConvenienceFee === 'number' &&
+        record.achConvenienceFee >= 0 &&
+        typeof record.achTotalAmount === 'number' &&
+        record.achTotalAmount >= record.amountDue)) &&
     (record.purpose === 'PREMIUM' ||
       record.purpose === 'DOWN_PAYMENT' ||
       record.purpose === 'INSTALLMENT' ||
@@ -237,6 +250,9 @@ function isSuccessfulPayment(value: unknown): value is SuccessfulPayment {
     typeof payment.id === 'string' &&
     typeof payment.demandId === 'string' &&
     typeof payment.amount === 'number' &&
+    (payment.convenienceFee === null || typeof payment.convenienceFee === 'number') &&
+    (payment.addOnConvenienceFee === null || typeof payment.addOnConvenienceFee === 'number') &&
+    (payment.totalCharged === null || typeof payment.totalCharged === 'number') &&
     payment.currency === 'USD' &&
     typeof payment.purpose === 'string' &&
     (payment.receiptId === null || typeof payment.receiptId === 'string') &&

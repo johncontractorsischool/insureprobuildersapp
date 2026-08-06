@@ -20,14 +20,12 @@
 ## 3. Sign In Flow
 
 1. `app/(auth)/login.tsx` collects the email address.
-2. The screen first calls `fetchAccountByBusinessEmail(email)`, which uses `GET /client/account/by-business-email` and matches only the account's primary business email.
-3. A `404` stops sign-in before OTP; a `409` is surfaced instead of arbitrarily selecting an account.
-4. If the singular account exists, the screen calls `sendEmailSignInCode(email)` through Supabase.
-5. On success:
+2. The screen calls `sendEmailSignInCode(email)` through Supabase before making any PBIA request.
+3. On success:
    - `pendingEmail` is stored in auth context
    - `customer` is cleared so stale profile data does not leak forward
    - the router pushes `/(auth)/verify`
-6. If Supabase reports OTP rate limiting:
+4. If Supabase reports OTP rate limiting:
    - the user is still sent to `verify`
    - the screen passes `hint=rate-limited` so the verify screen can show the right notice and resend cooldown
 
@@ -36,13 +34,14 @@
 1. `app/(auth)/verify.tsx` requires `pendingEmail`; otherwise it redirects back to login.
 2. The user enters a six-digit code via `OTPInput`.
 3. `verifyEmailSignInCode(pendingEmail, code)` verifies the code with Supabase.
-4. After a successful verification, the screen refreshes the same singular account by calling `fetchAccountByBusinessEmail(verifiedEmail)`.
-5. If the account is returned:
+4. For signup, the screen verifies that the pending form email equals the verified email, then calls authenticated `POST /client/signup`. Signup data is never sent to PBIA before OTP verification and is not persisted locally.
+5. The screen loads the singular primary business-email account by calling authenticated `fetchAccountByBusinessEmail(verifiedEmail)`.
+6. If the account is returned:
    - it is persisted into Supabase with `persistCustomersForEmail`
    - it is converted with `toCustomerProfile`
-6. `completeSignIn(email, customerProfile)` updates auth context.
-7. The user is redirected to `/(tabs)`.
-8. If customer sync fails after OTP verification, sign-in still completes so auth is not blocked by a secondary lookup failure.
+7. `completeSignIn(email, customerProfile)` updates auth context.
+8. The user is redirected to `/(tabs)`.
+9. A missing or failed PBIA account lookup blocks entry and remains retryable; failure of only the optional Supabase customer-cache write does not block entry.
 
 ## 5. Dashboard Hydration Flow
 
@@ -68,9 +67,9 @@
 2. PBIA returns only visible `PUBLISHED` payment demands. An empty list means no payment is currently due.
 3. The dashboard renders one **Payment Due** card per returned `demandId`, including the exact amount, due date, purpose, and optional agent message.
 4. The payment screen reloads `GET /client/payment-eligibility/{demandId}` with `X-Client-Account-Id` before review and again before submission.
-5. The amount and purpose are agent-authored and cannot be changed by the client.
-6. Card or ACH submission posts to `/client/payment-eligibility/{demandId}/payments` with the selected account header and one intent-scoped idempotency key.
-7. Only `SUCCEEDED` confirms payment. After success, the app clears sensitive fields, refreshes eligibility, and the paid demand disappears.
+5. The amount and purpose are agent-authored and cannot be changed by the client. Card and ACH reviews display PBIA's server-calculated convenience-fee preview and total; confirmation for a method is unavailable when its preview is missing. ACH currently uses the approved fixed $3.00 fee.
+6. Card or ACH submission posts to `/client/payment-eligibility/{demandId}/payments` with the selected account header and one intent-scoped idempotency key. Both request bodies contain the base `amountDue`, not the preview total, because Input1 applies its configured fee.
+7. Only `SUCCEEDED` confirms payment. The success screen shows Input1's actual normalized fee and total when receipt details are available. After success, the app clears sensitive fields, refreshes eligibility, and the paid demand disappears.
 
 ## 7. Policies Flow
 
@@ -133,5 +132,6 @@
 
 - Missing `customer.accountId` blocks PBIA policy, agent, CSLB, coverage, document, and contact-request calls and surfaces a user-facing error.
 - Agent lookup failure does not break the dashboard; it falls back to env-configured agent info.
-- Customer sync failure after OTP success does not cancel the authenticated session.
+- A rejected/expired PBIA bearer token requires Supabase session refresh or a new sign-in; the app never falls back to a caller-supplied email header or static review code.
+- PBIA account lookup failure after OTP success blocks protected data access. Only failure of the optional Supabase customer-cache write is tolerated.
 - PBIA WebView failures never throw into the UI intentionally; they log diagnostics and show retryable fallback UI instead.

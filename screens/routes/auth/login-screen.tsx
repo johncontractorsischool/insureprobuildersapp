@@ -10,9 +10,7 @@ import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { ClientSignUpForm } from '@/screens/routes/auth/client-sign-up-form';
-import { fetchAccountByBusinessEmail } from '@/services/customer-api';
 import { isOtpRateLimitError, sendEmailSignInCode, toUserFacingError } from '@/services/auth-flow';
-import { getPortalConfig } from '@/services/portal-config';
 
 function isEmailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -30,7 +28,6 @@ function getAuthModeFromParam(value: string | string[] | undefined): AuthMode {
 export default function LoginScreen() {
   const params = useLocalSearchParams<{ mode?: string | string[] }>();
   const { setPendingEmail, setCustomer } = useAuth();
-  const portalConfig = getPortalConfig();
   const { width } = useWindowDimensions();
   const [mode, setMode] = useState<AuthMode>(getAuthModeFromParam(params.mode));
   const [email, setEmail] = useState('');
@@ -47,7 +44,6 @@ export default function LoginScreen() {
 
   const handleContinue = async () => {
     const normalizedEmail = email.trim().toLowerCase();
-    let selectedInsuredId = '';
 
     if (!isEmailValid(normalizedEmail)) {
       setError('Enter a valid email address to continue.');
@@ -60,30 +56,14 @@ export default function LoginScreen() {
     setError('');
 
     try {
-      const customer = await fetchAccountByBusinessEmail(normalizedEmail);
-
-      if (!customer) {
-        setError('No account was found for that primary business email address.');
-        return;
-      }
-
-      selectedInsuredId = customer.insuredId?.trim() ?? '';
-
-      if (portalConfig.review.enabled && normalizedEmail === portalConfig.review.email) {
-        setPendingEmail(normalizedEmail, selectedInsuredId);
-        setCustomer(null);
-        router.push({ pathname: '/(auth)/verify', params: { hint: 'apple-review' } });
-        return;
-      }
-
       await sendEmailSignInCode(normalizedEmail);
 
-      setPendingEmail(normalizedEmail, selectedInsuredId);
+      setPendingEmail(normalizedEmail);
       setCustomer(null);
       router.push('/(auth)/verify');
     } catch (caughtError) {
       if (isOtpRateLimitError(caughtError)) {
-        setPendingEmail(normalizedEmail, selectedInsuredId);
+        setPendingEmail(normalizedEmail);
         setCustomer(null);
         router.push({ pathname: '/(auth)/verify', params: { hint: 'rate-limited' } });
         return;

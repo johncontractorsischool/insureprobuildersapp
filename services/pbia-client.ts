@@ -43,24 +43,31 @@ export function normalizeClientEmail(email: string) {
 
 async function buildPbiaHeaders(clientEmail: string, additionalHeaders: Record<string, string>) {
   const requestedEmail = normalizeClientEmail(clientEmail);
-  let authorizationHeader: string | null = null;
+  let sessionEmail: string;
+  let accessToken: string;
 
   try {
-    const { data } = await getSupabaseClient().auth.getSession();
+    const { data, error } = await getSupabaseClient().auth.getSession();
     const session = data.session;
-    const sessionEmail = session?.user.email ? normalizeClientEmail(session.user.email) : null;
-
-    if (session?.access_token && sessionEmail === requestedEmail) {
-      authorizationHeader = `Bearer ${session.access_token}`;
+    if (error || !session?.access_token || !session.user.email) {
+      throw new Error('Missing session');
     }
+    sessionEmail = normalizeClientEmail(session.user.email);
+    accessToken = session.access_token;
   } catch {
-    // Account discovery and signup happen before an authenticated Supabase session exists.
+    throw new PbiaApiError(
+      401,
+      'Your secure sign-in session is unavailable. Please sign in again.'
+    );
+  }
+
+  if (sessionEmail !== requestedEmail) {
+    throw new PbiaApiError(401, 'Your signed-in account changed. Please sign in again.');
   }
 
   return {
     Accept: 'application/json',
-    'X-Client-Email': requestedEmail,
-    ...(authorizationHeader ? { Authorization: authorizationHeader } : {}),
+    Authorization: `Bearer ${accessToken}`,
     ...additionalHeaders,
   };
 }

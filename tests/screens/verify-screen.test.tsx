@@ -12,24 +12,16 @@ const mockRouter = {
 const mockUseLocalSearchParams = jest.fn(() => ({}));
 const mockUseAuth = jest.fn();
 const mockFetchAccountByBusinessEmail = jest.fn();
+const mockCreateClientSignup = jest.fn();
 const mockPersistCustomersForEmail = jest.fn();
 const mockSendEmailSignInCode = jest.fn();
-const mockToCustomerProfile = jest.fn((customer) => ({ insuredId: customer.insuredId, fullName: 'Jane Builder' }));
+const mockToCustomerProfile = jest.fn((customer: { insuredId?: string | null }) => ({
+  insuredId: customer.insuredId,
+  fullName: 'Jane Builder',
+}));
 const mockToUserFacingError = jest.fn((error: Error, fallback: string) => error.message || fallback);
 const mockVerifyEmailSignInCode = jest.fn();
 const mockIsOtpRateLimitError = jest.fn();
-const mockGetPortalConfig = jest.fn(() => ({
-  demo: {
-    enabled: false,
-    profile: null,
-    data: null,
-  },
-  review: {
-    enabled: false,
-    email: null,
-    code: null,
-  },
-}));
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -42,16 +34,18 @@ jest.mock('@/context/auth-context', () => ({
 jest.mock('@/services/customer-api', () => ({
   fetchAccountByBusinessEmail: (...args: unknown[]) => mockFetchAccountByBusinessEmail(...args),
 }));
+jest.mock('@/services/client-signup-api', () => ({
+  createClientSignup: (...args: unknown[]) => mockCreateClientSignup(...args),
+}));
 jest.mock('@/services/auth-flow', () => ({
   persistCustomersForEmail: (...args: unknown[]) => mockPersistCustomersForEmail(...args),
   sendEmailSignInCode: (...args: unknown[]) => mockSendEmailSignInCode(...args),
-  toCustomerProfile: (...args: unknown[]) => mockToCustomerProfile(...args),
-  toUserFacingError: (...args: unknown[]) => mockToUserFacingError(...args),
+  toCustomerProfile: (customer: { insuredId?: string | null }) =>
+    mockToCustomerProfile(customer),
+  toUserFacingError: (error: Error, fallback: string) =>
+    mockToUserFacingError(error, fallback),
   verifyEmailSignInCode: (...args: unknown[]) => mockVerifyEmailSignInCode(...args),
   isOtpRateLimitError: (...args: unknown[]) => mockIsOtpRateLimitError(...args),
-}));
-jest.mock('@/services/portal-config', () => ({
-  getPortalConfig: () => mockGetPortalConfig(),
 }));
 jest.mock('@/components/otp-input', () => ({
   OTPInput: ({ value, onChange }: { value: string; onChange: (next: string) => void }) => {
@@ -69,21 +63,12 @@ describe('VerifyScreen', () => {
     mockUseAuth.mockReturnValue({
       pendingEmail: 'jane@example.com',
       pendingInsuredId: 'LIC-123456',
+      pendingSignup: null,
+      clearPendingSignup: jest.fn(),
       completeSignIn: jest.fn(),
     });
     mockIsOtpRateLimitError.mockReturnValue(false);
-    mockGetPortalConfig.mockReturnValue({
-      demo: {
-        enabled: false,
-        profile: null,
-        data: null,
-      },
-      review: {
-        enabled: false,
-        email: null,
-        code: null,
-      },
-    });
+    mockPersistCustomersForEmail.mockResolvedValue(undefined);
   });
 
   it('verifies the code, syncs customers, and routes into the app', async () => {
@@ -91,6 +76,8 @@ describe('VerifyScreen', () => {
     mockUseAuth.mockReturnValue({
       pendingEmail: 'jane@example.com',
       pendingInsuredId: 'LIC-123456',
+      pendingSignup: null,
+      clearPendingSignup: jest.fn(),
       completeSignIn,
     });
     mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
@@ -122,6 +109,8 @@ describe('VerifyScreen', () => {
     mockUseAuth.mockReturnValue({
       pendingEmail: 'jane@example.com',
       pendingInsuredId: 'LIC-123456',
+      pendingSignup: null,
+      clearPendingSignup: jest.fn(),
       completeSignIn,
     });
     mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
@@ -155,6 +144,8 @@ describe('VerifyScreen', () => {
     mockUseAuth.mockReturnValue({
       pendingEmail: '',
       pendingInsuredId: '',
+      pendingSignup: null,
+      clearPendingSignup: jest.fn(),
       completeSignIn: jest.fn(),
     });
 
@@ -173,25 +164,15 @@ describe('VerifyScreen', () => {
     ).toBeTruthy();
   });
 
-  it('accepts the Apple review code for the demo email without calling Supabase verification', async () => {
+  it('requires Supabase verification for the Apple review email', async () => {
     const completeSignIn = jest.fn();
     mockUseLocalSearchParams.mockReturnValue({ hint: 'apple-review' });
     mockUseAuth.mockReturnValue({
       pendingEmail: 'demo@insureprobuilders.com',
       pendingInsuredId: '101000937',
+      pendingSignup: null,
+      clearPendingSignup: jest.fn(),
       completeSignIn,
-    });
-    mockGetPortalConfig.mockReturnValue({
-      demo: {
-        enabled: false,
-        profile: null,
-        data: null,
-      },
-      review: {
-        enabled: true,
-        email: 'demo@insureprobuilders.com',
-        code: '111111',
-      },
     });
     mockFetchAccountByBusinessEmail.mockResolvedValue(
       buildCustomerLookupRecord({
@@ -201,9 +182,8 @@ describe('VerifyScreen', () => {
       })
     );
 
-    const { getByTestId, getByText, findByText } = render(<VerifyScreen />);
-
-    expect(await findByText('Enter code 111111 to continue')).toBeTruthy();
+    mockVerifyEmailSignInCode.mockResolvedValue('demo@insureprobuilders.com');
+    const { getByTestId, getByText } = render(<VerifyScreen />);
 
     fireEvent.changeText(getByTestId('otp-input'), '111111');
     fireEvent.press(getByText('Verify and Continue'));
@@ -215,9 +195,53 @@ describe('VerifyScreen', () => {
         '101000937'
       )
     );
-    expect(mockVerifyEmailSignInCode).not.toHaveBeenCalled();
+    expect(mockVerifyEmailSignInCode).toHaveBeenCalledWith(
+      'demo@insureprobuilders.com',
+      '111111'
+    );
     expect(mockFetchAccountByBusinessEmail).toHaveBeenCalledWith('demo@insureprobuilders.com');
-    expect(mockPersistCustomersForEmail).not.toHaveBeenCalled();
+    expect(mockPersistCustomersForEmail).toHaveBeenCalled();
     expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)');
+  });
+
+  it('creates a pending signup only after Supabase verifies its email', async () => {
+    const completeSignIn = jest.fn();
+    const clearPendingSignup = jest.fn();
+    const pendingSignup = {
+      legalName: 'Builder Co',
+      email: 'new@example.com',
+      status: 'PROSPECT' as const,
+      licenseNumber: '1144038',
+      primaryContactFirstName: 'New',
+      primaryContactLastName: 'Client',
+      addressLine1: '123 Main St',
+      city: 'Los Angeles',
+      state: 'CA',
+      zipCode: '90001',
+    };
+    mockUseAuth.mockReturnValue({
+      pendingEmail: 'new@example.com',
+      pendingInsuredId: '',
+      pendingSignup,
+      clearPendingSignup,
+      completeSignIn,
+    });
+    mockVerifyEmailSignInCode.mockResolvedValue('new@example.com');
+    mockCreateClientSignup.mockResolvedValue({ id: 'signup-1' });
+    mockFetchAccountByBusinessEmail.mockResolvedValue(
+      buildCustomerLookupRecord({ eMail: 'new@example.com' })
+    );
+
+    const { getByTestId, getByText } = render(<VerifyScreen />);
+    fireEvent.changeText(getByTestId('otp-input'), '123456');
+    fireEvent.press(getByText('Verify and Continue'));
+
+    await waitFor(() => expect(mockCreateClientSignup).toHaveBeenCalledWith(pendingSignup));
+    expect(clearPendingSignup).toHaveBeenCalled();
+    expect(completeSignIn).toHaveBeenCalledWith(
+      'new@example.com',
+      expect.any(Object),
+      expect.anything()
+    );
   });
 });

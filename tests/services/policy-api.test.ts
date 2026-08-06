@@ -1,5 +1,21 @@
 import { fetchPoliciesByAccount } from '@/services/policy-api';
 
+jest.mock('@/services/supabase', () => ({
+  getSupabaseClient: () => ({
+    auth: {
+      getSession: async () => ({
+        data: {
+          session: {
+            access_token: 'supabase-token',
+            user: { email: 'jane@example.com' },
+          },
+        },
+        error: null,
+      }),
+    },
+  }),
+}));
+
 describe('PBIA policy api', () => {
   beforeEach(() => {
     process.env.EXPO_PUBLIC_PBIA_API_BASE_URL = 'http://localhost:3000';

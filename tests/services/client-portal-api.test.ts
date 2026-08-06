@@ -2,17 +2,12 @@ import { fetchClientAgent } from '@/services/agent-api';
 import { createClientSignup } from '@/services/client-signup-api';
 import { createClientContactRequest } from '@/services/contact-request-api';
 
+const mockGetSession = jest.fn();
+
 jest.mock('@/services/supabase', () => ({
   getSupabaseClient: () => ({
     auth: {
-      getSession: async () => ({
-        data: {
-          session: {
-            access_token: 'supabase-token',
-            user: { email: 'jane@example.com' },
-          },
-        },
-      }),
+      getSession: () => mockGetSession(),
     },
   }),
 }));
@@ -21,6 +16,15 @@ describe('PBIA client portal write and agent routes', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     process.env.EXPO_PUBLIC_PBIA_API_BASE_URL = 'http://localhost:3000';
+    mockGetSession.mockResolvedValue({
+      data: {
+        session: {
+          access_token: 'supabase-token',
+          user: { email: 'jane@example.com' },
+        },
+      },
+      error: null,
+    });
   });
 
   it('loads the email-scoped assigned agent', async () => {
@@ -44,10 +48,10 @@ describe('PBIA client portal write and agent routes', () => {
         method: 'GET',
         headers: expect.objectContaining({
           Authorization: 'Bearer supabase-token',
-          'X-Client-Email': 'jane@example.com',
         }),
       })
     );
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('X-Client-Email');
   });
 
   it('submits signup with its stable idempotency key', async () => {
@@ -107,5 +111,16 @@ describe('PBIA client portal write and agent routes', () => {
         }),
       })
     );
+  });
+
+  it('does not call PBIA without an authenticated Supabase session', async () => {
+    mockGetSession.mockResolvedValue({ data: { session: null }, error: null });
+    global.fetch = jest.fn() as unknown as typeof fetch;
+
+    await expect(fetchClientAgent('jane@example.com', 'account-1')).rejects.toMatchObject({
+      status: 401,
+      message: 'Your secure sign-in session is unavailable. Please sign in again.',
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

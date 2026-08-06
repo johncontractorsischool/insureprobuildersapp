@@ -25,6 +25,10 @@ export type PaymentEligibility = {
   premium: number;
   paidAmount: number;
   amountDue: number;
+  cardConvenienceFee: number | null;
+  cardTotalAmount: number | null;
+  achConvenienceFee: number | null;
+  achTotalAmount: number | null;
   purpose: PaymentPurpose;
   paymentState: 'DUE';
   paymentNeeded: true;
@@ -104,6 +108,9 @@ export type SuccessfulPayment = {
   demandId: string;
   status: 'SUCCEEDED';
   amount: number;
+  convenienceFee: number | null;
+  addOnConvenienceFee: number | null;
+  totalCharged: number | null;
   currency: 'USD';
   purpose: PaymentPurpose;
   receiptId: string | null;

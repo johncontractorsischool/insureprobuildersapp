@@ -75,7 +75,11 @@ describe('PaymentScreen', () => {
       .mockReturnValue('different-payment-key');
     mockRouter.canGoBack.mockReturnValue(true);
     mockUseLocalSearchParams.mockReturnValue({});
-    const payableRecord = buildPaymentEligibility({ purpose: 'DOWN_PAYMENT' });
+    const payableRecord = buildPaymentEligibility({
+      purpose: 'DOWN_PAYMENT',
+      cardConvenienceFee: 37.46,
+      cardTotalAmount: 1285.96,
+    });
     mockUseAuth.mockReturnValue({
       isAuthenticated: true,
       customer: buildCustomer({
@@ -101,6 +105,9 @@ describe('PaymentScreen', () => {
       demandId: 'demand-1',
       status: 'SUCCEEDED',
       amount: 1248.5,
+      convenienceFee: 37.46,
+      addOnConvenienceFee: 0,
+      totalCharged: 1285.96,
       currency: 'USD',
       purpose: 'DOWN_PAYMENT',
       receiptId: 'input1-receipt-1',
@@ -122,6 +129,10 @@ describe('PaymentScreen', () => {
     fireEvent.press(getByText('Review Payment'));
 
     const confirmButton = await findByRole('button', { name: 'Confirm Payment' });
+    expect(getAllByText('Card convenience fee').length).toBeGreaterThan(0);
+    expect(getAllByText('$37.46').length).toBeGreaterThan(0);
+    expect(getByText('Total charged')).toBeTruthy();
+    expect(getAllByText('$1,285.96').length).toBeGreaterThan(0);
     expect(mockGetPaymentEligibility).toHaveBeenCalledWith(
       'jane@example.com',
       'account-1',
@@ -132,6 +143,8 @@ describe('PaymentScreen', () => {
 
     expect(await findByText('Payment successful')).toBeTruthy();
     expect(getByText('input1-receipt-1')).toBeTruthy();
+    expect(getByText('Convenience fee')).toBeTruthy();
+    expect(getByText('Total charged')).toBeTruthy();
     expect(mockSubmitPayment).toHaveBeenCalledWith(
       'jane@example.com',
       'account-1',
@@ -189,6 +202,19 @@ describe('PaymentScreen', () => {
   });
 
   it('submits ACH without including a card instrument', async () => {
+    mockSubmitPayment.mockResolvedValue({
+      id: 'payment-request-1',
+      demandId: 'demand-1',
+      status: 'SUCCEEDED',
+      amount: 1248.5,
+      convenienceFee: 3,
+      addOnConvenienceFee: 0,
+      totalCharged: 1251.5,
+      currency: 'USD',
+      purpose: 'DOWN_PAYMENT',
+      receiptId: 'input1-receipt-ach-1',
+      completedAt: '2026-08-05T18:00:00.000Z',
+    });
     const { getAllByText, getByLabelText, getByText, findByRole, findByText } = render(<PaymentScreen />);
 
     await waitFor(() => expect(getAllByText('$1,248.50').length).toBeGreaterThan(0));
@@ -197,7 +223,11 @@ describe('PaymentScreen', () => {
     fireEvent.changeText(getByLabelText('Routing Number'), '021000021');
     fireEvent.changeText(getByLabelText('Bank Account Number'), '123456789');
     fireEvent.press(getByText('Review Payment'));
-    fireEvent.press(await findByRole('button', { name: 'Confirm Payment' }));
+    const confirmButton = await findByRole('button', { name: 'Confirm Payment' });
+    expect(getAllByText('ACH convenience fee').length).toBeGreaterThan(0);
+    expect(getAllByText('$3.00').length).toBeGreaterThan(0);
+    expect(getAllByText('$1,251.50').length).toBeGreaterThan(0);
+    fireEvent.press(confirmButton);
 
     expect(await findByText('Payment successful')).toBeTruthy();
     const submittedRequest = mockSubmitPayment.mock.calls[0][4];
@@ -251,6 +281,9 @@ describe('PaymentScreen', () => {
         demandId: 'demand-1',
         status: 'SUCCEEDED',
         amount: 1248.5,
+        convenienceFee: 37.46,
+        addOnConvenienceFee: 0,
+        totalCharged: 1285.96,
         currency: 'USD',
         purpose: 'DOWN_PAYMENT',
         receiptId: 'input1-receipt-2',

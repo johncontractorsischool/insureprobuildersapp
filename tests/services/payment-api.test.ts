@@ -53,10 +53,10 @@ describe('payment API', () => {
         method: 'GET',
         headers: expect.objectContaining({
           Authorization: 'Bearer supabase-access-token',
-          'X-Client-Email': 'jane@example.com',
         }),
       })
     );
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('X-Client-Email');
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('x-api-key');
   });
 
@@ -84,6 +84,9 @@ describe('payment API', () => {
         demandId: 'demand-1',
         status: 'SUCCEEDED',
         amount: 750,
+        convenienceFee: 22.5,
+        addOnConvenienceFee: 0,
+        totalCharged: 772.5,
         currency: 'USD',
         purpose: 'PREMIUM',
         receiptId: 'receipt-1',
@@ -119,7 +122,7 @@ describe('payment API', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          'X-Client-Email': 'jane@example.com',
+          Authorization: 'Bearer supabase-access-token',
           'X-Client-Account-Id': 'account-1',
           'Idempotency-Key': 'uuid-1',
           'Content-Type': 'application/json',
@@ -127,6 +130,28 @@ describe('payment API', () => {
         body: JSON.stringify(request),
       })
     );
+  });
+
+  it('rejects eligibility that omits the server-calculated fee previews', async () => {
+    const {
+      cardConvenienceFee: _cardConvenienceFee,
+      cardTotalAmount: _cardTotalAmount,
+      achConvenienceFee: _achConvenienceFee,
+      achTotalAmount: _achTotalAmount,
+      ...record
+    } = buildPaymentEligibility();
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [record], page: 1, pageSize: 50, total: 1, totalPages: 1 }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      listPaymentEligibility('jane@example.com', 'account-1', { page: 1, pageSize: 50 })
+    ).rejects.toMatchObject({
+      status: 500,
+      message: 'Unexpected payment eligibility response format.',
+    });
   });
 
   it('rejects insecure API URLs before sending payment data', async () => {
@@ -160,6 +185,17 @@ describe('payment API', () => {
 
     await expect(listPaymentEligibility('different@example.com', 'account-1')).rejects.toMatchObject({
       status: 401,
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not call the payment API without an authenticated Supabase session', async () => {
+    mockGetSession.mockResolvedValue({ data: { session: null }, error: null });
+    global.fetch = jest.fn() as unknown as typeof fetch;
+
+    await expect(listPaymentEligibility('jane@example.com', 'account-1')).rejects.toMatchObject({
+      status: 401,
+      message: 'Your secure sign-in session is unavailable. Please sign in again.',
     });
     expect(global.fetch).not.toHaveBeenCalled();
   });

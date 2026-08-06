@@ -1,5 +1,20 @@
 import { fetchAccountByBusinessEmail, fetchCustomersByEmail } from '@/services/customer-api';
 
+jest.mock('@/services/supabase', () => ({
+  getSupabaseClient: () => ({
+    auth: {
+      getSession: async () => ({
+        data: {
+          session: {
+            access_token: 'supabase-token',
+            user: { email: 'jane@example.com' },
+          },
+        },
+      }),
+    },
+  }),
+}));
+
 describe('PBIA customer api', () => {
   const originalBaseUrl = process.env.EXPO_PUBLIC_PBIA_API_BASE_URL;
 
@@ -45,9 +60,10 @@ describe('PBIA customer api', () => {
       'http://localhost:3500/client/account?page=1&pageSize=50',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'X-Client-Email': 'jane@example.com' }),
+        headers: expect.objectContaining({ Authorization: 'Bearer supabase-token' }),
       })
     );
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('X-Client-Email');
     expect(accounts[0]).toEqual(
       expect.objectContaining({
         accountId: 'account-1',
@@ -86,10 +102,11 @@ describe('PBIA customer api', () => {
         method: 'GET',
         headers: expect.objectContaining({
           Accept: 'application/json',
-          'X-Client-Email': 'jane@example.com',
+          Authorization: 'Bearer supabase-token',
         }),
       })
     );
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('X-Client-Email');
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('x-api-key');
     expect(account).toEqual(
       expect.objectContaining({ accountId: 'account-1', insuredId: '1144038' })
@@ -103,7 +120,7 @@ describe('PBIA customer api', () => {
       json: async () => ({ message: 'Client account not found' }),
     }) as unknown as typeof fetch;
 
-    await expect(fetchAccountByBusinessEmail('missing@example.com')).resolves.toBeNull();
+    await expect(fetchAccountByBusinessEmail('jane@example.com')).resolves.toBeNull();
   });
 
   it('preserves an ambiguous primary business-email conflict', async () => {
@@ -113,7 +130,7 @@ describe('PBIA customer api', () => {
       json: async () => ({ message: 'Multiple client accounts use this business email' }),
     }) as unknown as typeof fetch;
 
-    await expect(fetchAccountByBusinessEmail('shared@example.com')).rejects.toThrow(
+    await expect(fetchAccountByBusinessEmail('jane@example.com')).rejects.toThrow(
       'Multiple client accounts use this business email'
     );
   });

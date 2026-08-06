@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 
 import { isOtpRateLimitError, sendEmailSignInCode } from '@/services/auth-flow';
-import { ClientSignupRequest, createClientSignup } from '@/services/client-signup-api';
+import type { ClientSignupRequest } from '@/services/client-signup-api';
 
 export type SignupIdentifierType = 'license' | 'appFee';
 
@@ -24,6 +24,7 @@ export type ClientSignupFormField = keyof ClientSignupForm;
 export type ClientSignupValidationErrors = Partial<Record<ClientSignupFormField, string>>;
 export type ClientSignupSubmitResult = {
   email: string;
+  request: ClientSignupRequest;
   rateLimited: boolean;
   otpDeliveryFailed: boolean;
 };
@@ -179,19 +180,34 @@ export function useClientSignup() {
     setErrorMessage('');
     setDidSubmit(false);
     try {
-      await createClientSignup(buildClientSignupRequest(normalized));
+      const request = buildClientSignupRequest(normalized);
       try {
         await sendEmailSignInCode(normalized.email);
       } catch (error) {
         if (isOtpRateLimitError(error)) {
           setDidSubmit(true);
-          return { email: normalized.email, rateLimited: true, otpDeliveryFailed: false };
+          return {
+            email: normalized.email,
+            request,
+            rateLimited: true,
+            otpDeliveryFailed: false,
+          };
         }
         setDidSubmit(true);
-        return { email: normalized.email, rateLimited: false, otpDeliveryFailed: true };
+        return {
+          email: normalized.email,
+          request,
+          rateLimited: false,
+          otpDeliveryFailed: true,
+        };
       }
       setDidSubmit(true);
-      return { email: normalized.email, rateLimited: false, otpDeliveryFailed: false };
+      return {
+        email: normalized.email,
+        request,
+        rateLimited: false,
+        otpDeliveryFailed: false,
+      };
     } catch (error) {
       setErrorMessage(error instanceof Error && error.message ? error.message : 'Unable to create your PBIA account.');
       return null;

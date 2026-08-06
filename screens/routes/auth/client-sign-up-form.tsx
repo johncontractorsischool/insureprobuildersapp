@@ -8,7 +8,7 @@ import { useAuth } from '@/context/auth-context';
 import { useClientSignup } from '@/hooks/use-client-signup';
 
 export function ClientSignUpForm() {
-  const { setPendingEmail, setCustomer } = useAuth();
+  const { setPendingEmail, setPendingSignup, setCustomer } = useAuth();
   const {
     form,
     identifierType,
@@ -32,6 +32,7 @@ export function ClientSignUpForm() {
     if (!result) return;
 
     setPendingEmail(result.email);
+    setPendingSignup(result.request);
     setCustomer(null);
 
     if (result.otpDeliveryFailed) {

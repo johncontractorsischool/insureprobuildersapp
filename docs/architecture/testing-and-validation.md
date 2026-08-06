@@ -57,3 +57,5 @@ Coverage output is written to `coverage/` and is ignored by Git.
 ## Gaps To Expect
 
 The suite is a strong foundation, not a claim that every screen is exhaustively covered. Coverage reports currently point to remaining gaps in less critical or still-evolving areas such as some dashboard paths, company screens, and a few scaffold-derived components. Those gaps are visible by design so future work can target them deliberately.
+
+As of August 6, 2026, the full Jest suite passes 99 tests and Expo lint passes. `npx tsc --noEmit` still fails only in the existing PBIA WebView/diagnostics code and tests: the WebView navigation-error callback overload, diagnostics values narrowed to `never`, and untyped mock spread arguments. The client-authentication, OTP-first signup/sign-in, PBIA bearer transport, and payment changes add no TypeScript errors. Resolve the WebView diagnostics typing separately before treating standalone `tsc` as a release gate.
