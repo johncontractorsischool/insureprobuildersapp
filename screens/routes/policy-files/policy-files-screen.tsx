@@ -10,9 +10,8 @@ import { SectionHeader } from '@/components/section-header';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import {
-  fetchPolicyFilesList,
-  fetchPolicyFilesListByInsuredId,
-  fetchPolicyFilesListByPolicy,
+  fetchClientDocuments,
+  fetchClientPolicyDocuments,
 } from '@/services/policy-files-api';
 import { PolicyFileEntry } from '@/types/policy-file';
 import { openInAppBrowser } from '@/utils/external-actions';
@@ -39,13 +38,15 @@ function getFileUrl(item: PolicyFileEntry) {
 
 async function collectVisibleFilesFromEntries({
   entries,
-  insuredId,
+  clientEmail,
+  accountId,
   selectedPolicyId,
   selectedPolicyNumber,
   visitedFolderIds,
 }: {
   entries: PolicyFileEntry[];
-  insuredId: string;
+  clientEmail: string;
+  accountId: string;
   selectedPolicyId: string;
   selectedPolicyNumber: string;
   visitedFolderIds: Set<string>;
@@ -63,22 +64,23 @@ async function collectVisibleFilesFromEntries({
       .map(async (entry) => {
         const folderId = entry.databaseId.trim();
         const folderPolicyId = entry.policyId?.trim() || selectedPolicyId;
-        const folderInsuredId = entry.insuredId?.trim() || insuredId;
-
-        if (!folderId || !folderPolicyId || !folderInsuredId || visitedFolderIds.has(folderId)) {
+        if (!folderId || !accountId || visitedFolderIds.has(folderId)) {
           return [];
         }
 
         visitedFolderIds.add(folderId);
-        const response = await fetchPolicyFilesList({
-          insuredId: folderInsuredId,
-          policyId: folderPolicyId,
-          folderId,
-        });
+        const response = folderPolicyId
+          ? await fetchClientPolicyDocuments(clientEmail, {
+              accountId,
+              policyId: folderPolicyId,
+              folderId,
+            })
+          : await fetchClientDocuments(clientEmail, { accountId, folderId });
 
         return collectVisibleFilesFromEntries({
           entries: response.data,
-          insuredId: folderInsuredId,
+          clientEmail,
+          accountId,
           selectedPolicyId: folderPolicyId,
           selectedPolicyNumber,
           visitedFolderIds,
@@ -90,31 +92,29 @@ async function collectVisibleFilesFromEntries({
 }
 
 export default function PolicyFilesScreen() {
-  const { insuredId, policyId, policyNumber } = useLocalSearchParams<{
-    insuredId?: string | string[];
+  const { accountId: accountIdParam, policyId, policyNumber } = useLocalSearchParams<{
+    accountId?: string | string[];
     policyId?: string | string[];
     policyNumber?: string | string[];
   }>();
-  const { customer } = useAuth();
+  const { customer, userEmail } = useAuth();
   const [files, setFiles] = useState<PolicyFileEntry[]>([]);
   const [isLoadingInitial, setIsLoadingInitial] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const insuredLookupId = useMemo(() => {
-    const fromParams = readSearchParam(insuredId).trim();
+  const accountId = useMemo(() => {
+    const fromParams = readSearchParam(accountIdParam).trim();
     if (fromParams) return fromParams;
-    const fromDatabaseId = customer?.databaseId?.trim();
-    if (fromDatabaseId) return fromDatabaseId;
-    return customer?.insuredId?.trim() || '';
-  }, [customer?.databaseId, customer?.insuredId, insuredId]);
+    return customer?.accountId?.trim() || customer?.databaseId?.trim() || '';
+  }, [accountIdParam, customer?.accountId, customer?.databaseId]);
   const selectedPolicyId = useMemo(() => readSearchParam(policyId).trim(), [policyId]);
   const selectedPolicyNumber = useMemo(() => readSearchParam(policyNumber).trim(), [policyNumber]);
 
   const loadFiles = useCallback(async () => {
-    if (!insuredLookupId) {
+    if (!accountId || !userEmail) {
       setFiles([]);
-      setError('No insured id is available for this account.');
+      setError('No PBIA account id is available for this account.');
       setIsLoadingInitial(false);
       return;
     }
@@ -122,22 +122,23 @@ export default function PolicyFilesScreen() {
     setError(null);
 
     const rootResponse = selectedPolicyId
-      ? await fetchPolicyFilesListByPolicy({
-          insuredId: insuredLookupId,
+      ? await fetchClientPolicyDocuments(userEmail, {
+          accountId,
           policyId: selectedPolicyId,
         })
-      : await fetchPolicyFilesListByInsuredId(insuredLookupId);
+      : await fetchClientDocuments(userEmail, { accountId });
 
     const visibleFiles = await collectVisibleFilesFromEntries({
       entries: rootResponse.data,
-      insuredId: insuredLookupId,
+      clientEmail: userEmail,
+      accountId,
       selectedPolicyId,
       selectedPolicyNumber,
       visitedFolderIds: new Set<string>(),
     });
 
     setFiles(visibleFiles);
-  }, [insuredLookupId, selectedPolicyId, selectedPolicyNumber]);
+  }, [accountId, selectedPolicyId, selectedPolicyNumber, userEmail]);
 
   useEffect(() => {
     let isMounted = true;
@@ -165,7 +166,7 @@ export default function PolicyFilesScreen() {
   }, [loadFiles]);
 
   const refreshFiles = useCallback(async () => {
-    if (!insuredLookupId) return;
+    if (!accountId || !userEmail) return;
 
     setIsRefreshing(true);
     setError(null);
@@ -181,12 +182,12 @@ export default function PolicyFilesScreen() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [files.length, insuredLookupId, loadFiles]);
+  }, [accountId, files.length, loadFiles, userEmail]);
 
   const handleFilePress = useCallback(async (item: PolicyFileEntry) => {
     const fileUrl = getFileUrl(item);
     if (!fileUrl) {
-      Alert.alert('File action', 'TODO: file preview/download');
+      Alert.alert('Download unavailable', 'Document download is not available from the PBIA API yet.');
       return;
     }
 
@@ -221,13 +222,13 @@ export default function PolicyFilesScreen() {
     );
   };
 
-  if (!insuredLookupId) {
+  if (!accountId || !userEmail) {
     return (
       <ScreenContainer>
         <EmptyState
           icon="warning-outline"
-          title="Missing insured id"
-          description="We could not find an insured id to load policy files for this account."
+          title="Missing account id"
+          description="We could not find a PBIA account id to load documents for this account."
         />
       </ScreenContainer>
     );

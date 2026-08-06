@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '@/context/auth-context';
 import type { DemoCompanyData } from '@/data/demo-profiles/types';
@@ -6,7 +6,8 @@ import {
   CslbLicense,
   CslbWorkersComp,
   buildCslbLicenseUrl,
-  fetchCslbLicenseByInsuredId,
+  fetchClientCslb,
+  refreshClientCslb,
 } from '@/services/cslb-api';
 import { getPortalConfig } from '@/services/portal-config';
 
@@ -225,17 +226,18 @@ function normalizeDemoGroups(groups: DemoCompanyData['bonding'] | DemoCompanyDat
 }
 
 export function useCompanyProfile() {
-  const { customer } = useAuth();
+  const { customer, userEmail } = useAuth();
   const portalConfig = useMemo(() => getPortalConfig(), []);
   const demoCompany = portalConfig.demo.data?.company ?? null;
   const [cslbLicense, setCslbLicense] = useState<CslbLicense | null>(null);
   const [isLoadingCompany, setIsLoadingCompany] = useState(false);
   const [companyLookupNotice, setCompanyLookupNotice] = useState<string | null>(null);
 
-  const cslbInsuredId = useMemo(
-    () => demoCompany?.licenseNumber ?? (customer?.insuredId?.trim() || ''),
-    [customer?.insuredId, demoCompany?.licenseNumber]
+  const accountId = useMemo(
+    () => customer?.accountId?.trim() || customer?.databaseId?.trim() || '',
+    [customer?.accountId, customer?.databaseId]
   );
+  const licenseNumber = demoCompany?.licenseNumber ?? customer?.licenseNumber?.trim() ?? customer?.insuredId?.trim() ?? '';
 
   useEffect(() => {
     let isMounted = true;
@@ -248,7 +250,7 @@ export function useCompanyProfile() {
         return;
       }
 
-      if (!cslbInsuredId) {
+      if (!accountId || !userEmail) {
         setCslbLicense(null);
         setCompanyLookupNotice('No CSLB license number is available for this account.');
         setIsLoadingCompany(false);
@@ -259,12 +261,12 @@ export function useCompanyProfile() {
       setCompanyLookupNotice(null);
 
       try {
-        const nextLicense = await fetchCslbLicenseByInsuredId(cslbInsuredId);
+        const nextLicense = await fetchClientCslb(userEmail, accountId);
         if (!isMounted) return;
         setCslbLicense(nextLicense);
       } catch (error) {
         console.warn('[Company Profile] CSLB lookup failed.', {
-          insuredId: cslbInsuredId,
+          accountId,
           error: error instanceof Error ? error.message : 'Unknown company lookup error',
         });
         if (!isMounted) return;
@@ -282,18 +284,36 @@ export function useCompanyProfile() {
     return () => {
       isMounted = false;
     };
-  }, [cslbInsuredId, demoCompany]);
+  }, [accountId, demoCompany, userEmail]);
+
+  const refreshCompany = useCallback(async () => {
+    if (demoCompany || !accountId || !userEmail) return;
+    setIsLoadingCompany(true);
+    setCompanyLookupNotice(null);
+    try {
+      setCslbLicense(await refreshClientCslb(userEmail, accountId));
+    } catch (error) {
+      setCompanyLookupNotice(
+        error instanceof Error && error.message
+          ? error.message
+          : 'Unable to refresh CSLB details right now.'
+      );
+    } finally {
+      setIsLoadingCompany(false);
+    }
+  }, [accountId, demoCompany, userEmail]);
 
   const cslbLink = useMemo(() => {
     if (demoCompany?.cslbUrl) return demoCompany.cslbUrl;
-    if (cslbInsuredId) return buildCslbLicenseUrl(cslbInsuredId);
-    return cslbLicense?.sourceUrl ?? portalConfig.company.cslbUrl;
-  }, [cslbInsuredId, cslbLicense?.sourceUrl, demoCompany?.cslbUrl, portalConfig.company.cslbUrl]);
+    if (cslbLicense?.sourceUrl) return cslbLicense.sourceUrl;
+    if (licenseNumber) return buildCslbLicenseUrl(licenseNumber);
+    return portalConfig.company.cslbUrl;
+  }, [cslbLicense?.sourceUrl, demoCompany?.cslbUrl, licenseNumber, portalConfig.company.cslbUrl]);
 
   const companyLicenseNumber =
     normalizeDisplayValue(demoCompany?.licenseNumber) ||
     normalizeDisplayValue(cslbLicense?.licenseNumber) ||
-    normalizeDisplayValue(cslbInsuredId) ||
+    normalizeDisplayValue(licenseNumber) ||
     normalizeDisplayValue(portalConfig.company.licenseNumber);
 
   const statusFallbackText =
@@ -330,7 +350,10 @@ export function useCompanyProfile() {
 
   const businessName =
     normalizeDisplayValue(demoCompany?.businessName) ??
-    normalizeDisplayValue(cslbLicense?.business.businessName);
+    normalizeDisplayValue(cslbLicense?.business.businessName) ??
+    normalizeDisplayValue(customer?.dba) ??
+    normalizeDisplayValue(customer?.legalName) ??
+    normalizeDisplayValue(customer?.commercialName);
 
   const businessRows = useMemo(
     () =>
@@ -340,8 +363,8 @@ export function useCompanyProfile() {
             { label: 'DBA', value: cslbLicense?.business.dba },
             { label: 'Street', value: cslbLicense?.business.street },
             { label: 'City/State/ZIP', value: cslbLicense?.business.cityStateZip },
-            { label: 'Phone', value: cslbLicense?.business.phone },
-            { label: 'Entity', value: formatEntityDisplay(cslbLicense?.entity) },
+            { label: 'Phone', value: cslbLicense?.business.phone ?? customer?.phone },
+            { label: 'Entity', value: formatEntityDisplay(cslbLicense?.entity ?? customer?.entityType) },
           ]),
     [
       cslbLicense?.business.cityStateZip,
@@ -349,6 +372,8 @@ export function useCompanyProfile() {
       cslbLicense?.business.phone,
       cslbLicense?.business.street,
       cslbLicense?.entity,
+      customer?.entityType,
+      customer?.phone,
       demoCompany?.businessRows,
     ]
   );
@@ -456,5 +481,6 @@ export function useCompanyProfile() {
     workersCompRows,
     personnel,
     hasDetailContent,
+    refreshCompany,
   };
 }

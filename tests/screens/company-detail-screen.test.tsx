@@ -1,5 +1,5 @@
 import React from 'react';
-import { render } from '@testing-library/react-native';
+import { fireEvent, render } from '@testing-library/react-native';
 
 const mockRouter = {
   push: jest.fn(),
@@ -9,6 +9,7 @@ const mockRouter = {
 };
 const mockUseCompanyProfile = jest.fn();
 const mockOpenInAppBrowser = jest.fn();
+const mockRefreshCompany = jest.fn();
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -47,6 +48,7 @@ describe('CompanyDetailScreen', () => {
       workersCompRows: [],
       personnel: [],
       hasDetailContent: true,
+      refreshCompany: mockRefreshCompany,
     });
     mockOpenInAppBrowser.mockResolvedValue({ ok: true });
   });
@@ -59,6 +61,8 @@ describe('CompanyDetailScreen', () => {
     expect(getByText('Business Information')).toBeTruthy();
     expect(getByText('Builder Co')).toBeTruthy();
     expect(getByText('View on CSLB')).toBeTruthy();
+    fireEvent.press(getByText('Refresh CSLB Data'));
+    expect(mockRefreshCompany).toHaveBeenCalledTimes(1);
     expect(queryByText('Company details')).toBeNull();
     expect(queryByText('Full CSLB profile and compliance records')).toBeNull();
   });

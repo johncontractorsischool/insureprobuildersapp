@@ -7,59 +7,7 @@ import { ScreenContainer } from '@/components/screen-container';
 import { CONTACT_TOPIC_CONFIG, normalizeContactTopic } from '@/constants/contact-support';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { getPortalConfig } from '@/services/portal-config';
-import { sendSmtpEmail } from '@/services/smtp-email-api';
-import { getNameFromCustomer } from '@/utils/format';
-
-function isEmailValid(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-function buildContactEmailHtml({
-  topicLabel,
-  message,
-  accountHolder,
-  businessName,
-  replyEmail,
-  phone,
-  databaseId,
-  insuredId,
-}: {
-  topicLabel: string;
-  message: string;
-  accountHolder: string;
-  businessName: string;
-  replyEmail: string;
-  phone: string;
-  databaseId: string;
-  insuredId: string;
-}) {
-  return `
-    <div style="font-family:Arial,sans-serif;color:#1f2933;line-height:1.5;">
-      <p>A new Contact Us request was submitted from the Insure Pro Builders app.</p>
-      <p><strong>Type:</strong> ${escapeHtml(topicLabel)}</p>
-      <p><strong>Account Holder:</strong> ${escapeHtml(accountHolder)}</p>
-      <p><strong>Business Name:</strong> ${escapeHtml(businessName)}</p>
-      <p><strong>Reply Email:</strong> ${escapeHtml(replyEmail)}</p>
-      <p><strong>Phone:</strong> ${escapeHtml(phone)}</p>
-      <p><strong>Database ID:</strong> ${escapeHtml(databaseId)}</p>
-      <p><strong>Insured ID:</strong> ${escapeHtml(insuredId)}</p>
-      <div style="margin-top:16px;padding:16px;border:1px solid #d7ddda;border-radius:12px;background:#f7faf8;">
-        <p style="margin:0 0 8px 0;"><strong>Message</strong></p>
-        <p style="margin:0;white-space:pre-wrap;">${escapeHtml(message)}</p>
-      </div>
-    </div>
-  `.trim();
-}
+import { createClientContactRequest } from '@/services/contact-request-api';
 
 export default function ContactScreen() {
   const { topic } = useLocalSearchParams<{ topic?: string }>();
@@ -71,19 +19,20 @@ export default function ContactScreen() {
 
   const resolvedTopic = normalizeContactTopic(topic);
   const topicConfig = CONTACT_TOPIC_CONFIG[resolvedTopic];
-  const supportEmail = getPortalConfig().actions.supportEmail;
-  const accountHolder = getNameFromCustomer(customer, userEmail);
-  const businessName = customer?.commercialName?.trim() || 'Not provided';
-  const replyEmail = customer?.email?.trim() || userEmail?.trim() || '';
-  const phone = customer?.cellPhone?.trim() || customer?.phone?.trim() || 'Not provided';
-  const databaseId = customer?.databaseId?.trim() || 'Not provided';
-  const insuredId = customer?.insuredId?.trim() || 'Not provided';
+  const clientEmail = userEmail?.trim() || customer?.email?.trim() || '';
+  const phone = customer?.cellPhone?.trim() || customer?.phone?.trim() || '';
+  const accountId = customer?.accountId?.trim() || customer?.databaseId?.trim() || '';
 
   const handleSubmit = async () => {
     const normalizedMessage = message.trim();
 
-    if (!replyEmail || !isEmailValid(replyEmail)) {
-      setError('A valid account email is required before sending this message.');
+    if (!clientEmail || !accountId) {
+      setError('A valid PBIA account is required before sending this message.');
+      return;
+    }
+
+    if (!phone) {
+      setError('A callback number is required before sending this message.');
       return;
     }
 
@@ -99,19 +48,11 @@ export default function ContactScreen() {
     setNotice('');
 
     try {
-      await sendSmtpEmail({
-        subject: topicConfig.subject,
-        html: buildContactEmailHtml({
-          topicLabel: topicConfig.menuLabel,
-          message: normalizedMessage,
-          accountHolder,
-          businessName,
-          replyEmail,
-          phone,
-          databaseId,
-          insuredId,
-        }),
-        to: [supportEmail],
+      await createClientContactRequest(clientEmail, {
+        accountId,
+        callbackNumber: phone,
+        preferredContactMethod: 'EMAIL',
+        description: `${topicConfig.menuLabel}\n\n${normalizedMessage}`,
       });
 
       setMessage('');

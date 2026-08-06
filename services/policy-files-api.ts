@@ -1,190 +1,118 @@
-import { PolicyFileEntry, PolicyFileOrFolder, PolicyFilesListResponse } from '@/types/policy-file';
-import { withApiKeyHeader } from '@/services/api-request-headers';
+import { buildClientQuery, pbiaRequest } from '@/services/pbia-client';
+import type { PolicyFileEntry, PolicyFilesListResponse } from '@/types/policy-file';
 
-const DEFAULT_POLICY_FILES_API_BASE_URL = 'http://localhost:3000';
+type ClientDocumentRecord = {
+  id: string;
+  name: string;
+  mimeType: string | null;
+  size: number | null;
+  description: string | null;
+  createdAt: string | null;
+  policyId: string | null;
+  parentId: string | null;
+  isFolder: boolean;
+};
 
-function getPolicyFilesApiBaseUrl() {
+type ClientDocumentList = {
+  data: ClientDocumentRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+type ClientDocumentQuery = {
+  accountId: string;
+  policyId?: string;
+  folderId?: string;
+};
+
+function isClientDocument(value: unknown): value is ClientDocumentRecord {
+  if (!value || typeof value !== 'object') return false;
+  const document = value as Partial<ClientDocumentRecord>;
   return (
-    process.env.EXPO_PUBLIC_POLICY_API_BASE_URL?.trim() ||
-    process.env.EXPO_PUBLIC_CUSTOMER_API_BASE_URL?.trim() ||
-    DEFAULT_POLICY_FILES_API_BASE_URL
+    typeof document.id === 'string' &&
+    typeof document.name === 'string' &&
+    typeof document.isFolder === 'boolean'
   );
 }
 
-function normalizeText(value: unknown) {
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim();
-  return normalized ? normalized : null;
-}
-
-function normalizeNumber(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  return null;
-}
-
-function toObject(value: unknown) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function normalizeFileOrFolder(value: unknown): PolicyFileOrFolder {
-  const normalized = normalizeText(value)?.toLowerCase();
-  if (normalized === 'folder') return 'Folder';
-  return 'File';
-}
-
-function mapPolicyFileEntry(value: unknown): PolicyFileEntry | null {
-  const payload = toObject(value);
-  if (!payload) return null;
-
-  const databaseId = normalizeText(payload.databaseId);
-  if (!databaseId) return null;
-
+function mapDocument(document: ClientDocumentRecord, accountId: string): PolicyFileEntry {
   return {
-    databaseId,
-    insuredId: normalizeText(payload.insuredId),
-    policyId: normalizeText(payload.policyId),
-    policyNumber: normalizeText(payload.policyNumber),
-    name: normalizeText(payload.name) ?? 'Untitled',
-    type: normalizeNumber(payload.type),
-    createDate: normalizeText(payload.createDate),
-    changeDate: normalizeText(payload.changeDate),
-    creatorName: normalizeText(payload.creatorName),
-    fileOrFolder: normalizeFileOrFolder(payload.fileOrFolder),
-    fileUrl: normalizeText(payload.fileUrl),
-    downloadUrl: normalizeText(payload.downloadUrl),
-    url: normalizeText(payload.url),
+    databaseId: document.id,
+    insuredId: accountId,
+    policyId: document.policyId,
+    policyNumber: null,
+    name: document.name,
+    type: null,
+    createDate: document.createdAt,
+    changeDate: null,
+    creatorName: null,
+    fileOrFolder: document.isFolder ? 'Folder' : 'File',
+    fileUrl: null,
+    downloadUrl: null,
+    url: null,
+    mimeType: document.mimeType,
+    size: document.size,
+    description: document.description,
+    parentId: document.parentId,
   };
 }
 
-function extractFileEntries(value: unknown): PolicyFileEntry[] | null {
-  if (Array.isArray(value)) {
-    return value
-      .map((entry) => mapPolicyFileEntry(entry))
-      .filter((entry): entry is PolicyFileEntry => Boolean(entry));
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return [];
-
-    try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      return extractFileEntries(parsed);
-    } catch {
-      return null;
-    }
-  }
-
-  const payload = toObject(value);
-  if (!payload) return null;
-
-  const nestedCandidates = [
-    payload.data,
-    payload.items,
-    payload.files,
-    payload.results,
-    payload.rows,
-    payload.list,
-  ];
-
-  for (const candidate of nestedCandidates) {
-    const resolved = extractFileEntries(candidate);
-    if (resolved) return resolved;
-  }
-
-  const singleEntry = mapPolicyFileEntry(payload);
-  if (singleEntry) return [singleEntry];
-
-  return null;
-}
-
-function mapPolicyFilesPayload(payload: unknown): PolicyFilesListResponse {
-  const parsed = toObject(payload);
-  if (!parsed) {
-    throw new Error('Unexpected policy files response format.');
-  }
-
-  const status = typeof parsed.status === 'number' ? parsed.status : -1;
-  const message = normalizeText(parsed.message) ?? normalizeText(parsed.Message);
-  const data = extractFileEntries(parsed.data);
-  if (!data) {
-    throw new Error('Unexpected policy files data format.');
-  }
-
-  return {
-    status,
-    message,
-    data,
-  };
-}
-
-async function requestPolicyFiles(path: string): Promise<PolicyFilesListResponse> {
-  const url = `${getPolicyFilesApiBaseUrl()}${path}`;
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: withApiKeyHeader({ Accept: 'application/json' }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Policy files lookup failed (${response.status}).`);
-  }
-
-  const payload: unknown = await response.json();
-  const parsed = mapPolicyFilesPayload(payload);
-
-  if (parsed.status !== 1) {
-    throw new Error(parsed.message ?? 'Policy files lookup failed.');
-  }
-
-  return parsed;
-}
-
-export async function fetchPolicyFilesListByInsuredId(insuredId: string): Promise<PolicyFilesListResponse> {
-  const trimmedInsuredId = insuredId.trim();
-  if (!trimmedInsuredId) {
-    throw new Error('Missing insured id for policy files lookup.');
-  }
-
-  return requestPolicyFiles(`/getPolicyFilesListByInsuredId?insuredId=${encodeURIComponent(trimmedInsuredId)}`);
-}
-
-type PolicyFilesRootParams = {
-  insuredId: string;
-  policyId: string;
-};
-
-export async function fetchPolicyFilesListByPolicy(
-  params: PolicyFilesRootParams
+async function requestDocuments(
+  clientEmail: string,
+  path: string,
+  query: ClientDocumentQuery
 ): Promise<PolicyFilesListResponse> {
-  const insuredId = params.insuredId.trim();
-  const policyId = params.policyId.trim();
+  const accountId = query.accountId.trim();
+  if (!accountId) throw new Error('Missing PBIA account id for document lookup.');
 
-  if (!insuredId || !policyId) {
-    throw new Error('Missing insured id or policy id for policy files lookup.');
+  const loadPage = (page: number) =>
+    pbiaRequest<ClientDocumentList>(
+      `${path}${buildClientQuery({
+        accountId,
+        policyId: query.policyId?.trim(),
+        folderId: query.folderId?.trim(),
+        page,
+        pageSize: 50,
+      })}`,
+      { method: 'GET', clientEmail },
+      'Unable to load documents from PBIA.'
+    );
+  const payload = await loadPage(1);
+
+  if (!payload || !Array.isArray(payload.data) || !payload.data.every(isClientDocument)) {
+    throw new Error('Unexpected PBIA documents response format.');
   }
 
-  return requestPolicyFiles(
-    `/getPolicyFilesList?insuredId=${encodeURIComponent(insuredId)}&policyId=${encodeURIComponent(policyId)}`
+  const remainingPages = await Promise.all(
+    Array.from({ length: Math.max(0, payload.totalPages - 1) }, (_, index) => loadPage(index + 2))
   );
+  const documents = [payload, ...remainingPages].flatMap((page) => page.data);
+  if (!documents.every(isClientDocument)) {
+    throw new Error('Unexpected PBIA documents response format.');
+  }
+
+  return {
+    status: 1,
+    message: null,
+    data: documents.map((document) => mapDocument(document, accountId)),
+  };
 }
 
-type PolicyFilesFolderParams = {
-  insuredId: string;
-  policyId: string;
-  folderId: string;
-};
+export function fetchClientDocuments(clientEmail: string, query: ClientDocumentQuery) {
+  return requestDocuments(clientEmail, '/client/documents', query);
+}
 
-export async function fetchPolicyFilesList(params: PolicyFilesFolderParams): Promise<PolicyFilesListResponse> {
-  const insuredId = params.insuredId.trim();
-  const policyId = params.policyId.trim();
-  const folderId = params.folderId.trim();
-
-  if (!insuredId || !policyId || !folderId) {
-    throw new Error('Missing insured id, policy id, or folder id for policy files lookup.');
-  }
-
-  return requestPolicyFiles(
-    `/getPolicyFilesList?insuredId=${encodeURIComponent(insuredId)}&policyId=${encodeURIComponent(policyId)}&folderId=${encodeURIComponent(folderId)}`
+export function fetchClientPolicyDocuments(
+  clientEmail: string,
+  query: ClientDocumentQuery & { policyId: string }
+) {
+  const policyId = query.policyId.trim();
+  if (!policyId) throw new Error('Missing PBIA policy id for document lookup.');
+  return requestDocuments(
+    clientEmail,
+    `/client/policies/${encodeURIComponent(policyId)}/documents`,
+    { accountId: query.accountId, folderId: query.folderId }
   );
 }

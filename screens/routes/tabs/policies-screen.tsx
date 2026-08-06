@@ -248,7 +248,7 @@ export default function PoliciesScreen({
       if (policy.status === 'Active') activeCount += 1;
       if (policy.status === 'Pending') pendingCount += 1;
       if (policy.status === 'Lapsed') lapsedCount += 1;
-      totalMonthlyPremium += policy.premiumMonthly;
+      totalMonthlyPremium += policy.premium ?? policy.premiumMonthly;
     }
 
     return {
@@ -393,7 +393,7 @@ export default function PoliciesScreen({
                   <Text style={styles.desktopSummaryValue}>{desktopSummary.totalPolicies}</Text>
                 </View>
                 <View style={styles.desktopSummaryItem}>
-                  <Text style={styles.desktopSummaryLabel}>Monthly premium</Text>
+                  <Text style={styles.desktopSummaryLabel}>Total premium</Text>
                   <Text style={styles.desktopSummaryValue}>
                     {formatCurrency(desktopSummary.totalMonthlyPremium)}
                   </Text>

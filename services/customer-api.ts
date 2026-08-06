@@ -1,156 +1,128 @@
-import { CustomerLookupRecord } from '@/types/customer';
-import { withApiKeyHeader } from '@/services/api-request-headers';
+import { buildClientQuery, PbiaApiError, pbiaRequest } from '@/services/pbia-client';
+import type { CustomerLookupRecord } from '@/types/customer';
 
-const DEFAULT_CUSTOMER_API_BASE_URL = 'http://localhost:3000';
-
-function getCustomerApiBaseUrl() {
-  return process.env.EXPO_PUBLIC_CUSTOMER_API_BASE_URL?.trim() || DEFAULT_CUSTOMER_API_BASE_URL;
-}
-
-function normalizeText(value: string | null | undefined) {
-  const normalized = value?.trim();
-  return normalized ? normalized : null;
-}
-
-type InsuredProfileUpdateInput = {
-  databaseId?: string | null;
-  type?: number | null;
-  commercialName?: string | null;
-  firstName?: string | null;
-  lastName?: string | null;
-  email: string;
-  phone?: string | null;
-  cellPhone?: string | null;
+type ClientAgentRecord = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
 };
 
-function buildAddCustomerPayload(input: InsuredProfileUpdateInput) {
-  const payload: Record<string, string | number | null> = {
-    databaseId: normalizeText(input.databaseId),
-    eMail: input.email.trim(),
-  };
+type ClientAccountRecord = {
+  id: string;
+  legalName: string;
+  dba: string | null;
+  email: string | null;
+  phone: string | null;
+  licenseNumber: string | null;
+  status: string;
+  entityType: string | null;
+  agentId: string | null;
+  agent: ClientAgentRecord | null;
+  policyCount: number;
+};
 
-  if (typeof input.type === 'number') {
-    payload.type = input.type;
-  }
+type ClientAccountList = {
+  data: ClientAccountRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
 
-  const commercialName = normalizeText(input.commercialName);
-  if (commercialName) {
-    payload.commercialName = commercialName;
-  }
-
-  const firstName = normalizeText(input.firstName);
-  if (firstName) {
-    payload.firstName = firstName;
-  }
-
-  const lastName = normalizeText(input.lastName);
-  if (lastName) {
-    payload.lastName = lastName;
-  }
-
-  const phone = normalizeText(input.phone);
-  if (phone) {
-    payload.phone = phone;
-  }
-
-  const cellPhone = normalizeText(input.cellPhone);
-  if (cellPhone) {
-    payload.cellPhone = cellPhone;
-  }
-
-  return payload;
+function isClientAccountRecord(value: unknown): value is ClientAccountRecord {
+  if (!value || typeof value !== 'object') return false;
+  const account = value as Partial<ClientAccountRecord>;
+  return (
+    typeof account.id === 'string' &&
+    typeof account.legalName === 'string' &&
+    typeof account.status === 'string' &&
+    typeof account.policyCount === 'number'
+  );
 }
 
-async function requestAddCustomer(payload: Record<string, string | number | null>) {
-  return fetch(`${getCustomerApiBaseUrl()}/addCustomer`, {
-    method: 'POST',
-    headers: withApiKeyHeader({
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    }),
-    body: JSON.stringify(payload),
-  });
+function toCustomerLookupRecord(account: ClientAccountRecord): CustomerLookupRecord {
+  const commercialName = account.dba?.trim() || account.legalName;
+  const active = account.status.toUpperCase() === 'ACTIVE';
+
+  return {
+    accountId: account.id,
+    legalName: account.legalName,
+    dba: account.dba,
+    email: account.email,
+    licenseNumber: account.licenseNumber,
+    status: account.status,
+    entityType: account.entityType,
+    agentId: account.agentId,
+    policyCount: account.policyCount,
+    // Compatibility aliases keep persisted portal profiles readable during migration.
+    databaseId: account.id,
+    commercialName,
+    firstName: null,
+    lastName: null,
+    type: null,
+    addressLine1: null,
+    addressLine2: null,
+    stateNameOrAbbreviation: null,
+    city: null,
+    zipCode: null,
+    eMail: account.email,
+    eMail2: null,
+    eMail3: null,
+    fax: null,
+    phone: account.phone,
+    cellPhone: null,
+    smsPhone: null,
+    description: null,
+    active,
+    website: null,
+    fein: null,
+    customerId: account.id,
+    insuredId: account.licenseNumber,
+  };
 }
 
 export async function fetchCustomersByEmail(email: string): Promise<CustomerLookupRecord[]> {
-  const url = `${getCustomerApiBaseUrl()}/getCustomer?Email=${encodeURIComponent(email)}`;
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: withApiKeyHeader({ Accept: 'application/json' }),
-  });
+  const loadPage = (page: number) =>
+    pbiaRequest<ClientAccountList>(
+      `/client/account${buildClientQuery({ page, pageSize: 50 })}`,
+      { method: 'GET', clientEmail: email },
+      'We could not load your PBIA account right now.'
+    );
+  const payload = await loadPage(1);
 
-  if (!response.ok) {
-    if (response.status === 404) {
-      return [];
-    }
-
-    if (response.status >= 500) {
-      throw new Error('We are having trouble finding your account right now. Please try again shortly.');
-    }
-
-    throw new Error('We could not verify that email right now. Please try again.');
+  if (!payload || !Array.isArray(payload.data) || !payload.data.every(isClientAccountRecord)) {
+    throw new Error('Unexpected PBIA account response format.');
   }
 
-  const payload: unknown = await response.json();
-  if (!Array.isArray(payload)) {
-    throw new Error('Unexpected customer lookup response format.');
+  const remainingPages = await Promise.all(
+    Array.from({ length: Math.max(0, payload.totalPages - 1) }, (_, index) => loadPage(index + 2))
+  );
+  const accounts = [payload, ...remainingPages].flatMap((page) => page.data);
+  if (!accounts.every(isClientAccountRecord)) {
+    throw new Error('Unexpected PBIA account response format.');
   }
-
-  return payload as CustomerLookupRecord[];
+  return accounts.map(toCustomerLookupRecord);
 }
 
-export async function updateInsuredProfile(input: InsuredProfileUpdateInput): Promise<void> {
-  const response = await requestAddCustomer(buildAddCustomerPayload(input));
+export async function fetchAccountByBusinessEmail(email: string): Promise<CustomerLookupRecord | null> {
+  try {
+    const account = await pbiaRequest<ClientAccountRecord>(
+      '/client/account/by-business-email',
+      { method: 'GET', clientEmail: email },
+      'We could not find your PBIA account right now.'
+    );
 
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error(
-        'The NowCerts profile update endpoint is not available yet. Enable POST /addCustomer on the backend to save profile edits.'
-      );
+    if (!isClientAccountRecord(account)) {
+      throw new Error('Unexpected PBIA account response format.');
     }
 
-    if (response.status >= 500) {
-      throw new Error('We could not save your profile changes right now. Please try again shortly.');
-    }
-
-    const message = await response.text();
-    const normalizedMessage = message.trim();
-    if (normalizedMessage) {
-      throw new Error(normalizedMessage);
-    }
-
-    throw new Error('We could not save your profile changes right now. Please review your changes and try again.');
-  }
-
-  const commercialName = normalizeText(input.commercialName);
-  const firstName = normalizeText(input.firstName);
-  const lastName = normalizeText(input.lastName);
-
-  if (commercialName && (firstName || lastName)) {
-    const commercialNameRefreshPayload = buildAddCustomerPayload({
-      databaseId: input.databaseId,
-      type: input.type,
-      commercialName,
-      email: input.email,
-      phone: input.phone,
-      cellPhone: input.cellPhone,
-    });
-    const commercialNameResponse = await requestAddCustomer(commercialNameRefreshPayload);
-
-    if (!commercialNameResponse.ok) {
-      if (commercialNameResponse.status >= 500) {
-        throw new Error('We saved your profile, but could not restore the business name right now. Please try again shortly.');
-      }
-
-      const message = await commercialNameResponse.text();
-      const normalizedMessage = message.trim();
-      if (normalizedMessage) {
-        throw new Error(normalizedMessage);
-      }
-
-      throw new Error('We saved your profile, but could not restore the business name right now. Please review your changes and try again.');
-    }
+    return toCustomerLookupRecord(account);
+  } catch (error) {
+    if (error instanceof PbiaApiError && error.status === 404) return null;
+    throw error;
   }
 }
 
-export type { InsuredProfileUpdateInput };
+export type { ClientAccountRecord, ClientAgentRecord };

@@ -1,11 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-import { fetchCustomersByEmail } from '@/services/customer-api';
+import { fetchAccountByBusinessEmail } from '@/services/customer-api';
 import { getPortalConfig } from '@/services/portal-config';
 import { getSupabaseClient } from '@/services/supabase';
 import type { Customer, CustomerLookupRecord } from '@/types/customer';
-import { matchesCustomerInsuredId, pickPreferredCustomerLookup } from '@/utils/customer-selection';
+import { matchesCustomerInsuredId } from '@/utils/customer-selection';
 
 const CUSTOMER_TABLE = process.env.EXPO_PUBLIC_SUPABASE_CUSTOMER_TABLE?.trim() || 'portal_customers';
 const SELECTED_CUSTOMER_STORAGE_KEY = 'portal_selected_customer';
@@ -145,6 +145,14 @@ function buildFullName(firstName: string | null, lastName: string | null, commer
 
 function mapCustomerLookupToProfile(customer: CustomerLookupRecord): Customer {
   return {
+    accountId: customer.accountId ?? customer.databaseId,
+    legalName: customer.legalName ?? customer.commercialName,
+    dba: customer.dba,
+    licenseNumber: customer.licenseNumber ?? customer.insuredId,
+    status: customer.status ?? (customer.active ? 'ACTIVE' : 'INACTIVE'),
+    entityType: customer.entityType,
+    agentId: customer.agentId,
+    policyCount: customer.policyCount ?? null,
     databaseId: customer.databaseId,
     commercialName: customer.commercialName,
     fullName: buildFullName(customer.firstName, customer.lastName, customer.commercialName),
@@ -173,6 +181,14 @@ function mapPortalCustomer(row: PortalCustomerRow, loginEmail: string): Customer
   const sourcePayload = row.source_payload;
 
   return {
+    accountId: row.database_id,
+    legalName: sourcePayload?.legalName ?? row.commercial_name,
+    dba: sourcePayload?.dba ?? null,
+    licenseNumber: sourcePayload?.licenseNumber ?? row.insured_id,
+    status: sourcePayload?.status ?? (row.is_active === false ? 'INACTIVE' : 'ACTIVE'),
+    entityType: sourcePayload?.entityType ?? null,
+    agentId: sourcePayload?.agentId ?? null,
+    policyCount: sourcePayload?.policyCount ?? null,
     databaseId: row.database_id,
     commercialName: row.commercial_name,
     fullName: buildFullName(row.first_name, row.last_name, row.commercial_name),
@@ -227,10 +243,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const normalizedEmail = normalizeEmail(email);
 
         try {
-          const customers = await fetchCustomersByEmail(normalizedEmail);
+          const nextCustomer = await fetchAccountByBusinessEmail(normalizedEmail);
           if (!mounted) return;
 
-          const nextCustomer = pickPreferredCustomerLookup(customers, preferredInsuredId);
           if (nextCustomer) {
             setCustomerState(mapCustomerLookupToProfile(nextCustomer));
             const nextInsuredId = nextCustomer.insuredId?.trim() ?? '';

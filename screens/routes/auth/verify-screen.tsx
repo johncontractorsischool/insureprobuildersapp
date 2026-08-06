@@ -9,7 +9,7 @@ import { OTPInput } from '@/components/otp-input';
 import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { fetchCustomersByEmail } from '@/services/customer-api';
+import { fetchAccountByBusinessEmail } from '@/services/customer-api';
 import {
   isOtpRateLimitError,
   persistCustomersForEmail,
@@ -19,7 +19,6 @@ import {
   verifyEmailSignInCode,
 } from '@/services/auth-flow';
 import { getPortalConfig } from '@/services/portal-config';
-import { pickPreferredCustomerLookup } from '@/utils/customer-selection';
 
 function maskEmail(email: string) {
   const [name, domain] = email.split('@');
@@ -61,6 +60,12 @@ export default function VerifyScreen() {
   }, [hint, portalConfig.review.code, portalConfig.review.enabled]);
 
   useEffect(() => {
+    if (hint !== 'otp-unavailable') return;
+    setNotice('Your PBIA account was created, but the first code could not be sent. Tap Resend Code.');
+    setSecondsRemaining(0);
+  }, [hint]);
+
+  useEffect(() => {
     if (secondsRemaining <= 0) return;
     const timer = setInterval(() => setSecondsRemaining((prev) => prev - 1), 1000);
     return () => clearInterval(timer);
@@ -86,8 +91,7 @@ export default function VerifyScreen() {
           return;
         }
 
-        const customers = await fetchCustomersByEmail(pendingEmail);
-        const primaryCustomer = pickPreferredCustomerLookup(customers, pendingInsuredId);
+        const primaryCustomer = await fetchAccountByBusinessEmail(pendingEmail);
 
         if (!primaryCustomer) {
           throw new Error('No account was found for that email address.');
@@ -102,17 +106,14 @@ export default function VerifyScreen() {
       const verifiedEmail = await verifyEmailSignInCode(pendingEmail, code);
       let customerProfile;
       try {
-        const customers = await fetchCustomersByEmail(verifiedEmail);
-        if (customers.length > 0) {
-          const primaryCustomer = pickPreferredCustomerLookup(customers, pendingInsuredId);
-          if (primaryCustomer) {
-            customerProfile = toCustomerProfile(primaryCustomer);
-            try {
-              await persistCustomersForEmail(verifiedEmail, customers);
-            } catch (persistError) {
-              // Keep the fresh customer profile in memory even if the Supabase cache write is blocked.
-              console.warn('Customer cache sync failed after successful OTP verification.', persistError);
-            }
+        const primaryCustomer = await fetchAccountByBusinessEmail(verifiedEmail);
+        if (primaryCustomer) {
+          customerProfile = toCustomerProfile(primaryCustomer);
+          try {
+            await persistCustomersForEmail(verifiedEmail, [primaryCustomer]);
+          } catch (persistError) {
+            // Keep the fresh customer profile in memory even if the Supabase cache write is blocked.
+            console.warn('Customer cache sync failed after successful OTP verification.', persistError);
           }
         }
       } catch (syncError) {

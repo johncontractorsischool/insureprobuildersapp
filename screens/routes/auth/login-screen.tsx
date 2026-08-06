@@ -9,11 +9,10 @@ import { BrandMark } from '@/components/brand-mark';
 import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { CslbMomentumSignUpForm } from '@/screens/routes/auth/cslb-momentum-sign-up-form';
-import { fetchCustomersByEmail } from '@/services/customer-api';
+import { ClientSignUpForm } from '@/screens/routes/auth/client-sign-up-form';
+import { fetchAccountByBusinessEmail } from '@/services/customer-api';
 import { isOtpRateLimitError, sendEmailSignInCode, toUserFacingError } from '@/services/auth-flow';
 import { getPortalConfig } from '@/services/portal-config';
-import { matchesCustomerInsuredId } from '@/utils/customer-selection';
 
 function isEmailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -35,8 +34,6 @@ export default function LoginScreen() {
   const { width } = useWindowDimensions();
   const [mode, setMode] = useState<AuthMode>(getAuthModeFromParam(params.mode));
   const [email, setEmail] = useState('');
-  const [licenseNumber, setLicenseNumber] = useState('');
-  const [requiresLicenseNumber, setRequiresLicenseNumber] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const isDesktop = width >= 1100;
@@ -63,37 +60,14 @@ export default function LoginScreen() {
     setError('');
 
     try {
-      const customers = await fetchCustomersByEmail(normalizedEmail);
+      const customer = await fetchAccountByBusinessEmail(normalizedEmail);
 
-      if (customers.length === 0) {
-        setRequiresLicenseNumber(false);
-        setError('No account was found for that email address.');
+      if (!customer) {
+        setError('No account was found for that primary business email address.');
         return;
       }
 
-      if (customers.length > 1) {
-        const normalizedLicenseNumber = licenseNumber.trim();
-        const matchingCustomer = customers.find((customer) =>
-          matchesCustomerInsuredId(customer.insuredId, normalizedLicenseNumber)
-        );
-
-        setRequiresLicenseNumber(true);
-
-        if (!normalizedLicenseNumber) {
-          setError('Multiple accounts were found for that email. Enter your license number to continue.');
-          return;
-        }
-
-        if (!matchingCustomer) {
-          setError('We could not match that license number to this email address.');
-          return;
-        }
-
-        selectedInsuredId = matchingCustomer.insuredId?.trim() ?? '';
-      } else {
-        setRequiresLicenseNumber(false);
-        selectedInsuredId = customers[0]?.insuredId?.trim() ?? '';
-      }
+      selectedInsuredId = customer.insuredId?.trim() ?? '';
 
       if (portalConfig.review.enabled && normalizedEmail === portalConfig.review.email) {
         setPendingEmail(normalizedEmail, selectedInsuredId);
@@ -130,20 +104,11 @@ export default function LoginScreen() {
     setMode(nextMode);
     if (nextMode === 'signup') {
       setError('');
-      setRequiresLicenseNumber(false);
-      setLicenseNumber('');
     }
   };
 
   const handleEmailChange = (value: string) => {
     setEmail(value);
-    setError('');
-    setRequiresLicenseNumber(false);
-    setLicenseNumber('');
-  };
-
-  const handleLicenseNumberChange = (value: string) => {
-    setLicenseNumber(value);
     setError('');
   };
 
@@ -211,25 +176,9 @@ export default function LoginScreen() {
                     placeholder="You@Company.com"
                     returnKeyType="done"
                     onSubmitEditing={handleContinue}
-                    errorText={!requiresLicenseNumber ? error : undefined}
+                    errorText={error}
                     helperText="We only use this for secure account verification."
                   />
-
-                  {requiresLicenseNumber ? (
-                    <AppInput
-                      label="License Number"
-                      leftIcon="document-text-outline"
-                      value={licenseNumber}
-                      onChangeText={handleLicenseNumberChange}
-                      autoCapitalize="characters"
-                      autoCorrect={false}
-                      placeholder="CSLB License Number"
-                      returnKeyType="done"
-                      onSubmitEditing={handleContinue}
-                      errorText={error}
-                      helperText="We found multiple accounts for this email. Enter your license number to continue."
-                    />
-                  ) : null}
 
                   <AppButton label="Continue" onPress={handleContinue} loading={submitting} />
 
@@ -238,7 +187,7 @@ export default function LoginScreen() {
                   </Text>
                 </>
               ) : (
-                <CslbMomentumSignUpForm />
+                <ClientSignUpForm />
               )}
             </View>
           </View>

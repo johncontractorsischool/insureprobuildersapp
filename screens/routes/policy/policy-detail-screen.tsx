@@ -11,7 +11,7 @@ import { useIsDesktopWebLayout } from '@/components/web-auth-shell';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { usePolicies } from '@/context/policies-context';
-import { fetchPolicyCoveragesByPolicyId, type PolicyCoverageGroup } from '@/services/policy-coverages-api';
+import { fetchPolicyCoverages, type PolicyCoverageGroup } from '@/services/policy-coverages-api';
 import type { PolicyStatus } from '@/types/policy';
 import { formatCurrency, formatDate } from '@/utils/format';
 
@@ -53,10 +53,10 @@ export default function PolicyDetailScreen({
   const { id } = useLocalSearchParams<{ id: string }>();
   const isDesktopLayout = useIsDesktopWebLayout();
   const isDesktopWebLayout = Platform.OS === 'web' && isDesktopLayout;
-  const { isAuthenticated, customer } = useAuth();
+  const { isAuthenticated, customer, userEmail } = useAuth();
   const { policies, isLoadingPolicies, policiesError, refreshPolicies } = usePolicies();
   const policy = policies.find((item) => item.id === id);
-  const policyFilesInsuredId = customer?.databaseId?.trim() || customer?.insuredId?.trim() || '';
+  const accountId = customer?.accountId?.trim() || customer?.databaseId?.trim() || '';
   const [coverageGroups, setCoverageGroups] = useState<PolicyCoverageGroup[]>([]);
   const [isLoadingPolicyCoverages, setIsLoadingPolicyCoverages] = useState(false);
   const [policyCoveragesError, setPolicyCoveragesError] = useState<string | null>(null);
@@ -69,7 +69,7 @@ export default function PolicyDetailScreen({
     let isMounted = true;
 
     const hydratePolicyCoverages = async () => {
-      if (!policy) {
+      if (!policy || !accountId || !userEmail) {
         setCoverageGroups([]);
         setPolicyCoveragesError(null);
         setIsLoadingPolicyCoverages(false);
@@ -79,7 +79,7 @@ export default function PolicyDetailScreen({
       setIsLoadingPolicyCoverages(true);
       setPolicyCoveragesError(null);
       try {
-        const nextCoverageGroups = await fetchPolicyCoveragesByPolicyId(policy.id);
+        const nextCoverageGroups = await fetchPolicyCoverages(userEmail, accountId, policy.id);
         if (!isMounted) return;
         setCoverageGroups(nextCoverageGroups);
       } catch (error) {
@@ -98,7 +98,7 @@ export default function PolicyDetailScreen({
     return () => {
       isMounted = false;
     };
-  }, [policy]);
+  }, [accountId, policy, userEmail]);
 
   if (isLoadingPolicies) {
     return (
@@ -160,8 +160,8 @@ export default function PolicyDetailScreen({
       value: formatDate(policy.expirationDate),
     },
     {
-      label: 'Monthly Premium',
-      value: formatCurrency(policy.premiumMonthly),
+      label: 'Premium',
+      value: formatCurrency(policy.premium ?? policy.premiumMonthly),
     },
   ] as const;
   const policyDateRows = [
@@ -219,13 +219,13 @@ export default function PolicyDetailScreen({
         router.push({
           pathname: '/policy-files',
           params: {
-            insuredId: policyFilesInsuredId,
+            accountId,
             policyId: policy.id,
             policyNumber: policy.policyNumber,
           },
         });
       }}
-      disabled={!policyFilesInsuredId}
+      disabled={!accountId}
     />
   );
 

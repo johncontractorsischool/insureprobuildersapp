@@ -1,98 +1,120 @@
-import { fetchCustomersByEmail, updateInsuredProfile } from '@/services/customer-api';
+import { fetchAccountByBusinessEmail, fetchCustomersByEmail } from '@/services/customer-api';
 
-describe('customer api', () => {
-  const originalCustomerApiBaseUrl = process.env.EXPO_PUBLIC_CUSTOMER_API_BASE_URL;
-  const originalPublicApiKey = process.env.EXPO_PUBLIC_X_API_KEY;
+describe('PBIA customer api', () => {
+  const originalBaseUrl = process.env.EXPO_PUBLIC_PBIA_API_BASE_URL;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    process.env.EXPO_PUBLIC_CUSTOMER_API_BASE_URL = 'http://localhost:3500';
-    process.env.EXPO_PUBLIC_X_API_KEY = 'test-api-key';
+    process.env.EXPO_PUBLIC_PBIA_API_BASE_URL = 'http://localhost:3500';
   });
 
   afterAll(() => {
-    process.env.EXPO_PUBLIC_CUSTOMER_API_BASE_URL = originalCustomerApiBaseUrl;
-    process.env.EXPO_PUBLIC_X_API_KEY = originalPublicApiKey;
+    process.env.EXPO_PUBLIC_PBIA_API_BASE_URL = originalBaseUrl;
   });
 
-  it('looks up customers by email through the configured backend', async () => {
+  it('loads email-scoped PBIA accounts and maps compatibility fields', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => [{ databaseId: 'insured-db-1' }],
+      json: async () => ({
+        data: [
+          {
+            id: 'account-1',
+            legalName: 'Builder Co',
+            dba: null,
+            email: 'jane@example.com',
+            phone: '5551112222',
+            licenseNumber: '1144038',
+            status: 'ACTIVE',
+            entityType: 'LLC',
+            agentId: 'agent-1',
+            agent: null,
+            policyCount: 2,
+          },
+        ],
+        page: 1,
+        pageSize: 50,
+        total: 1,
+        totalPages: 1,
+      }),
     });
-
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    await fetchCustomersByEmail('jane@example.com');
+    const accounts = await fetchCustomersByEmail('jane@example.com');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:3500/getCustomer?Email=jane%40example.com',
+      'http://localhost:3500/client/account?page=1&pageSize=50',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ 'X-Client-Email': 'jane@example.com' }),
+      })
+    );
+    expect(accounts[0]).toEqual(
+      expect.objectContaining({
+        accountId: 'account-1',
+        databaseId: 'account-1',
+        licenseNumber: '1144038',
+        insuredId: '1144038',
+      })
+    );
+  });
+
+  it('uses the singular primary business-email endpoint for sign-in discovery', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: 'account-1',
+        legalName: 'Builder Co',
+        dba: null,
+        email: 'jane@example.com',
+        phone: '5551112222',
+        licenseNumber: '1144038',
+        status: 'ACTIVE',
+        entityType: 'LLC',
+        agentId: 'agent-1',
+        agent: null,
+        policyCount: 2,
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const account = await fetchAccountByBusinessEmail(' Jane@Example.com ');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3500/client/account/by-business-email',
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({
           Accept: 'application/json',
-          'x-api-key': 'test-api-key',
+          'X-Client-Email': 'jane@example.com',
         }),
       })
+    );
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('x-api-key');
+    expect(account).toEqual(
+      expect.objectContaining({ accountId: 'account-1', insuredId: '1144038' })
     );
   });
 
-  it('posts profile edits to the NowCerts addCustomer endpoint and restores the business name', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-    });
+  it('maps a missing primary business-email account to null', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ message: 'Client account not found' }),
+    }) as unknown as typeof fetch;
 
-    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(fetchAccountByBusinessEmail('missing@example.com')).resolves.toBeNull();
+  });
 
-    await updateInsuredProfile({
-      databaseId: 'insured-db-1',
-      type: 0,
-      commercialName: 'Builder Co',
-      firstName: 'Jane',
-      lastName: 'Builder',
-      email: 'jane@example.com',
-      phone: '5551112222',
-      cellPhone: '5559990000',
-    });
+  it('preserves an ambiguous primary business-email conflict', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ message: 'Multiple client accounts use this business email' }),
+    }) as unknown as typeof fetch;
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      'http://localhost:3500/addCustomer',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          'x-api-key': 'test-api-key',
-        }),
-      })
+    await expect(fetchAccountByBusinessEmail('shared@example.com')).rejects.toThrow(
+      'Multiple client accounts use this business email'
     );
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
-      databaseId: 'insured-db-1',
-      eMail: 'jane@example.com',
-      type: 0,
-      commercialName: 'Builder Co',
-      firstName: 'Jane',
-      lastName: 'Builder',
-      phone: '5551112222',
-      cellPhone: '5559990000',
-    });
-
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      'http://localhost:3500/addCustomer',
-      expect.objectContaining({
-        method: 'POST',
-      })
-    );
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({
-      databaseId: 'insured-db-1',
-      eMail: 'jane@example.com',
-      type: 0,
-      commercialName: 'Builder Co',
-      phone: '5551112222',
-      cellPhone: '5559990000',
-    });
   });
 });

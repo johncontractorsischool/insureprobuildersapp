@@ -8,14 +8,14 @@ const mockFetchCslbLicenseByInsuredId = jest.fn();
 const mockGetPortalConfig = jest.fn();
 
 jest.mock('@/context/auth-context', () => ({
-  useAuth: () => mockUseAuth(),
+  useAuth: () => ({ userEmail: 'jane@example.com', ...mockUseAuth() }),
 }));
 
 jest.mock('@/services/cslb-api', () => {
   const actual = jest.requireActual('@/services/cslb-api');
   return {
     ...actual,
-    fetchCslbLicenseByInsuredId: (...args: unknown[]) => mockFetchCslbLicenseByInsuredId(...args),
+    fetchClientCslb: (...args: unknown[]) => mockFetchCslbLicenseByInsuredId(...args),
   };
 });
 
@@ -102,7 +102,10 @@ describe('useCompanyProfile', () => {
 
     await waitFor(() => expect(result.current.isLoadingCompany).toBe(false));
 
-    expect(mockFetchCslbLicenseByInsuredId).toHaveBeenCalledWith('LIC-123456');
+    expect(mockFetchCslbLicenseByInsuredId).toHaveBeenCalledWith(
+      'jane@example.com',
+      'insured-db-1'
+    );
     expect(result.current.statusChips).toEqual(['Active']);
     expect(result.current.licenseRows).toEqual(
       expect.arrayContaining([
@@ -121,7 +124,13 @@ describe('useCompanyProfile', () => {
 
   it('falls back to configured values when no insured id is available', async () => {
     mockUseAuth.mockReturnValue({
-      customer: buildCustomer({ insuredId: '', active: false }),
+      customer: buildCustomer({
+        accountId: '',
+        databaseId: '',
+        licenseNumber: '',
+        insuredId: '',
+        active: false,
+      }),
     });
 
     const { result } = renderHook(() => useCompanyProfile());

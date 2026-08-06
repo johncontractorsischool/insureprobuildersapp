@@ -1,39 +1,40 @@
-import { Policy, PolicyStatus } from '@/types/policy';
-import { withApiKeyHeader } from '@/services/api-request-headers';
+import { buildClientQuery, pbiaRequest } from '@/services/pbia-client';
+import type { Policy, PolicyStatus } from '@/types/policy';
 
-const DEFAULT_POLICY_API_BASE_URL = 'http://localhost:3000';
-
-type PolicyLookupRecord = {
-  databaseId: string;
-  number: string | null;
-  isQuote: boolean | null;
+type ClientPolicyRecord = {
+  id: string;
+  accountId: string;
+  accountName: string;
+  policyNumber: string | null;
+  recordType: 'POLICY' | 'QUOTE';
+  status: string;
+  lineOfBusiness: string | null;
   effectiveDate: string | null;
   expirationDate: string | null;
-  insuredFirstName: string | null;
-  insuredLastName: string | null;
-  insuredCommercialName: string | null;
-  linesOfBusiness: string[] | null;
-  carrierName: string | null;
-  totalPremium: number | null;
-  changeDate: string | null;
-  active: boolean;
-  status: string | null;
-  inceptionDate: string | null;
-  createDate: string | null;
-  billingType: number | null;
+  carrierReference: string | null;
+  premium: number | null;
 };
 
-function getPolicyApiBaseUrl() {
-  return (
-    process.env.EXPO_PUBLIC_POLICY_API_BASE_URL?.trim() ||
-    process.env.EXPO_PUBLIC_CUSTOMER_API_BASE_URL?.trim() ||
-    DEFAULT_POLICY_API_BASE_URL
-  );
-}
+type ClientPolicyList = {
+  data: ClientPolicyRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
 
 function normalizeText(value: string | null | undefined) {
-  const next = value?.trim();
-  return next ? next : null;
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function toDisplayLabel(value: string | null | undefined, fallback: string) {
+  const normalized = normalizeText(value);
+  if (!normalized) return fallback;
+  return normalized
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function formatPolicyDate(value: string | null | undefined) {
@@ -47,123 +48,89 @@ function formatPolicyDate(value: string | null | undefined) {
   }).format(date);
 }
 
-function normalizeCurrencyValue(value: number | null | undefined) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 0;
-  return value;
-}
-
-function toPolicyStatus(record: PolicyLookupRecord): PolicyStatus {
-  const rawStatus = normalizeText(record.status)?.toLowerCase();
-
-  if (record.active || rawStatus === 'active') return 'Active';
-  if (record.isQuote || rawStatus === 'pending' || rawStatus === 'quote' || rawStatus === 'quoted') {
-    return 'Pending';
-  }
-
+function toPolicyStatus(record: ClientPolicyRecord): PolicyStatus {
+  const status = record.status.trim().toUpperCase();
+  if (status === 'ACTIVE') return 'Active';
+  if (record.recordType === 'QUOTE' || status === 'PENDING' || status === 'QUOTE') return 'Pending';
   return 'Lapsed';
 }
 
-function toBillingPlan(record: PolicyLookupRecord) {
-  if (record.billingType === 0) return 'Agency billed';
-  if (record.billingType === 1) return 'Carrier billed';
-  return 'Billing details unavailable';
-}
-
-function isPolicyLookupRecord(value: unknown): value is PolicyLookupRecord {
+function isClientPolicyRecord(value: unknown): value is ClientPolicyRecord {
   if (!value || typeof value !== 'object') return false;
-  const maybeRecord = value as { databaseId?: unknown };
-  return typeof maybeRecord.databaseId === 'string';
+  const policy = value as Partial<ClientPolicyRecord>;
+  return (
+    typeof policy.id === 'string' &&
+    typeof policy.accountId === 'string' &&
+    (policy.recordType === 'POLICY' || policy.recordType === 'QUOTE') &&
+    typeof policy.status === 'string'
+  );
 }
 
-function extractPolicyRecords(payload: unknown): PolicyLookupRecord[] | null {
-  if (Array.isArray(payload)) {
-    return payload.filter(isPolicyLookupRecord);
-  }
-
-  if (!payload || typeof payload !== 'object') return null;
-
-  const maybeWrapped = payload as { data?: unknown };
-  if (Array.isArray(maybeWrapped.data)) {
-    return maybeWrapped.data.filter(isPolicyLookupRecord);
-  }
-
-  return null;
-}
-
-function mapPolicyRecord(record: PolicyLookupRecord): Policy {
-  const lineOfBusinessValues = (record.linesOfBusiness ?? [])
-    .map((entry) => normalizeText(entry))
-    .filter((entry): entry is string => Boolean(entry));
-  const lineOfBusiness = lineOfBusinessValues.length > 0 ? lineOfBusinessValues.join(', ') : 'Policy';
-  const carrierName = normalizeText(record.carrierName) ?? 'Carrier not provided';
-
-  const effectiveDate =
-    normalizeText(record.effectiveDate) ??
-    normalizeText(record.inceptionDate) ??
-    normalizeText(record.createDate) ??
-    new Date().toISOString();
+function mapPolicyRecord(record: ClientPolicyRecord): Policy {
+  const productName = toDisplayLabel(record.lineOfBusiness, 'Policy');
+  const carrierName = normalizeText(record.carrierReference) ?? 'Carrier not provided';
+  const effectiveDate = normalizeText(record.effectiveDate) ?? new Date(0).toISOString();
   const expirationDate = normalizeText(record.expirationDate) ?? effectiveDate;
-
-  const personalName = [normalizeText(record.insuredFirstName), normalizeText(record.insuredLastName)]
-    .filter((entry): entry is string => Boolean(entry))
-    .join(' ');
-  const insuredName = normalizeText(record.insuredCommercialName) ?? (personalName || 'Named insured');
-
-  const statusValue = normalizeText(record.status) ?? (record.active ? 'Active' : 'Inactive');
-  const monthlyPremium = normalizeCurrencyValue(record.totalPremium);
-  const lastPaymentDate = normalizeText(record.changeDate) ?? 'Not billed yet';
+  const premium = typeof record.premium === 'number' && Number.isFinite(record.premium) ? record.premium : 0;
 
   return {
-    id: record.databaseId,
-    productName: lineOfBusiness,
+    id: record.id,
+    accountId: record.accountId,
+    recordType: record.recordType,
+    lineOfBusiness: record.lineOfBusiness,
+    productName,
     status: toPolicyStatus(record),
-    policyNumber: normalizeText(record.number) ?? record.databaseId,
+    policyNumber: normalizeText(record.policyNumber) ?? record.id,
     carrierName,
-    premiumMonthly: monthlyPremium,
+    premium,
+    premiumMonthly: premium,
     effectiveDate,
     expirationDate,
-    insuredName,
-    insuredItem: `${lineOfBusiness} • ${carrierName}`,
+    insuredName: normalizeText(record.accountName) ?? 'Named insured',
+    insuredItem: `${productName} • ${carrierName}`,
     coverageSummary: [
-      { label: 'Line of business', value: lineOfBusiness },
+      { label: 'Line of business', value: productName },
       { label: 'Carrier', value: carrierName },
       { label: 'Effective date', value: formatPolicyDate(effectiveDate) },
       { label: 'Expiration date', value: formatPolicyDate(expirationDate) },
     ],
     billing: {
-      plan: toBillingPlan(record),
-      monthlyPremium,
+      plan: 'Billing details available in Payments',
+      monthlyPremium: premium,
       nextDueDate: expirationDate,
-      lastPaymentDate,
+      lastPaymentDate: 'Not available',
       autopayEnabled: false,
     },
     documents: [],
-    claimsPlaceholder: `Current status: ${statusValue}. Claims integration is coming soon.`,
+    claimsPlaceholder: `Current status: ${record.status}. Claims integration is coming soon.`,
   };
 }
 
-export async function fetchPoliciesByInsuredDatabaseId(insuredDatabaseId: string): Promise<Policy[]> {
-  const trimmedId = insuredDatabaseId.trim();
-  if (!trimmedId) {
-    throw new Error('Missing insured database id for policy lookup.');
+export async function fetchPoliciesByAccount(
+  clientEmail: string,
+  accountId: string
+): Promise<Policy[]> {
+  const normalizedAccountId = accountId.trim();
+  if (!normalizedAccountId) throw new Error('Missing PBIA account id for policy lookup.');
+
+  const loadPage = (page: number) =>
+    pbiaRequest<ClientPolicyList>(
+      `/client/policies${buildClientQuery({ accountId: normalizedAccountId, page, pageSize: 50 })}`,
+      { method: 'GET', clientEmail },
+      'Unable to load policies from PBIA.'
+    );
+  const payload = await loadPage(1);
+
+  if (!payload || !Array.isArray(payload.data) || !payload.data.every(isClientPolicyRecord)) {
+    throw new Error('Unexpected PBIA policy response format.');
   }
 
-  const url = `${getPolicyApiBaseUrl()}/getPolicy?IId=${encodeURIComponent(trimmedId)}`;
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: withApiKeyHeader({ Accept: 'application/json' }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Policy lookup failed (${response.status}).`);
+  const remainingPages = await Promise.all(
+    Array.from({ length: Math.max(0, payload.totalPages - 1) }, (_, index) => loadPage(index + 2))
+  );
+  const policies = [payload, ...remainingPages].flatMap((page) => page.data);
+  if (!policies.every(isClientPolicyRecord)) {
+    throw new Error('Unexpected PBIA policy response format.');
   }
-
-  const payload: unknown = await response.json();
-  const records = extractPolicyRecords(payload);
-  if (!records) {
-    throw new Error('Unexpected policy lookup response format.');
-  }
-
-  const policies = records.map(mapPolicyRecord);
-  return policies.sort((left, right) => right.expirationDate.localeCompare(left.expirationDate));
+  return policies.map(mapPolicyRecord);
 }

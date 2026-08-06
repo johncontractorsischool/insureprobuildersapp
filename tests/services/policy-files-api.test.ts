@@ -1,130 +1,61 @@
-import {
-  fetchPolicyFilesList,
-  fetchPolicyFilesListByInsuredId,
-  fetchPolicyFilesListByPolicy,
-} from '@/services/policy-files-api';
+import { fetchClientDocuments, fetchClientPolicyDocuments } from '@/services/policy-files-api';
 
-describe('policy-files api', () => {
-  it('parses nested stringified file data returned by the root lookup', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        status: 1,
-        message: 'ok',
-        data: JSON.stringify([
-          {
-            databaseId: 'file-1',
-            insuredId: 'insured-db-1',
-            policyId: 'policy-1',
-            policyNumber: 'GL-1001',
-            name: 'Folder A',
-            fileOrFolder: 'Folder',
-            createDate: '2026-02-01T00:00:00.000Z',
-          },
-        ]),
-      }),
-    }) as unknown as typeof fetch;
-
-    const response = await fetchPolicyFilesListByInsuredId('insured-db-1');
-
-    expect(response.status).toBe(1);
-    expect(response.data).toEqual([
-      expect.objectContaining({
-        databaseId: 'file-1',
-        fileOrFolder: 'Folder',
-        name: 'Folder A',
-      }),
-    ]);
+describe('PBIA documents api', () => {
+  beforeEach(() => {
+    process.env.EXPO_PUBLIC_PBIA_API_BASE_URL = 'http://localhost:3000';
   });
 
-  it('loads nested folder items with all required identifiers', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        status: 1,
-        data: [
-          {
-            databaseId: 'file-2',
-            insuredId: 'insured-db-1',
-            policyId: 'policy-1',
-            policyNumber: 'GL-1001',
-            name: 'Declarations',
-            fileOrFolder: 'File',
-          },
-        ],
-      }),
-    });
+  const response = {
+    ok: true,
+    json: async () => ({
+      data: [
+        {
+          id: 'doc-1',
+          name: 'Declarations.pdf',
+          mimeType: 'application/pdf',
+          size: 100,
+          description: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          policyId: 'policy-1',
+          parentId: null,
+          isFolder: false,
+        },
+      ],
+      page: 1,
+      pageSize: 50,
+      total: 1,
+      totalPages: 1,
+    }),
+  };
 
+  it('loads account documents', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(response);
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const response = await fetchPolicyFilesList({
-      insuredId: 'insured-db-1',
+    const result = await fetchClientDocuments('jane@example.com', { accountId: 'account-1' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/client/documents?accountId=account-1&page=1&pageSize=50',
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({ databaseId: 'doc-1', fileOrFolder: 'File' })
+    );
+  });
+
+  it('loads policy folder documents', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(response);
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await fetchClientPolicyDocuments('jane@example.com', {
+      accountId: 'account-1',
       policyId: 'policy-1',
       folderId: 'folder-1',
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:3000/getPolicyFilesList?insuredId=insured-db-1&policyId=policy-1&folderId=folder-1',
+      'http://localhost:3000/client/policies/policy-1/documents?accountId=account-1&folderId=folder-1&page=1&pageSize=50',
       expect.objectContaining({ method: 'GET' })
     );
-    expect(response.data[0].name).toBe('Declarations');
-  });
-
-  it('loads policy-specific root files from the strict policy endpoint', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        status: 1,
-        data: {
-          number: 'GL-1001',
-          files: [
-            {
-              databaseId: 'file-3',
-              name: '101000937.URBANEDGE CONSTRUCTION INC....pdf',
-              fileOrFolder: 'File',
-              createDate: '2026-04-17T11:16:00.000Z',
-            },
-          ],
-          currentFolderId: 'folder-root',
-        },
-      }),
-    });
-
-    global.fetch = fetchMock as unknown as typeof fetch;
-
-    const response = await fetchPolicyFilesListByPolicy({
-      insuredId: 'insured-db-1',
-      policyId: 'policy-1',
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:3000/getPolicyFilesList?insuredId=insured-db-1&policyId=policy-1',
-      expect.objectContaining({ method: 'GET' })
-    );
-    expect(response.data).toEqual([
-      expect.objectContaining({
-        databaseId: 'file-3',
-        name: '101000937.URBANEDGE CONSTRUCTION INC....pdf',
-      }),
-    ]);
-  });
-
-  it('rejects folder requests that are missing required ids', async () => {
-    await expect(
-      fetchPolicyFilesList({
-        insuredId: '',
-        policyId: 'policy-1',
-        folderId: 'folder-1',
-      })
-    ).rejects.toThrow('Missing insured id, policy id, or folder id for policy files lookup.');
-  });
-
-  it('rejects policy root requests that are missing required ids', async () => {
-    await expect(
-      fetchPolicyFilesListByPolicy({
-        insuredId: 'insured-db-1',
-        policyId: '',
-      })
-    ).rejects.toThrow('Missing insured id or policy id for policy files lookup.');
   });
 });
