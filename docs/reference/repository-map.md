@@ -132,6 +132,11 @@ This file explains every tracked folder and file in the repo and calls out wheth
 - `docs/`: canonical project documentation folder.
 - `docs/README.md`: docs index that points readers to architecture, flows, integrations, and repository reference.
 
+### `docs/handoffs/`
+
+- `docs/handoffs/`: implementation-ready specifications for scoped product work.
+- `docs/handoffs/digital-business-card.md`: Expo implementation handoff for the profile entry point, card builder, public QR route, contact sharing, persistence, and Apple/Google Wallet issuance.
+
 ### `docs/architecture/`
 
 - `docs/architecture/`: runtime and integration documentation.

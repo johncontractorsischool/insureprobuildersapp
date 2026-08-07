@@ -11,9 +11,24 @@ const mockRouter = {
 };
 const mockUseAuth = jest.fn();
 const mockCreateClientContactRequest = jest.fn();
+const mockRefreshDigitalCard = jest.fn();
+const mockRefreshDigitalCardDraftStatus = jest.fn();
 
 jest.mock('expo-router', () => ({ __esModule: true, router: mockRouter }));
 jest.mock('@/context/auth-context', () => ({ useAuth: () => mockUseAuth() }));
+jest.mock('@/context/digital-card-context', () => ({
+  useDigitalCard: () => ({
+    card: null,
+    hasDraft: false,
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    refresh: mockRefreshDigitalCard,
+    refreshDraftStatus: mockRefreshDigitalCardDraftStatus,
+    publish: jest.fn(),
+    update: jest.fn(),
+  }),
+}));
 jest.mock('@/services/contact-request-api', () => ({
   createClientContactRequest: (...args: unknown[]) => mockCreateClientContactRequest(...args),
 }));
