@@ -4,7 +4,7 @@ import {
   listPaymentEligibility,
   submitPayment,
 } from '@/services/payment-api';
-import { buildPaymentEligibility } from '@/tests/factories';
+import { buildPaymentEligibility, buildPaymentTermOption } from '@/tests/factories';
 
 const ORIGINAL_PAYMENT_BASE_URL = process.env.EXPO_PUBLIC_PBIA_API_BASE_URL;
 const mockGetSession = jest.fn();
@@ -34,7 +34,7 @@ describe('payment API', () => {
   });
 
   it('lists email-scoped payment eligibility', async () => {
-    const record = buildPaymentEligibility();
+    const record = buildPaymentEligibility({ lineOfBusiness: '' });
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ data: [record], page: 1, pageSize: 50, total: 1, totalPages: 1 }),
@@ -82,6 +82,8 @@ describe('payment API', () => {
       json: async () => ({
         id: 'payment-1',
         demandId: 'demand-1',
+        paymentOptionId: null,
+        termYears: null,
         status: 'SUCCEEDED',
         amount: 750,
         convenienceFee: 22.5,
@@ -130,6 +132,84 @@ describe('payment API', () => {
         body: JSON.stringify(request),
       })
     );
+  });
+
+  it('accepts term options and submits only the selected opaque option ID', async () => {
+    const termRecord = buildPaymentEligibility({
+      paymentMode: 'TERM_OPTIONS',
+      amountDue: 139,
+      premium: 139,
+      paidAmount: 0,
+      selectedOptionId: null,
+      termOptions: [
+        buildPaymentTermOption(),
+        buildPaymentTermOption({
+          id: 'option-3',
+          termYears: 3,
+          amount: 330,
+          label: '3 years',
+          cardConvenienceFee: 9.9,
+          cardTotalAmount: 339.9,
+          achTotalAmount: 333,
+        }),
+      ],
+      cardConvenienceFee: 4.17,
+      cardTotalAmount: 143.17,
+      achConvenienceFee: 3,
+      achTotalAmount: 142,
+    });
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => termRecord })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'payment-3',
+          demandId: 'demand-1',
+          paymentOptionId: 'option-3',
+          termYears: 3,
+          status: 'SUCCEEDED',
+          amount: 330,
+          convenienceFee: 9.9,
+          addOnConvenienceFee: 0,
+          totalCharged: 339.9,
+          currency: 'USD',
+          purpose: 'PREMIUM',
+          receiptId: 'receipt-3',
+          completedAt: '2026-08-07T18:00:00.000Z',
+        }),
+      });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      getPaymentEligibility('jane@example.com', 'account-1', 'demand-1')
+    ).resolves.toEqual(termRecord);
+
+    const request = {
+      paymentOptionId: 'option-3',
+      paymentMethod: 'ACH' as const,
+      emailReceipt: true as const,
+      ach: {
+        firstName: 'Jane',
+        lastName: 'Builder',
+        address1: '123 Main Street',
+        country: 'United States Of America' as const,
+        city: 'Los Angeles',
+        region: 'California',
+        postalCode: '90001',
+        email: 'jane@example.com',
+        achBankAccountType: 'Checking' as const,
+        accountType: 'Business' as const,
+        achBankName: 'Example Bank',
+        achRoutingNumber: '021000021',
+        achBankAccountNumber: '123456789',
+      },
+    };
+    await submitPayment('jane@example.com', 'account-1', 'demand-1', 'uuid-term', request);
+
+    expect(fetchMock.mock.calls[1][1].body).toBe(JSON.stringify(request));
+    expect(request).not.toHaveProperty('amount');
+    expect(request).not.toHaveProperty('purpose');
   });
 
   it('rejects eligibility that omits the server-calculated fee previews', async () => {

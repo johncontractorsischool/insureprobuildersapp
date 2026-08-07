@@ -37,18 +37,32 @@ const US_STATE_NAMES: Record<string, string> = {
   DC: 'District of Columbia',
 };
 
-function humanizeLineOfBusiness(value: string | null) {
-  if (!value?.trim()) return null;
-  return value
+const LINE_OF_BUSINESS_LABELS: Record<string, string> = {
+  CONTRACTOR_LICENSE_BOND: 'Contractors License Bond',
+  WORKERS_COMP: 'Workers Compensation',
+  WORKERS_COMPENSATION: 'Workers Compensation',
+  GENERAL_LIABILITY: 'General Liability',
+  COMMERCIAL_AUTO: 'Commercial Auto',
+};
+
+export function formatLineOfBusiness(value: string) {
+  const normalized = value.trim();
+  if (!normalized) return 'Insurance payment';
+  if (LINE_OF_BUSINESS_LABELS[normalized]) return LINE_OF_BUSINESS_LABELS[normalized];
+
+  return normalized
     .trim()
     .toLowerCase()
     .split('_')
+    .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 }
 
 export function buildPaymentRecordLabel(record: PaymentEligibility) {
-  const businessLine = humanizeLineOfBusiness(record.lineOfBusiness);
+  const businessLine = record.lineOfBusiness.trim()
+    ? formatLineOfBusiness(record.lineOfBusiness)
+    : null;
   const number = record.policyNumber?.trim();
   if (businessLine && number) return `${businessLine} • ${number}`;
   return businessLine ?? number ?? `${record.recordType === 'QUOTE' ? 'Quote' : 'Policy'} payment`;
@@ -64,7 +78,9 @@ export function buildAccountPaymentSummary(
 
   const lineItems = payableRecords.map((record) => ({
     id: record.demandId,
-    label: humanizeLineOfBusiness(record.lineOfBusiness) ?? buildPaymentRecordLabel(record),
+    label: record.lineOfBusiness.trim()
+      ? formatLineOfBusiness(record.lineOfBusiness)
+      : buildPaymentRecordLabel(record),
     amount: record.amountDue,
   }));
 

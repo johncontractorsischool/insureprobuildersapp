@@ -2,7 +2,11 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
-import { buildCustomer, buildPaymentEligibility } from '@/tests/factories';
+import {
+  buildCustomer,
+  buildPaymentEligibility,
+  buildPaymentTermOption,
+} from '@/tests/factories';
 
 const mockRouter = {
   push: jest.fn(),
@@ -206,7 +210,7 @@ describe('DashboardScreen', () => {
       refreshPaymentEligibility: jest.fn(),
     });
 
-    const { findAllByText, findByText, getByText } = render(<DashboardScreen />);
+    const { findAllByText, findByText, getByText, queryByText } = render(<DashboardScreen />);
 
     await act(async () => {
       jest.runAllTimers();
@@ -214,6 +218,9 @@ describe('DashboardScreen', () => {
     });
 
     expect(await findByText('Payment Due')).toBeTruthy();
+    expect(getByText('General Liability')).toBeTruthy();
+    expect(queryByText('GL-1001')).toBeNull();
+    expect(queryByText('General Liability • GL-1001')).toBeNull();
     expect((await findAllByText('$1,248.50')).length).toBeGreaterThan(0);
     expect(getByText('Due Aug 15, 2026')).toBeTruthy();
     expect(getByText('Premium payment requested by your agent.')).toBeTruthy();
@@ -223,6 +230,79 @@ describe('DashboardScreen', () => {
       pathname: '/payment',
       params: { demandId: 'demand-1' },
     });
+  });
+
+  it('shows quote term choices without presenting the first option as one fixed bill', async () => {
+    const termRecord = buildPaymentEligibility({
+      lineOfBusiness: 'CONTRACTOR_LICENSE_BOND',
+      paymentMode: 'TERM_OPTIONS',
+      amountDue: 139,
+      premium: 139,
+      paidAmount: 0,
+      selectedOptionId: null,
+      termOptions: [
+        buildPaymentTermOption(),
+        buildPaymentTermOption({
+          id: 'option-3',
+          termYears: 3,
+          amount: 330,
+          label: '3 years',
+          cardConvenienceFee: 9.9,
+          cardTotalAmount: 339.9,
+          achTotalAmount: 333,
+        }),
+      ],
+      cardConvenienceFee: 4.17,
+      cardTotalAmount: 143.17,
+      achConvenienceFee: 3,
+      achTotalAmount: 142,
+    });
+    mockUsePayments.mockReturnValue({
+      paymentRecords: [termRecord],
+      payableRecords: [termRecord],
+      isLoadingPayments: false,
+      paymentsError: null,
+      refreshPaymentEligibility: jest.fn(),
+    });
+
+    const { findByText, getByText, queryByText } = render(<DashboardScreen />);
+
+    await act(async () => {
+      jest.runAllTimers();
+      await Promise.resolve();
+    });
+
+    expect(await findByText('Term Options')).toBeTruthy();
+    expect(getByText('Contractors License Bond')).toBeTruthy();
+    expect(getByText('From $139.00')).toBeTruthy();
+    expect(getByText('2 terms available')).toBeTruthy();
+    expect(queryByText('Amount Due')).toBeNull();
+    fireEvent.press(getByText('Choose Term & Pay'));
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: '/payment',
+      params: { demandId: 'demand-1' },
+    });
+  });
+
+  it('keeps a payment visible when its policy type is temporarily empty', async () => {
+    const paymentRecord = buildPaymentEligibility({ lineOfBusiness: '', policyNumber: '' });
+    mockUsePayments.mockReturnValue({
+      paymentRecords: [paymentRecord],
+      payableRecords: [paymentRecord],
+      isLoadingPayments: false,
+      paymentsError: null,
+      refreshPaymentEligibility: jest.fn(),
+    });
+
+    const { findByText } = render(<DashboardScreen />);
+
+    await act(async () => {
+      jest.runAllTimers();
+      await Promise.resolve();
+    });
+
+    expect(await findByText('Payment Due')).toBeTruthy();
+    expect(await findByText('Insurance payment')).toBeTruthy();
   });
 
   it('submits a COI contact request to PBIA and confirms success in the app', async () => {

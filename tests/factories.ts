@@ -1,7 +1,7 @@
 import type { Customer, CustomerLookupRecord } from '@/types/customer';
 import type { Policy } from '@/types/policy';
 import type { PolicyFileEntry } from '@/types/policy-file';
-import type { PaymentEligibility } from '@/types/payment';
+import type { PaymentEligibility, PaymentTermOption } from '@/types/payment';
 
 export function buildCustomer(overrides: Partial<Customer> = {}): Customer {
   return {
@@ -111,6 +111,9 @@ export function buildPaymentEligibility(
     premium: 1500,
     paidAmount: 251.5,
     amountDue: 1248.5,
+    paymentMode: 'FIXED',
+    selectedOptionId: null,
+    termOptions: [],
     cardConvenienceFee: 37.46,
     cardTotalAmount: 1285.96,
     achConvenienceFee: 3,
@@ -121,6 +124,23 @@ export function buildPaymentEligibility(
     purpose: 'PREMIUM',
     dueDate: '2026-08-15',
     clientMessage: 'Premium payment requested by your agent.',
+    ...overrides,
+  };
+}
+
+export function buildPaymentTermOption(
+  overrides: Partial<PaymentTermOption> = {}
+): PaymentTermOption {
+  return {
+    id: 'option-1',
+    termYears: 1,
+    amount: 139,
+    currency: 'USD',
+    label: '1 year',
+    cardConvenienceFee: 4.17,
+    cardTotalAmount: 143.17,
+    achConvenienceFee: 3,
+    achTotalAmount: 142,
     ...overrides,
   };
 }

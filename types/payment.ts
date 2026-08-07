@@ -2,12 +2,26 @@ export type PaymentRecordType = 'POLICY' | 'QUOTE';
 
 export type PaymentDemandSource = 'REPLICA' | 'CRM';
 
+export type PaymentMode = 'FIXED' | 'TERM_OPTIONS';
+
 export type PaymentPurpose =
   | 'PREMIUM'
   | 'DOWN_PAYMENT'
   | 'INSTALLMENT'
   | 'POLICY_FEE'
   | 'OTHER';
+
+export type PaymentTermOption = {
+  id: string;
+  termYears: number;
+  amount: number;
+  currency: string;
+  label: string;
+  cardConvenienceFee: number | null;
+  cardTotalAmount: number | null;
+  achConvenienceFee: number | null;
+  achTotalAmount: number | null;
+};
 
 export type PaymentEligibility = {
   demandId: string;
@@ -19,12 +33,15 @@ export type PaymentEligibility = {
   quoteCreationRequestId: string | null;
   policyNumber: string | null;
   status: 'PUBLISHED';
-  lineOfBusiness: string | null;
+  lineOfBusiness: string;
   effectiveDate: string | null;
   expirationDate: string | null;
   premium: number;
   paidAmount: number;
   amountDue: number;
+  paymentMode: PaymentMode;
+  selectedOptionId: string | null;
+  termOptions: PaymentTermOption[];
   cardConvenienceFee: number | null;
   cardTotalAmount: number | null;
   achConvenienceFee: number | null;
@@ -82,30 +99,46 @@ export type AchPaymentInstrument = PaymentPayer & {
 };
 
 type SharedPaymentRequest = {
-  amount: number;
-  purpose: PaymentPurpose;
   emailReceipt: true;
   internalReference?: string;
   notes?: string;
 };
 
-export type CardPaymentRequest = SharedPaymentRequest & {
-  paymentMethod: 'CARD';
-  card: CardPaymentInstrument;
-  ach?: never;
+type FixedPaymentSelection = {
+  amount: number;
+  purpose: PaymentPurpose;
+  paymentOptionId?: never;
 };
 
-export type AchPaymentRequest = SharedPaymentRequest & {
-  paymentMethod: 'ACH';
-  ach: AchPaymentInstrument;
-  card?: never;
+type TermPaymentSelection = {
+  paymentOptionId: string;
+  amount?: never;
+  purpose?: never;
 };
+
+type PaymentSelection = FixedPaymentSelection | TermPaymentSelection;
+
+export type CardPaymentRequest = SharedPaymentRequest &
+  PaymentSelection & {
+    paymentMethod: 'CARD';
+    card: CardPaymentInstrument;
+    ach?: never;
+  };
+
+export type AchPaymentRequest = SharedPaymentRequest &
+  PaymentSelection & {
+    paymentMethod: 'ACH';
+    ach: AchPaymentInstrument;
+    card?: never;
+  };
 
 export type SubmitPaymentRequest = CardPaymentRequest | AchPaymentRequest;
 
 export type SuccessfulPayment = {
   id: string;
   demandId: string;
+  paymentOptionId: string | null;
+  termYears: number | null;
   status: 'SUCCEEDED';
   amount: number;
   convenienceFee: number | null;
