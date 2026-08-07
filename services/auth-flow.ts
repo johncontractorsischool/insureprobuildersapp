@@ -48,6 +48,14 @@ function buildFullName(customer: CustomerLookupRecord) {
 
 export function toCustomerProfile(customer: CustomerLookupRecord): Customer {
   return {
+    accountId: customer.accountId ?? customer.databaseId,
+    legalName: customer.legalName ?? customer.commercialName,
+    dba: customer.dba,
+    licenseNumber: customer.licenseNumber ?? customer.insuredId,
+    status: customer.status ?? (customer.active ? 'ACTIVE' : 'INACTIVE'),
+    entityType: customer.entityType,
+    agentId: customer.agentId,
+    policyCount: customer.policyCount ?? null,
     databaseId: customer.databaseId,
     commercialName: customer.commercialName,
     fullName: buildFullName(customer),

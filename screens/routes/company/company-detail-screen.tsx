@@ -45,6 +45,7 @@ export default function CompanyDetailScreen({
     workersCompRows,
     personnel,
     hasDetailContent,
+    refreshCompany,
   } = useCompanyProfile();
 
   const openCslb = async () => {
@@ -132,6 +133,20 @@ export default function CompanyDetailScreen({
             pressed && cslbLink ? styles.pressed : null,
           ]}>
           <Text style={styles.linkButtonText}>View on CSLB</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            void refreshCompany();
+          }}
+          disabled={isLoadingCompany}
+          style={({ pressed }) => [
+            styles.linkButton,
+            isLoadingCompany ? styles.disabled : null,
+            pressed && !isLoadingCompany ? styles.pressed : null,
+          ]}>
+          <Text style={styles.linkButtonText}>
+            {isLoadingCompany ? 'Refreshing CSLB...' : 'Refresh CSLB Data'}
+          </Text>
         </Pressable>
       </View>
 

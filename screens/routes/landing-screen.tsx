@@ -28,11 +28,12 @@ export default function LandingScreen() {
   const insets = useSafeAreaInsets();
   const isDesktop = width >= 1080;
   const showMobileVisual = !isDesktop;
-  const isCompactMobileHeight = showMobileVisual && height <= 760;
+  const isTabletVisual = showMobileVisual && width >= 700;
+  const isCompactMobileHeight = showMobileVisual && height <= 820;
   const isVeryCompactMobileHeight = showMobileVisual && height <= 700;
   const isResponsiveWeb = Platform.OS === 'web' && showMobileVisual;
   const maxContentWidth = showMobileVisual ? width : 1280;
-  const responsiveWebViewportStyle = isResponsiveWeb ? { height } : null;
+  const mobileViewportStyle = showMobileVisual ? { minHeight: height } : null;
 
   useEffect(() => {
     if (!isLoadingAuth && isAuthenticated) {
@@ -58,6 +59,7 @@ export default function LandingScreen() {
         styles.heroCard,
         isDesktop ? styles.heroCardDesktop : null,
         showMobileVisual ? styles.mobileHeroCard : null,
+        isTabletVisual ? styles.tabletHeroCard : null,
         isCompactMobileHeight ? styles.mobileHeroCardCompact : null,
       ]}>
       <View style={styles.heroRule} />
@@ -90,16 +92,17 @@ export default function LandingScreen() {
       style={[
         styles.cta,
         showMobileVisual ? styles.mobileCta : null,
+        isTabletVisual ? styles.tabletCta : null,
         isCompactMobileHeight ? styles.mobileCtaCompact : null,
       ]}>
-      <View style={styles.ctaButtonWrap}>
+      <View style={isTabletVisual ? styles.tabletCtaButtonWrap : styles.ctaButtonWrap}>
         <AppButton
           label="Access Your Account"
           onPress={() => (isAuthenticated ? router.replace('/(tabs)') : router.push('/(auth)/login'))}
         />
       </View>
       {!isAuthenticated ? (
-        <View style={styles.ctaButtonWrap}>
+        <View style={isTabletVisual ? styles.tabletCtaButtonWrap : styles.ctaButtonWrap}>
           <AppButton
             label="Sign Up"
             variant="secondary"
@@ -115,6 +118,7 @@ export default function LandingScreen() {
       style={[
         styles.offeringsCard,
         showMobileVisual ? styles.mobileOfferingsCard : null,
+        isTabletVisual ? styles.tabletOfferingsCard : null,
         isCompactMobileHeight ? styles.mobileOfferingsCardCompact : null,
       ]}>
       <Text
@@ -129,6 +133,7 @@ export default function LandingScreen() {
         style={[
           styles.offeringsGrid,
           showMobileVisual ? styles.mobileOfferingsGrid : null,
+          isTabletVisual ? styles.tabletOfferingsGrid : null,
           isCompactMobileHeight ? styles.mobileOfferingsGridCompact : null,
         ]}>
         {OFFERINGS.map((item) => (
@@ -137,6 +142,7 @@ export default function LandingScreen() {
             style={[
               styles.offeringPill,
               showMobileVisual ? styles.mobileOfferingPill : null,
+              isTabletVisual ? styles.tabletOfferingPill : null,
               isCompactMobileHeight ? styles.mobileOfferingPillCompact : null,
               isVeryCompactMobileHeight ? styles.mobileOfferingPillVeryCompact : null,
             ]}>
@@ -156,33 +162,41 @@ export default function LandingScreen() {
 
   return (
     <ScreenContainer
-      scroll={false}
+      scroll={!isDesktop}
       maxContentWidth={maxContentWidth}
       includeTopInset={!showMobileVisual}
       style={showMobileVisual ? styles.mobileScreenContainer : undefined}>
-      <View style={[styles.page, isResponsiveWeb ? styles.responsiveWebPage : null, responsiveWebViewportStyle]}>
+      <View
+        style={[
+          showMobileVisual ? styles.mobilePage : styles.page,
+          isResponsiveWeb ? styles.responsiveWebPage : null,
+          mobileViewportStyle,
+        ]}>
         <View
           style={[
-            styles.desktopFrame,
+            showMobileVisual ? styles.mobileFrame : styles.desktopFrame,
             isDesktop ? styles.desktopFrameActive : null,
             isResponsiveWeb ? styles.responsiveWebFrame : null,
-            responsiveWebViewportStyle,
+            mobileViewportStyle,
           ]}>
           <View style={[styles.leftColumn, isDesktop ? styles.leftColumnDesktop : null]}>
             {showMobileVisual ? (
               <View
                 style={[
                   styles.mobileVisualCanvas,
+                  isTabletVisual ? styles.tabletVisualCanvas : null,
                   isResponsiveWeb ? styles.responsiveWebVisualCanvas : null,
-                  responsiveWebViewportStyle,
+                  mobileViewportStyle,
                 ]}>
                 <Image source={LANDING_VISUAL_IMAGE} style={styles.mobileVisualImage} resizeMode="cover" />
                 <View style={styles.visualImageScrim} />
 
-                  <View
+                <View
                   style={[
                     styles.mobileOverlayContent,
+                    isTabletVisual ? styles.tabletOverlayContent : null,
                     isCompactMobileHeight ? styles.mobileOverlayContentCompact : null,
+                    mobileViewportStyle,
                     {
                       paddingTop: insets.top + theme.spacing.sm,
                       paddingBottom: insets.bottom + (isCompactMobileHeight ? theme.spacing.sm : theme.spacing.md),
@@ -194,6 +208,7 @@ export default function LandingScreen() {
                   <View
                     style={[
                       styles.mobileBottomContent,
+                      isTabletVisual ? styles.tabletBottomContent : null,
                       isCompactMobileHeight ? styles.mobileBottomContentCompact : null,
                     ]}>
                     {heroCard}
@@ -258,11 +273,19 @@ const styles = StyleSheet.create({
   page: {
     flex: 1,
   },
+  mobilePage: {
+    width: '100%',
+    flexGrow: 1,
+  },
   responsiveWebPage: {
     overflow: 'hidden',
   },
   desktopFrame: {
     flex: 1,
+  },
+  mobileFrame: {
+    width: '100%',
+    flexGrow: 1,
   },
   responsiveWebFrame: {
     overflow: 'hidden',
@@ -338,6 +361,10 @@ const styles = StyleSheet.create({
     padding: theme.spacing.md,
     gap: theme.spacing.xs,
   },
+  tabletHeroCard: {
+    padding: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
   mobileHeroCardCompact: {
     padding: theme.spacing.sm,
     gap: 6,
@@ -406,6 +433,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.16)',
     padding: theme.spacing.sm,
   },
+  tabletOfferingsCard: {
+    gap: theme.spacing.xs,
+  },
   mobileOfferingsCardCompact: {
     padding: theme.spacing.xs,
     gap: 6,
@@ -431,6 +461,9 @@ const styles = StyleSheet.create({
   mobileOfferingsGrid: {
     gap: 6,
   },
+  tabletOfferingsGrid: {
+    justifyContent: 'center',
+  },
   mobileOfferingsGridCompact: {
     gap: 4,
   },
@@ -451,6 +484,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(7, 26, 18, 0.26)',
     paddingHorizontal: theme.spacing.xs,
     paddingVertical: 6,
+  },
+  tabletOfferingPill: {
+    width: '23%',
+    minHeight: 44,
   },
   mobileOfferingPillCompact: {
     minHeight: 40,
@@ -495,9 +532,18 @@ const styles = StyleSheet.create({
     padding: theme.spacing.sm,
     gap: theme.spacing.xs,
   },
+  tabletCta: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
   mobileCtaCompact: {
     padding: theme.spacing.xs,
     gap: 6,
+  },
+  tabletCtaButtonWrap: {
+    flex: 1,
+    minWidth: 0,
+    alignSelf: 'stretch',
   },
   mobileVisualCanvas: {
     flex: 1,
@@ -508,9 +554,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#EAF3EE',
     overflow: 'hidden',
   },
+  tabletVisualCanvas: {
+    borderRadius: theme.radius.xl,
+  },
   responsiveWebVisualCanvas: {
     minHeight: 0,
-    height: '100%',
     borderRadius: 0,
     borderWidth: 0,
   },
@@ -522,9 +570,13 @@ const styles = StyleSheet.create({
     height: '132%',
   },
   mobileOverlayContent: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'relative',
+    zIndex: 1,
     padding: theme.spacing.md,
     gap: theme.spacing.md,
+  },
+  tabletOverlayContent: {
+    paddingHorizontal: theme.spacing.xl,
   },
   mobileOverlayContentCompact: {
     padding: theme.spacing.sm,
@@ -538,6 +590,9 @@ const styles = StyleSheet.create({
   },
   mobileBottomContent: {
     marginTop: 'auto',
+    gap: theme.spacing.sm,
+  },
+  tabletBottomContent: {
     gap: theme.spacing.sm,
   },
   mobileBottomContentCompact: {

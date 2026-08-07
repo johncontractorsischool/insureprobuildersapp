@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
-import { CslbMomentumSignUpForm } from '@/screens/routes/auth/cslb-momentum-sign-up-form';
+import { ClientSignUpForm } from '@/screens/routes/auth/client-sign-up-form';
 import { useAuth } from '@/context/auth-context';
-import { useCslbMomentumSync } from '@/hooks/use-cslb-momentum-sync';
+import { useClientSignup } from '@/hooks/use-client-signup';
 import { router } from 'expo-router';
 
-jest.mock('@/hooks/use-cslb-momentum-sync', () => ({
-  useCslbMomentumSync: jest.fn(),
+jest.mock('@/hooks/use-client-signup', () => ({
+  useClientSignup: jest.fn(),
 }));
 jest.mock('@/context/auth-context', () => ({
   useAuth: jest.fn(),
@@ -17,19 +17,25 @@ jest.mock('expo-router', () => ({
   },
 }));
 
-const mockedUseCslbMomentumSync = useCslbMomentumSync as jest.Mock;
+const mockedUseClientSignup = useClientSignup as jest.Mock;
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedRouterPush = router.push as jest.Mock;
 
 function mockHookState(overrides: Record<string, unknown> = {}) {
-  mockedUseCslbMomentumSync.mockReturnValue({
+  mockedUseClientSignup.mockReturnValue({
     form: {
+      businessName: '',
       firstName: '',
       lastName: '',
       email: '',
+      phone: '',
+      addressLine1: '',
+      addressLine2: '',
+      city: '',
+      state: '',
+      zipCode: '',
       licenseNumber: '',
       appFeeNumber: '',
-      agentName: '',
     },
     identifierType: 'license',
     errors: {},
@@ -49,16 +55,19 @@ function mockHookState(overrides: Record<string, unknown> = {}) {
   });
 }
 
-describe('CslbMomentumSignUpForm', () => {
+describe('ClientSignUpForm', () => {
   const mockSetPendingEmail = jest.fn();
+  const mockSetPendingSignup = jest.fn();
   const mockSetCustomer = jest.fn();
 
   beforeEach(() => {
     mockedRouterPush.mockReset();
     mockSetPendingEmail.mockReset();
+    mockSetPendingSignup.mockReset();
     mockSetCustomer.mockReset();
     mockedUseAuth.mockReturnValue({
       setPendingEmail: mockSetPendingEmail,
+      setPendingSignup: mockSetPendingSignup,
       setCustomer: mockSetCustomer,
     });
   });
@@ -70,7 +79,7 @@ describe('CslbMomentumSignUpForm', () => {
         ok: true,
         result: {
           status: 'existing',
-          message: 'A matching Momentum record already exists.',
+          message: 'A matching PBIA account already exists.',
           cslb: {
             licenseNumber: '1105382',
             status: 'Active',
@@ -83,7 +92,7 @@ describe('CslbMomentumSignUpForm', () => {
       },
     });
 
-    render(<CslbMomentumSignUpForm />);
+    render(<ClientSignUpForm />);
 
     expect(screen.queryByText('Sync status')).toBeNull();
     expect(screen.queryByText('CSLB')).toBeNull();
@@ -99,34 +108,49 @@ describe('CslbMomentumSignUpForm', () => {
       response: null,
     });
 
-    render(<CslbMomentumSignUpForm />);
+    render(<ClientSignUpForm />);
 
-    expect(screen.getByText('Sync Failed')).toBeTruthy();
+    expect(screen.getByText('Account Creation Failed')).toBeTruthy();
     expect(screen.getByTestId('sync-error-message')).toHaveTextContent('Network request failed.');
   });
 
   it('shows Create Account action and hides agent name input', () => {
     mockHookState();
 
-    render(<CslbMomentumSignUpForm />);
+    render(<ClientSignUpForm />);
 
     expect(screen.getByText('Create Account')).toBeTruthy();
     expect(screen.queryByText('Agent Name (Optional)')).toBeNull();
   });
 
   it('navigates to verify when create account submit succeeds', async () => {
+    const request = {
+      legalName: 'Builder Co',
+      email: 'john@example.com',
+      status: 'PROSPECT' as const,
+      licenseNumber: '1144038',
+      primaryContactFirstName: 'John',
+      primaryContactLastName: 'Builder',
+      addressLine1: '123 Main St',
+      city: 'Los Angeles',
+      state: 'CA',
+      zipCode: '90001',
+    };
     const submit = jest.fn().mockResolvedValue({
       email: 'john@example.com',
+      request,
       rateLimited: false,
+      otpDeliveryFailed: false,
     });
     mockHookState({ submit });
 
-    render(<CslbMomentumSignUpForm />);
+    render(<ClientSignUpForm />);
 
     fireEvent.press(screen.getByText('Create Account'));
 
     await waitFor(() => {
       expect(mockSetPendingEmail).toHaveBeenCalledWith('john@example.com');
+      expect(mockSetPendingSignup).toHaveBeenCalledWith(request);
       expect(mockSetCustomer).toHaveBeenCalledWith(null);
       expect(mockedRouterPush).toHaveBeenCalledWith('/(auth)/verify');
     });

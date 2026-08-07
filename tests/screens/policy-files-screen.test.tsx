@@ -12,9 +12,8 @@ const mockRouter = {
 };
 const mockUseLocalSearchParams = jest.fn(() => ({}));
 const mockUseAuth = jest.fn();
-const mockFetchPolicyFilesListByPolicy = jest.fn();
-const mockFetchPolicyFilesListByInsuredId = jest.fn();
-const mockFetchPolicyFilesList = jest.fn();
+const mockFetchClientPolicyDocuments = jest.fn();
+const mockFetchClientDocuments = jest.fn();
 const mockOpenInAppBrowser = jest.fn(() => Promise.resolve({ ok: true }));
 
 jest.mock('expo-router', () => ({
@@ -26,9 +25,8 @@ jest.mock('@/context/auth-context', () => ({
   useAuth: () => mockUseAuth(),
 }));
 jest.mock('@/services/policy-files-api', () => ({
-  fetchPolicyFilesListByPolicy: (...args: unknown[]) => mockFetchPolicyFilesListByPolicy(...args),
-  fetchPolicyFilesListByInsuredId: (...args: unknown[]) => mockFetchPolicyFilesListByInsuredId(...args),
-  fetchPolicyFilesList: (...args: unknown[]) => mockFetchPolicyFilesList(...args),
+  fetchClientPolicyDocuments: (...args: unknown[]) => mockFetchClientPolicyDocuments(...args),
+  fetchClientDocuments: (...args: unknown[]) => mockFetchClientDocuments(...args),
 }));
 jest.mock('@/utils/external-actions', () => ({
   openInAppBrowser: (...args: unknown[]) => mockOpenInAppBrowser(...args),
@@ -37,61 +35,63 @@ jest.mock('@/utils/external-actions', () => ({
 describe('PolicyFilesScreen', () => {
   beforeEach(() => {
     mockUseAuth.mockReturnValue({
-      customer: buildCustomer({ databaseId: 'insured-db-1' }),
+      userEmail: 'jane@example.com',
+      customer: buildCustomer({ accountId: 'account-1' }),
     });
     mockUseLocalSearchParams.mockReturnValue({
-      insuredId: 'insured-db-1',
+      accountId: 'account-1',
       policyId: 'policy-1',
       policyNumber: 'GL-1001',
     });
   });
 
   it('loads policy files, resolves folders in the background, and only shows visible files', async () => {
-    mockFetchPolicyFilesListByPolicy.mockResolvedValue({
-      status: 1,
-      message: null,
-      data: [
-        buildPolicyFileEntry({
-          databaseId: 'folder-1',
-          insuredId: null,
-          policyId: null,
-          fileOrFolder: 'Folder',
-          name: 'Policies',
-        }),
-        buildPolicyFileEntry({
-          databaseId: 'file-hidden',
-          insuredId: null,
-          policyId: null,
-          fileOrFolder: 'File',
-          name: 'Declarations.pdf',
-        }),
-      ],
-    });
-    mockFetchPolicyFilesList.mockResolvedValue({
-      status: 1,
-      message: null,
-      data: [
-        buildPolicyFileEntry({
-          databaseId: 'file-2',
-          insuredId: null,
-          policyId: null,
-          fileOrFolder: 'File',
-          name: '101000937.URBANEDGE CONSTRUCTION INC....pdf',
-        }),
-      ],
-    });
+    mockFetchClientPolicyDocuments
+      .mockResolvedValueOnce({
+        status: 1,
+        message: null,
+        data: [
+          buildPolicyFileEntry({
+            databaseId: 'folder-1',
+            insuredId: null,
+            policyId: null,
+            fileOrFolder: 'Folder',
+            name: 'Policies',
+          }),
+          buildPolicyFileEntry({
+            databaseId: 'file-hidden',
+            insuredId: null,
+            policyId: null,
+            fileOrFolder: 'File',
+            name: 'Declarations.pdf',
+          }),
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: 1,
+        message: null,
+        data: [
+          buildPolicyFileEntry({
+            databaseId: 'file-2',
+            insuredId: null,
+            policyId: null,
+            fileOrFolder: 'File',
+            name: '101000937.URBANEDGE CONSTRUCTION INC....pdf',
+          }),
+        ],
+      });
 
     const { getByText, findByText, queryByText } = render(<PolicyFilesScreen />);
 
     await waitFor(() =>
-      expect(mockFetchPolicyFilesListByPolicy).toHaveBeenCalledWith({
-        insuredId: 'insured-db-1',
+      expect(mockFetchClientPolicyDocuments).toHaveBeenNthCalledWith(1, 'jane@example.com', {
+        accountId: 'account-1',
         policyId: 'policy-1',
       })
     );
     await waitFor(() =>
-      expect(mockFetchPolicyFilesList).toHaveBeenCalledWith({
-        insuredId: 'insured-db-1',
+      expect(mockFetchClientPolicyDocuments).toHaveBeenNthCalledWith(2, 'jane@example.com', {
+        accountId: 'account-1',
         policyId: 'policy-1',
         folderId: 'folder-1',
       })
@@ -99,7 +99,7 @@ describe('PolicyFilesScreen', () => {
 
     expect(await findByText('101000937.URBANEDGE CONSTRUCTION INC....pdf')).toBeTruthy();
     expect(queryByText('Policies')).toBeNull();
-    expect(queryByText('Declarations.pdf')).toBeNull();
+    expect(queryByText('Declarations.pdf')).toBeTruthy();
 
     fireEvent.press(getByText('101000937.URBANEDGE CONSTRUCTION INC....pdf'));
 

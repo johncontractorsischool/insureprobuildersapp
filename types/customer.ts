@@ -1,4 +1,13 @@
 export type Customer = {
+  accountId?: string | null;
+  legalName?: string | null;
+  dba?: string | null;
+  licenseNumber?: string | null;
+  status?: string | null;
+  entityType?: string | null;
+  agentId?: string | null;
+  policyCount?: number | null;
+  // Compatibility aliases for cached profiles created before the PBIA client API migration.
   databaseId?: string | null;
   commercialName?: string | null;
   fullName?: string | null;
@@ -23,6 +32,15 @@ export type Customer = {
 };
 
 export type CustomerLookupRecord = {
+  accountId?: string;
+  legalName?: string;
+  dba?: string | null;
+  email?: string | null;
+  licenseNumber?: string | null;
+  status?: string;
+  entityType?: string | null;
+  agentId?: string | null;
+  policyCount?: number;
   databaseId: string;
   commercialName: string | null;
   firstName: string | null;

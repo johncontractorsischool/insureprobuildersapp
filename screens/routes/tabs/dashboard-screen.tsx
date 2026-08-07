@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BrandMark } from "@/components/brand-mark";
 import { ContactUsMenu } from "@/components/contact-us-menu";
+import { PaymentDueCard } from "@/components/payment-due-card";
 import {
   type PbiaFormSlug,
   buildPbiaFormUrl,
@@ -24,14 +25,15 @@ import { ScreenContainer } from "@/components/screen-container";
 import { SectionHeader } from "@/components/section-header";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/context/auth-context";
+import { usePayments } from "@/context/payments-context";
 import type { CompanyStatusChip } from "@/hooks/use-company-profile";
 import { useCompanyProfile } from "@/hooks/use-company-profile";
 import {
-  fetchInsuredAgentsByInsuredDatabaseId,
+  fetchClientAgent,
   InsuredAgentRecord,
 } from "@/services/agent-api";
 import { getPortalConfig } from "@/services/portal-config";
-import { sendSmtpEmail } from "@/services/smtp-email-api";
+import { createClientContactRequest } from "@/services/contact-request-api";
 import {
   buildEmailLink,
   buildMapLink,
@@ -42,8 +44,6 @@ import {
 } from "@/utils/external-actions";
 import { getNameFromCustomer } from "@/utils/format";
 import { buildPbiaFormPrefillParams } from "@/utils/pbia-form-prefill";
-
-const COI_REQUEST_EMAIL = "support@insureprobuilders.com";
 
 const AGENT_AVATARS: Record<string, number> = {
   ariesapcar: require("../../../assets/images/ariesapcar.jpg"),
@@ -122,43 +122,6 @@ function getInitials(value: string) {
 function normalizeText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function buildCoiRequestEmailHtml({
-  businessName,
-  contactPerson,
-  email,
-  phone,
-  databaseId,
-  insuredId,
-}: {
-  businessName: string;
-  contactPerson: string;
-  email: string;
-  phone: string;
-  databaseId: string;
-  insuredId: string;
-}) {
-  return `
-    <div style="font-family:Arial,sans-serif;color:#1f2933;line-height:1.5;">
-      <p>This client is requesting a certificate of insurance from the Insure Pro Builders app.</p>
-      <p><strong>Business Name:</strong> ${escapeHtml(businessName)}</p>
-      <p><strong>Contact Person:</strong> ${escapeHtml(contactPerson)}</p>
-      <p><strong>Email:</strong> ${escapeHtml(email)}</p>
-      <p><strong>Phone:</strong> ${escapeHtml(phone)}</p>
-      <p><strong>Database ID:</strong> ${escapeHtml(databaseId)}</p>
-      <p><strong>Insured ID:</strong> ${escapeHtml(insuredId)}</p>
-    </div>
-  `.trim();
 }
 
 function toAvatarKey(value: string) {
@@ -392,6 +355,7 @@ export default function DashboardScreen({
 }: DashboardScreenProps) {
   const insets = useSafeAreaInsets();
   const { customer, userEmail } = useAuth();
+  const { payableRecords } = usePayments();
   const portalConfig = useMemo(() => getPortalConfig(), []);
   const demoProfile = portalConfig.demo.data;
   const isDemoMode = portalConfig.demo.enabled && Boolean(demoProfile);
@@ -416,12 +380,10 @@ export default function DashboardScreen({
     businessName,
     businessRows,
   } = useCompanyProfile();
-  // `/insuredAgents?insuredId=` expects the insured *database* id (UUID from `databaseId`).
-  const insuredLookupId = useMemo(() => {
-    const insuredDatabaseId = resolvedCustomer?.databaseId?.trim();
-    if (insuredDatabaseId) return insuredDatabaseId;
-    return resolvedCustomer?.insuredId?.trim() || "";
-  }, [resolvedCustomer?.databaseId, resolvedCustomer?.insuredId]);
+  const accountId = useMemo(
+    () => resolvedCustomer?.accountId?.trim() || resolvedCustomer?.databaseId?.trim() || "",
+    [resolvedCustomer?.accountId, resolvedCustomer?.databaseId],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -434,7 +396,7 @@ export default function DashboardScreen({
         return;
       }
 
-      if (!insuredLookupId) {
+      if (!accountId || !resolvedUserEmail) {
         setAgent(null);
         setAgentLookupNotice(null);
         setIsLoadingAgent(false);
@@ -444,11 +406,8 @@ export default function DashboardScreen({
       setIsLoadingAgent(true);
       setAgentLookupNotice(null);
       try {
-        const agents =
-          await fetchInsuredAgentsByInsuredDatabaseId(insuredLookupId);
+        const primaryAgent = await fetchClientAgent(resolvedUserEmail, accountId);
         if (!isMounted) return;
-
-        const primaryAgent = agents[0] ?? null;
         setAgent(primaryAgent);
         if (!primaryAgent) {
           setAgentLookupNotice(
@@ -473,7 +432,7 @@ export default function DashboardScreen({
     return () => {
       isMounted = false;
     };
-  }, [insuredLookupId, isDemoMode]);
+  }, [accountId, isDemoMode, resolvedUserEmail]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -496,18 +455,14 @@ export default function DashboardScreen({
     return {
       name: fullName || portalConfig.agent.name,
       phone:
-        normalizeText(agent?.phone) ??
-        normalizeText(agent?.cellPhone) ??
-        normalizeText(portalConfig.agent.phone),
+        normalizeText(agent?.phone) ?? normalizeText(portalConfig.agent.phone),
       email:
         normalizeText(agent?.email) ?? normalizeText(portalConfig.agent.email),
       smsPhone:
-        normalizeText(agent?.cellPhone) ??
         normalizeText(agent?.phone) ??
         normalizeText(portalConfig.agent.smsPhone),
     };
   }, [
-    agent?.cellPhone,
     agent?.email,
     agent?.firstName,
     agent?.lastName,
@@ -641,10 +596,6 @@ export default function DashboardScreen({
     normalizeText(resolvedCustomer?.phone) ??
     normalizeText(resolvedCustomer?.cellPhone) ??
     "Not provided";
-  const customerDatabaseId =
-    normalizeText(resolvedCustomer?.databaseId) ?? "Not provided";
-  const customerInsuredId =
-    normalizeText(resolvedCustomer?.insuredId) ?? "Not provided";
   const licenseNumber = lookupSummaryValue(licenseRows, [
     "license #",
     "license",
@@ -715,17 +666,19 @@ export default function DashboardScreen({
     }
 
     try {
-      await sendSmtpEmail({
-        subject: "Certificate of Insurance Request",
-        html: buildCoiRequestEmailHtml({
-          businessName: coiBusinessName,
-          contactPerson: coiContactPersonName,
-          email: coiContactEmail,
-          phone: contactPhone,
-          databaseId: customerDatabaseId,
-          insuredId: customerInsuredId,
-        }),
-        to: [COI_REQUEST_EMAIL],
+      if (!resolvedUserEmail || !accountId || contactPhone === "Not provided") {
+        throw new Error("Your PBIA account and callback number are required before sending this request.");
+      }
+      await createClientContactRequest(resolvedUserEmail, {
+        accountId,
+        callbackNumber: contactPhone,
+        preferredContactMethod: "EMAIL",
+        description: [
+          "Certificate of Insurance Request",
+          `Business Name: ${coiBusinessName}`,
+          `Contact Person: ${coiContactPersonName}`,
+          `Email: ${coiContactEmail}`,
+        ].join("\n"),
       });
 
       Alert.alert(
@@ -748,7 +701,7 @@ export default function DashboardScreen({
       [
         "Are you sure you want to request a certificate of insurance?",
         "",
-        `An email will be sent to the agency at ${COI_REQUEST_EMAIL} with the details below:`,
+        "A service request will be submitted to PBIA with the details below:",
         "",
         `Business Name: ${coiBusinessName}`,
         `Contact Person: ${coiContactPersonName}`,
@@ -826,6 +779,21 @@ export default function DashboardScreen({
           </View>
           <ContactUsMenu />
         </View>
+
+        {payableRecords.length > 0 ? (
+          <View style={styles.paymentDemandList}>
+            {payableRecords.map((record) => (
+              <PaymentDueCard
+                key={record.demandId}
+                record={record}
+                isDesktopLayout
+                onMakePayment={() =>
+                  router.push({ pathname: "/payment", params: { demandId: record.demandId } })
+                }
+              />
+            ))}
+          </View>
+        ) : null}
 
         <View style={styles.desktopGrid}>
           <View style={styles.desktopMainColumn}>
@@ -1125,6 +1093,20 @@ export default function DashboardScreen({
         </View>
       </View>
 
+      {payableRecords.length > 0 ? (
+        <View style={styles.paymentDemandList}>
+          {payableRecords.map((record) => (
+            <PaymentDueCard
+              key={record.demandId}
+              record={record}
+              onMakePayment={() =>
+                router.push({ pathname: "/payment", params: { demandId: record.demandId } })
+              }
+            />
+          ))}
+        </View>
+      ) : null}
+
       <SectionHeader title="Your Agent" />
       <View style={styles.card}>
         <View style={styles.agentTopRow}>
@@ -1393,6 +1375,9 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.xl,
     gap: theme.spacing.md,
   },
+  paymentDemandList: {
+    gap: theme.spacing.md,
+  },
   desktopSummaryHeader: {
     borderRadius: theme.radius.lg,
     borderWidth: 1,
@@ -1590,6 +1575,10 @@ const styles = StyleSheet.create({
   agentMeta: {
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
+  },
+  linkText: {
+    color: theme.colors.primary,
+    textDecorationLine: "underline",
   },
   agentHint: {
     ...theme.typography.caption,

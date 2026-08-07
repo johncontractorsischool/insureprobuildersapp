@@ -1,9 +1,14 @@
 import type { Customer, CustomerLookupRecord } from '@/types/customer';
 import type { Policy } from '@/types/policy';
 import type { PolicyFileEntry } from '@/types/policy-file';
+import type { PaymentEligibility } from '@/types/payment';
 
 export function buildCustomer(overrides: Partial<Customer> = {}): Customer {
   return {
+    accountId: 'insured-db-1',
+    legalName: 'Builder Co',
+    licenseNumber: 'LIC-123456',
+    status: 'ACTIVE',
     databaseId: 'insured-db-1',
     insuredId: 'LIC-123456',
     customerId: 'customer-1',
@@ -24,6 +29,15 @@ export function buildCustomerLookupRecord(
   overrides: Partial<CustomerLookupRecord> = {}
 ): CustomerLookupRecord {
   return {
+    accountId: 'insured-db-1',
+    legalName: 'Builder Co',
+    dba: null,
+    email: 'jane@example.com',
+    licenseNumber: 'LIC-123456',
+    status: 'ACTIVE',
+    entityType: null,
+    agentId: 'agent-1',
+    policyCount: 1,
     databaseId: 'insured-db-1',
     commercialName: 'Builder Co',
     firstName: 'Jane',
@@ -58,6 +72,7 @@ export function buildPolicy(overrides: Partial<Policy> = {}): Policy {
     status: 'Active',
     policyNumber: 'GL-1001',
     carrierName: 'Carrier Co',
+    premium: 1200,
     premiumMonthly: 1200,
     effectiveDate: '2026-01-01T00:00:00.000Z',
     expirationDate: '2027-01-01T00:00:00.000Z',
@@ -73,6 +88,39 @@ export function buildPolicy(overrides: Partial<Policy> = {}): Policy {
     },
     documents: [],
     claimsPlaceholder: 'Claims unavailable',
+    ...overrides,
+  };
+}
+
+export function buildPaymentEligibility(
+  overrides: Partial<PaymentEligibility> = {}
+): PaymentEligibility {
+  return {
+    demandId: 'demand-1',
+    source: 'REPLICA',
+    accountId: 'account-1',
+    accountName: 'Builder Co',
+    recordId: 'policy-1',
+    recordType: 'POLICY',
+    quoteCreationRequestId: null,
+    policyNumber: 'GL-1001',
+    status: 'PUBLISHED',
+    lineOfBusiness: 'GENERAL_LIABILITY',
+    effectiveDate: '2026-01-01T00:00:00.000Z',
+    expirationDate: '2027-01-01T00:00:00.000Z',
+    premium: 1500,
+    paidAmount: 251.5,
+    amountDue: 1248.5,
+    cardConvenienceFee: 37.46,
+    cardTotalAmount: 1285.96,
+    achConvenienceFee: 3,
+    achTotalAmount: 1251.5,
+    paymentState: 'DUE',
+    paymentNeeded: true,
+    missing: [],
+    purpose: 'PREMIUM',
+    dueDate: '2026-08-15',
+    clientMessage: 'Premium payment requested by your agent.',
     ...overrides,
   };
 }

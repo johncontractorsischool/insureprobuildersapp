@@ -9,7 +9,7 @@ import {
 } from 'react';
 
 import { useAuth } from '@/context/auth-context';
-import { fetchPoliciesByInsuredDatabaseId } from '@/services/policy-api';
+import { fetchPoliciesByAccount } from '@/services/policy-api';
 import { Policy } from '@/types/policy';
 
 type PoliciesContextValue = {
@@ -27,13 +27,15 @@ function toUserFacingError(error: unknown) {
 }
 
 export function PoliciesProvider({ children }: PropsWithChildren) {
-  const { isAuthenticated, customer } = useAuth();
+  const { isAuthenticated, customer, userEmail } = useAuth();
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [isLoadingPolicies, setIsLoadingPolicies] = useState(false);
   const [policiesError, setPoliciesError] = useState<string | null>(null);
 
-  // `getPolicy?IId=` expects the customer databaseId from getCustomer.
-  const policyLookupId = useMemo(() => customer?.databaseId?.trim() || '', [customer?.databaseId]);
+  const accountId = useMemo(
+    () => customer?.accountId?.trim() || customer?.databaseId?.trim() || '',
+    [customer?.accountId, customer?.databaseId]
+  );
 
   const refreshPolicies = useCallback(async () => {
     if (!isAuthenticated) {
@@ -43,9 +45,9 @@ export function PoliciesProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    if (!policyLookupId) {
+    if (!accountId || !userEmail) {
       setPolicies([]);
-      setPoliciesError('No customer database id is available for this account.');
+      setPoliciesError('No PBIA account id is available for this account.');
       setIsLoadingPolicies(false);
       return;
     }
@@ -53,7 +55,7 @@ export function PoliciesProvider({ children }: PropsWithChildren) {
     setIsLoadingPolicies(true);
     setPoliciesError(null);
     try {
-      const fetched = await fetchPoliciesByInsuredDatabaseId(policyLookupId);
+      const fetched = await fetchPoliciesByAccount(userEmail, accountId);
       setPolicies(fetched);
     } catch (error) {
       setPolicies([]);
@@ -61,7 +63,7 @@ export function PoliciesProvider({ children }: PropsWithChildren) {
     } finally {
       setIsLoadingPolicies(false);
     }
-  }, [isAuthenticated, policyLookupId]);
+  }, [accountId, isAuthenticated, userEmail]);
 
   useEffect(() => {
     void refreshPolicies();

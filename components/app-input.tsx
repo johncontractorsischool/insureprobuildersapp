@@ -20,6 +20,7 @@ export function AppInput({
   leftIcon,
   onFocus,
   onBlur,
+  accessibilityLabel,
   style,
   ...props
 }: AppInputProps) {
@@ -47,6 +48,7 @@ export function AppInput({
         ) : null}
         <TextInput
           {...props}
+          accessibilityLabel={accessibilityLabel ?? label}
           ref={inputRef}
           style={[styles.input, webInputReset, style]}
           placeholderTextColor={theme.colors.textSubtle}
