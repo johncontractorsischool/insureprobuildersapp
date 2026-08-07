@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import {
   buildCustomer,
@@ -178,6 +179,17 @@ describe('PaymentScreen', () => {
     await waitFor(() => expect(getAllByText('$1,248.50').length).toBeGreaterThan(0));
     expect(getAllByText('Down Payment').length).toBeGreaterThan(0);
     expect(queryByLabelText('Payment Amount')).toBeNull();
+  });
+
+  it('keeps the payment summary compact on mobile', () => {
+    const { getByTestId } = render(<PaymentScreen />);
+    const summaryStyle = StyleSheet.flatten(getByTestId('payment-summary-card').props.style);
+
+    expect(summaryStyle).toEqual(
+      expect.objectContaining({ width: '100%', padding: 16 })
+    );
+    expect(summaryStyle.flex).toBeUndefined();
+    expect(summaryStyle.minWidth).toBeUndefined();
   });
 
   it('requires a quote term and submits only its payment option ID', async () => {

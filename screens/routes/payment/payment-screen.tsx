@@ -656,6 +656,56 @@ export default function PaymentScreen({
     );
   }
 
+  const paymentSummary = selectedRecord ? (
+    <View
+      testID="payment-summary-card"
+      style={[
+        styles.balanceCard,
+        isDesktopLayout ? styles.desktopBalanceCard : styles.mobileBalanceCard,
+      ]}>
+      <View style={styles.balanceIcon}>
+        <Ionicons name="wallet-outline" size={22} color={theme.colors.primary} />
+      </View>
+      <Text style={styles.balanceLabel}>Amount Due</Text>
+      <Text
+        numberOfLines={2}
+        style={[styles.balanceValue, !isDesktopLayout ? styles.mobileBalanceValue : null]}>
+        {selectedRecord.paymentMode === 'TERM_OPTIONS' && selectedPaymentAmount === null
+          ? 'Select a term'
+          : formatCurrency(selectedPaymentAmount ?? selectedRecord.amountDue)}
+      </Text>
+      <Text style={styles.balanceRecord}>{buildPaymentRecordLabel(selectedRecord)}</Text>
+      <View style={styles.balanceDivider} />
+      {selectedTermOption ? (
+        <ReviewRow label="Selected term" value={selectedTermOption.label} />
+      ) : null}
+      <ReviewRow
+        label="Purpose"
+        value={getPaymentPurposeLabel(selectedRecord.purpose)}
+      />
+      {selectedConvenienceFee !== null ? (
+        <ReviewRow
+          label={paymentMethod === 'CARD' ? 'Card convenience fee' : 'ACH convenience fee'}
+          value={formatCurrency(selectedConvenienceFee)}
+        />
+      ) : null}
+      {selectedTotalAmount !== null ? (
+        <ReviewRow
+          label={paymentMethod === 'CARD' ? 'Card total' : 'ACH total'}
+          value={formatCurrency(selectedTotalAmount)}
+        />
+      ) : null}
+      <ReviewRow
+        label="Due date"
+        value={formatDemandDueDate(selectedRecord.dueDate)}
+      />
+      <ReviewRow
+        label="Type"
+        value={selectedRecord.recordType === 'QUOTE' ? 'Quote' : 'Policy'}
+      />
+    </View>
+  ) : null;
+
   return (
     <ScreenContainer
       includeTopInset={!isDesktopLayout}
@@ -698,6 +748,8 @@ export default function PaymentScreen({
               })}
             </View>
           </View>
+
+          {!isDesktopLayout ? paymentSummary : null}
 
           {selectedRecord ? (
             <View style={styles.card}>
@@ -999,47 +1051,7 @@ export default function PaymentScreen({
           )}
         </View>
 
-        {selectedRecord ? (
-          <View style={styles.balanceCard}>
-            <View style={styles.balanceIcon}>
-              <Ionicons name="wallet-outline" size={22} color={theme.colors.primary} />
-            </View>
-            <Text style={styles.balanceLabel}>Amount Due</Text>
-            <Text style={styles.balanceValue}>
-              {selectedRecord.paymentMode === 'TERM_OPTIONS' && selectedPaymentAmount === null
-                ? 'Select a term'
-                : formatCurrency(selectedPaymentAmount ?? selectedRecord.amountDue)}
-            </Text>
-            <Text style={styles.balanceRecord}>{buildPaymentRecordLabel(selectedRecord)}</Text>
-            <View style={styles.balanceDivider} />
-            {selectedTermOption ? (
-              <ReviewRow label="Selected term" value={selectedTermOption.label} />
-            ) : null}
-            <ReviewRow
-              label="Purpose"
-              value={getPaymentPurposeLabel(selectedRecord.purpose)}
-            />
-            {selectedConvenienceFee !== null ? (
-              <ReviewRow
-                label={
-                  paymentMethod === 'CARD' ? 'Card convenience fee' : 'ACH convenience fee'
-                }
-                value={formatCurrency(selectedConvenienceFee)}
-              />
-            ) : null}
-            {selectedTotalAmount !== null ? (
-              <ReviewRow
-                label={paymentMethod === 'CARD' ? 'Card total' : 'ACH total'}
-                value={formatCurrency(selectedTotalAmount)}
-              />
-            ) : null}
-            <ReviewRow
-              label="Due date"
-              value={formatDemandDueDate(selectedRecord.dueDate)}
-            />
-            <ReviewRow label="Type" value={selectedRecord.recordType === 'QUOTE' ? 'Quote' : 'Policy'} />
-          </View>
-        ) : null}
+        {isDesktopLayout ? paymentSummary : null}
       </View>
     </ScreenContainer>
   );
@@ -1349,8 +1361,6 @@ const styles = StyleSheet.create({
   reviewValue: { ...theme.typography.bodySmall, color: theme.colors.textStrong, fontWeight: '700', textAlign: 'right', flexShrink: 1 },
   confirmationText: { ...theme.typography.caption, color: theme.colors.textMuted },
   balanceCard: {
-    flex: 1,
-    minWidth: 300,
     borderRadius: theme.radius.lg,
     borderWidth: 1,
     borderColor: theme.colors.border,
@@ -1359,6 +1369,8 @@ const styles = StyleSheet.create({
     gap: theme.spacing.sm,
     ...theme.shadows.surface,
   },
+  desktopBalanceCard: { flex: 1, minWidth: 300 },
+  mobileBalanceCard: { width: '100%', padding: theme.spacing.md },
   balanceIcon: {
     width: 44,
     height: 44,
@@ -1369,6 +1381,7 @@ const styles = StyleSheet.create({
   },
   balanceLabel: { ...theme.typography.label, color: theme.colors.textMuted },
   balanceValue: { ...theme.typography.display, color: theme.colors.primaryDeep },
+  mobileBalanceValue: { ...theme.typography.h1 },
   balanceRecord: { ...theme.typography.bodySmall, color: theme.colors.textMuted },
   balanceDivider: { height: 1, backgroundColor: theme.colors.border, marginVertical: theme.spacing.xs },
   successCard: {
