@@ -1,7 +1,11 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
-import { buildCustomer, buildPaymentEligibility } from '@/tests/factories';
+import {
+  buildCustomer,
+  buildPaymentEligibility,
+  buildPaymentTermOption,
+} from '@/tests/factories';
 
 const mockRouter = {
   push: jest.fn(),
@@ -103,6 +107,8 @@ describe('PaymentScreen', () => {
     mockSubmitPayment.mockResolvedValue({
       id: 'payment-request-1',
       demandId: 'demand-1',
+      paymentOptionId: null,
+      termYears: null,
       status: 'SUCCEEDED',
       amount: 1248.5,
       convenienceFee: 37.46,
@@ -174,6 +180,146 @@ describe('PaymentScreen', () => {
     expect(queryByLabelText('Payment Amount')).toBeNull();
   });
 
+  it('requires a quote term and submits only its payment option ID', async () => {
+    const termRecord = buildPaymentEligibility({
+      recordType: 'QUOTE',
+      recordId: 'quote-1',
+      policyNumber: null,
+      paymentMode: 'TERM_OPTIONS',
+      amountDue: 139,
+      premium: 139,
+      paidAmount: 0,
+      purpose: 'PREMIUM',
+      selectedOptionId: null,
+      termOptions: [
+        buildPaymentTermOption(),
+        buildPaymentTermOption({
+          id: 'option-3',
+          termYears: 3,
+          amount: 330,
+          label: '3 years',
+          cardConvenienceFee: 9.9,
+          cardTotalAmount: 339.9,
+          achTotalAmount: 333,
+        }),
+      ],
+      cardConvenienceFee: 4.17,
+      cardTotalAmount: 143.17,
+      achConvenienceFee: 3,
+      achTotalAmount: 142,
+    });
+    mockUsePayments.mockReturnValue({
+      paymentRecords: [termRecord],
+      payableRecords: [termRecord],
+      isLoadingPayments: false,
+      paymentsError: null,
+      refreshPaymentEligibility: mockRefreshPaymentEligibility,
+    });
+    mockGetPaymentEligibility.mockResolvedValue(termRecord);
+    mockSubmitPayment.mockResolvedValue({
+      id: 'payment-request-3',
+      demandId: 'demand-1',
+      paymentOptionId: 'option-3',
+      termYears: 3,
+      status: 'SUCCEEDED',
+      amount: 330,
+      convenienceFee: 9.9,
+      addOnConvenienceFee: 0,
+      totalCharged: 339.9,
+      currency: 'USD',
+      purpose: 'PREMIUM',
+      receiptId: 'input1-receipt-3',
+      completedAt: '2026-08-07T18:00:00.000Z',
+    });
+
+    const { findByRole, findByText, getByLabelText, getByText } = render(<PaymentScreen />);
+
+    expect(await findByRole('button', { name: 'Review Payment' })).toBeDisabled();
+    fireEvent.press(getByLabelText('3 years, $330.00'));
+    expect(getByText('Card total $339.90 • ACH total $333.00')).toBeTruthy();
+    fireEvent.changeText(getByLabelText('Card Number'), '4111111111111111');
+    fireEvent.changeText(getByLabelText('Expiration (MM/YY)'), '1230');
+    fireEvent.changeText(getByLabelText('Security Code'), '123');
+    fireEvent.press(getByText('Review Payment'));
+    fireEvent.press(await findByRole('button', { name: 'Confirm Payment' }));
+
+    expect(await findByText('input1-receipt-3')).toBeTruthy();
+    const submittedRequest = mockSubmitPayment.mock.calls[0][4];
+    expect(submittedRequest).toEqual(
+      expect.objectContaining({
+        paymentOptionId: 'option-3',
+        paymentMethod: 'CARD',
+        emailReceipt: true,
+      })
+    );
+    expect(submittedRequest).not.toHaveProperty('amount');
+    expect(submittedRequest).not.toHaveProperty('purpose');
+  });
+
+  it('stops review when the selected quote term changed on PBIA', async () => {
+    const optionOne = buildPaymentTermOption();
+    const optionThree = buildPaymentTermOption({
+      id: 'option-3',
+      termYears: 3,
+      amount: 330,
+      label: '3 years',
+      cardConvenienceFee: 9.9,
+      cardTotalAmount: 339.9,
+      achTotalAmount: 333,
+    });
+    const termRecord = buildPaymentEligibility({
+      recordType: 'QUOTE',
+      paymentMode: 'TERM_OPTIONS',
+      amountDue: 139,
+      premium: 139,
+      paidAmount: 0,
+      selectedOptionId: null,
+      termOptions: [optionOne, optionThree],
+      cardConvenienceFee: 4.17,
+      cardTotalAmount: 143.17,
+      achConvenienceFee: 3,
+      achTotalAmount: 142,
+    });
+    const refreshedRecord = buildPaymentEligibility({
+      ...termRecord,
+      termOptions: [
+        optionOne,
+        buildPaymentTermOption({
+          ...optionThree,
+          id: 'option-3-updated',
+          amount: 350,
+          cardConvenienceFee: 10.5,
+          cardTotalAmount: 360.5,
+          achTotalAmount: 353,
+        }),
+      ],
+    });
+    mockUsePayments.mockReturnValue({
+      paymentRecords: [termRecord],
+      payableRecords: [termRecord],
+      isLoadingPayments: false,
+      paymentsError: null,
+      refreshPaymentEligibility: mockRefreshPaymentEligibility,
+    });
+    mockGetPaymentEligibility.mockResolvedValue(refreshedRecord);
+
+    const { findByText, getByLabelText, getByText } = render(<PaymentScreen />);
+
+    fireEvent.press(getByLabelText('3 years, $330.00'));
+    fireEvent.changeText(getByLabelText('Card Number'), '4111111111111111');
+    fireEvent.changeText(getByLabelText('Expiration (MM/YY)'), '1230');
+    fireEvent.changeText(getByLabelText('Security Code'), '123');
+    fireEvent.press(getByText('Review Payment'));
+
+    expect(
+      await findByText(
+        'The payment request changed. Please review the updated amount, purpose, and term options.'
+      )
+    ).toBeTruthy();
+    expect(mockRefreshPaymentEligibility).toHaveBeenCalled();
+    expect(mockSubmitPayment).not.toHaveBeenCalled();
+  });
+
   it('selects the demand opened from its dashboard card', async () => {
     const first = buildPaymentEligibility({ demandId: 'demand-1' });
     const second = buildPaymentEligibility({
@@ -205,6 +351,8 @@ describe('PaymentScreen', () => {
     mockSubmitPayment.mockResolvedValue({
       id: 'payment-request-1',
       demandId: 'demand-1',
+      paymentOptionId: null,
+      termYears: null,
       status: 'SUCCEEDED',
       amount: 1248.5,
       convenienceFee: 3,
@@ -279,6 +427,8 @@ describe('PaymentScreen', () => {
       .mockResolvedValueOnce({
         id: 'payment-request-2',
         demandId: 'demand-1',
+        paymentOptionId: null,
+        termYears: null,
         status: 'SUCCEEDED',
         amount: 1248.5,
         convenienceFee: 37.46,

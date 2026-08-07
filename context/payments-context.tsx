@@ -89,7 +89,12 @@ export function PaymentsProvider({ children }: PropsWithChildren) {
   const payableRecords = useMemo(
     () =>
       paymentRecords.filter(
-        (record) => record.paymentState === 'DUE' && record.paymentNeeded && record.amountDue > 0
+        (record) =>
+          record.paymentState === 'DUE' &&
+          record.paymentNeeded &&
+          (record.paymentMode === 'TERM_OPTIONS'
+            ? record.termOptions.length >= 2 && record.termOptions.some((option) => option.amount > 0)
+            : record.amountDue > 0)
       ),
     [paymentRecords]
   );

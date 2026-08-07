@@ -4,6 +4,7 @@ import type {
   PaymentEligibility,
   PaymentEligibilityList,
   PaymentRecordType,
+  PaymentTermOption,
   SubmitPaymentRequest,
   SuccessfulPayment,
 } from '@/types/payment';
@@ -133,6 +134,12 @@ async function throwResponseError(response: Response, fallback: string): Promise
 function isPaymentEligibility(value: unknown): value is PaymentEligibility {
   if (!value || typeof value !== 'object') return false;
   const record = value as Partial<PaymentEligibility>;
+  const termOptions = Array.isArray(record.termOptions) ? record.termOptions : [];
+  const termOptionsAreValid =
+    Array.isArray(record.termOptions) &&
+    termOptions.every(isPaymentTermOption) &&
+    new Set(termOptions.map((option) => option.id)).size === termOptions.length &&
+    new Set(termOptions.map((option) => option.termYears)).size === termOptions.length;
   return (
     typeof record.demandId === 'string' &&
     (record.source === 'REPLICA' || record.source === 'CRM') &&
@@ -140,9 +147,20 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
     typeof record.accountName === 'string' &&
     typeof record.recordId === 'string' &&
     (record.recordType === 'POLICY' || record.recordType === 'QUOTE') &&
+    typeof record.lineOfBusiness === 'string' &&
     typeof record.premium === 'number' &&
     typeof record.paidAmount === 'number' &&
     typeof record.amountDue === 'number' &&
+    (record.paymentMode === 'FIXED' || record.paymentMode === 'TERM_OPTIONS') &&
+    (record.selectedOptionId === null || typeof record.selectedOptionId === 'string') &&
+    termOptionsAreValid &&
+    ((record.paymentMode === 'FIXED' &&
+      record.selectedOptionId === null &&
+      termOptions.length === 0) ||
+      (record.paymentMode === 'TERM_OPTIONS' &&
+        record.selectedOptionId === null &&
+        termOptions.length >= 2 &&
+        termOptions.length <= 5)) &&
     (record.cardConvenienceFee === null || typeof record.cardConvenienceFee === 'number') &&
     (record.cardTotalAmount === null || typeof record.cardTotalAmount === 'number') &&
     ((record.cardConvenienceFee === null && record.cardTotalAmount === null) ||
@@ -169,6 +187,44 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
     record.missing.every((entry) => typeof entry === 'string') &&
     (record.dueDate === null || typeof record.dueDate === 'string') &&
     (record.clientMessage === null || typeof record.clientMessage === 'string')
+  );
+}
+
+function isFeePreview(
+  amount: number,
+  fee: unknown,
+  total: unknown
+): fee is number | null {
+  return (
+    (fee === null && total === null) ||
+    (typeof fee === 'number' &&
+      Number.isFinite(fee) &&
+      fee >= 0 &&
+      typeof total === 'number' &&
+      Number.isFinite(total) &&
+      total >= amount)
+  );
+}
+
+function isPaymentTermOption(value: unknown): value is PaymentTermOption {
+  if (!value || typeof value !== 'object') return false;
+  const option = value as Partial<PaymentTermOption>;
+  return (
+    typeof option.id === 'string' &&
+    Boolean(option.id.trim()) &&
+    typeof option.termYears === 'number' &&
+    Number.isInteger(option.termYears) &&
+    option.termYears >= 1 &&
+    option.termYears <= 5 &&
+    typeof option.amount === 'number' &&
+    Number.isFinite(option.amount) &&
+    option.amount > 0 &&
+    typeof option.currency === 'string' &&
+    Boolean(option.currency.trim()) &&
+    typeof option.label === 'string' &&
+    Boolean(option.label.trim()) &&
+    isFeePreview(option.amount, option.cardConvenienceFee, option.cardTotalAmount) &&
+    isFeePreview(option.amount, option.achConvenienceFee, option.achTotalAmount)
   );
 }
 
@@ -249,6 +305,14 @@ function isSuccessfulPayment(value: unknown): value is SuccessfulPayment {
     payment.status === 'SUCCEEDED' &&
     typeof payment.id === 'string' &&
     typeof payment.demandId === 'string' &&
+    (payment.paymentOptionId === null || typeof payment.paymentOptionId === 'string') &&
+    (payment.termYears === null ||
+      (typeof payment.termYears === 'number' &&
+        Number.isInteger(payment.termYears) &&
+        payment.termYears >= 1 &&
+        payment.termYears <= 5)) &&
+    ((payment.paymentOptionId === null && payment.termYears === null) ||
+      (typeof payment.paymentOptionId === 'string' && typeof payment.termYears === 'number')) &&
     typeof payment.amount === 'number' &&
     (payment.convenienceFee === null || typeof payment.convenienceFee === 'number') &&
     (payment.addOnConvenienceFee === null || typeof payment.addOnConvenienceFee === 'number') &&

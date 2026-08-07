@@ -24,6 +24,7 @@ import type {
   CardType,
   PaymentEligibility,
   PaymentMethod,
+  PaymentTermOption,
   SubmitPaymentRequest,
   SuccessfulPayment,
 } from '@/types/payment';
@@ -60,11 +61,43 @@ function getRecordKey(record: PaymentEligibility) {
 }
 
 function isRecordPayable(record: PaymentEligibility) {
-  return record.paymentState === 'DUE' && record.paymentNeeded && record.amountDue > 0;
+  if (record.paymentState !== 'DUE' || !record.paymentNeeded) return false;
+  return record.paymentMode === 'TERM_OPTIONS'
+    ? record.termOptions.length >= 2 && record.termOptions.some((option) => option.amount > 0)
+    : record.amountDue > 0;
 }
 
 function getRecordStatusDescription(record: PaymentEligibility) {
+  if (record.paymentMode === 'TERM_OPTIONS') {
+    return `${record.termOptions.length} term options available`;
+  }
   return `${getPaymentPurposeLabel(record.purpose)} due`;
+}
+
+function getTermOptionAmount(record: PaymentEligibility) {
+  if (record.paymentMode !== 'TERM_OPTIONS' || record.termOptions.length === 0) {
+    return record.amountDue;
+  }
+  return Math.min(...record.termOptions.map((option) => option.amount));
+}
+
+function sameMoney(left: number | null, right: number | null) {
+  if (left === null || right === null) return left === right;
+  return Math.round(left * 100) === Math.round(right * 100);
+}
+
+function termOptionMatches(left: PaymentTermOption, right: PaymentTermOption) {
+  return (
+    left.id === right.id &&
+    left.termYears === right.termYears &&
+    left.currency === right.currency &&
+    left.label === right.label &&
+    sameMoney(left.amount, right.amount) &&
+    sameMoney(left.cardConvenienceFee, right.cardConvenienceFee) &&
+    sameMoney(left.cardTotalAmount, right.cardTotalAmount) &&
+    sameMoney(left.achConvenienceFee, right.achConvenienceFee) &&
+    sameMoney(left.achTotalAmount, right.achTotalAmount)
+  );
 }
 
 function formatDemandDueDate(value: string | null) {
@@ -124,6 +157,7 @@ export default function PaymentScreen({
     refreshPaymentEligibility,
   } = usePayments();
   const [selectedRecordKey, setSelectedRecordKey] = useState('');
+  const [selectedPaymentOptionId, setSelectedPaymentOptionId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CARD');
   const [firstName, setFirstName] = useState(customer?.firstName?.trim() ?? '');
   const [lastName, setLastName] = useState(customer?.lastName?.trim() ?? '');
@@ -161,15 +195,32 @@ export default function PaymentScreen({
     () => payableRecords.find((record) => getRecordKey(record) === selectedRecordKey) ?? null,
     [payableRecords, selectedRecordKey]
   );
+  const selectedTermOption =
+    selectedRecord?.paymentMode === 'TERM_OPTIONS'
+      ? (selectedRecord.termOptions.find((option) => option.id === selectedPaymentOptionId) ?? null)
+      : null;
+  const selectedPaymentAmount = selectedRecord
+    ? selectedRecord.paymentMode === 'TERM_OPTIONS'
+      ? (selectedTermOption?.amount ?? null)
+      : selectedRecord.amountDue
+    : null;
   const selectedConvenienceFee = selectedRecord
     ? paymentMethod === 'CARD'
-      ? selectedRecord.cardConvenienceFee
-      : selectedRecord.achConvenienceFee
+      ? selectedRecord.paymentMode === 'TERM_OPTIONS'
+        ? (selectedTermOption?.cardConvenienceFee ?? null)
+        : selectedRecord.cardConvenienceFee
+      : selectedRecord.paymentMode === 'TERM_OPTIONS'
+        ? (selectedTermOption?.achConvenienceFee ?? null)
+        : selectedRecord.achConvenienceFee
     : null;
   const selectedTotalAmount = selectedRecord
     ? paymentMethod === 'CARD'
-      ? selectedRecord.cardTotalAmount
-      : selectedRecord.achTotalAmount
+      ? selectedRecord.paymentMode === 'TERM_OPTIONS'
+        ? (selectedTermOption?.cardTotalAmount ?? null)
+        : selectedRecord.cardTotalAmount
+      : selectedRecord.paymentMode === 'TERM_OPTIONS'
+        ? (selectedTermOption?.achTotalAmount ?? null)
+        : selectedRecord.achTotalAmount
     : null;
 
   useFocusEffect(
@@ -216,6 +267,7 @@ export default function PaymentScreen({
 
   useEffect(() => {
     if (!selectedRecord) return;
+    setSelectedPaymentOptionId('');
     setIsReviewing(false);
     setFormError('');
     setCardNumber('');
@@ -244,6 +296,7 @@ export default function PaymentScreen({
   }, []);
 
   const clearAllPaymentFields = useCallback(() => {
+    setSelectedPaymentOptionId('');
     setPaymentMethod('CARD');
     setFirstName('');
     setLastName('');
@@ -283,8 +336,18 @@ export default function PaymentScreen({
     resetReview();
   };
 
+  const changePaymentTerm = (paymentOptionId: string) => {
+    if (paymentOptionId === selectedPaymentOptionId) return;
+    setSelectedPaymentOptionId(paymentOptionId);
+    paymentIntentRef.current = null;
+    resetReview();
+  };
+
   const buildPaymentRequest = (): { request: SubmitPaymentRequest } | { error: string } => {
     if (!selectedRecord) return { error: 'Select a payment request.' };
+    if (selectedRecord.paymentMode === 'TERM_OPTIONS' && !selectedTermOption) {
+      return { error: 'Select a payment term.' };
+    }
 
     const signedInEmail = userEmail?.trim().toLowerCase();
     if (!signedInEmail) return { error: 'Your signed-in email is unavailable. Please sign in again.' };
@@ -310,12 +373,13 @@ export default function PaymentScreen({
       email: signedInEmail,
       ...(phone.trim() ? { phone: phone.trim() } : {}),
     };
+    const paymentSelection =
+      selectedRecord.paymentMode === 'TERM_OPTIONS'
+        ? { paymentOptionId: selectedTermOption!.id }
+        : { amount: selectedRecord.amountDue, purpose: selectedRecord.purpose };
 
     if (paymentMethod === 'CARD') {
-      if (
-        selectedRecord.cardConvenienceFee === null ||
-        selectedRecord.cardTotalAmount === null
-      ) {
+      if (selectedConvenienceFee === null || selectedTotalAmount === null) {
         return {
           error: 'Card payments are unavailable until the Input1 convenience fee is confirmed.',
         };
@@ -332,8 +396,7 @@ export default function PaymentScreen({
 
       return {
         request: {
-          amount: selectedRecord.amountDue,
-          purpose: selectedRecord.purpose,
+          ...paymentSelection,
           paymentMethod: 'CARD',
           emailReceipt: true,
           card: {
@@ -347,10 +410,7 @@ export default function PaymentScreen({
       };
     }
 
-    if (
-      selectedRecord.achConvenienceFee === null ||
-      selectedRecord.achTotalAmount === null
-    ) {
+    if (selectedConvenienceFee === null || selectedTotalAmount === null) {
       return {
         error: 'ACH payments are unavailable until the Input1 convenience fee is confirmed.',
       };
@@ -367,8 +427,7 @@ export default function PaymentScreen({
 
     return {
       request: {
-        amount: selectedRecord.amountDue,
-        purpose: selectedRecord.purpose,
+        ...paymentSelection,
         paymentMethod: 'ACH',
         emailReceipt: true,
         ach: {
@@ -383,25 +442,39 @@ export default function PaymentScreen({
     };
   };
 
-  const ensureRecordIsPayable = async (record: PaymentEligibility) => {
+  const ensureRecordIsPayable = async (
+    record: PaymentEligibility,
+    paymentOptionId: string
+  ) => {
     if (!userEmail) throw new PaymentApiError(400, 'A valid signed-in client email is required.');
     if (!accountId) throw new PaymentApiError(400, 'A client account is required.');
     const current = await getPaymentEligibility(userEmail, accountId, record.demandId);
-    if (current.paymentState !== 'DUE' || !current.paymentNeeded || current.amountDue <= 0) {
+    if (!isRecordPayable(current)) {
       throw new PaymentApiError(404, 'This payment request is no longer available.');
     }
-    if (
-      Math.round(record.amountDue * 100) !== Math.round(current.amountDue * 100) ||
-      record.cardConvenienceFee !== current.cardConvenienceFee ||
-      record.cardTotalAmount !== current.cardTotalAmount ||
-      record.achConvenienceFee !== current.achConvenienceFee ||
-      record.achTotalAmount !== current.achTotalAmount ||
-      record.purpose !== current.purpose
-    ) {
+    let requestChanged =
+      record.paymentMode !== current.paymentMode || record.purpose !== current.purpose;
+    if (!requestChanged && record.paymentMode === 'TERM_OPTIONS') {
+      const previousOption = record.termOptions.find((option) => option.id === paymentOptionId);
+      const currentOption = current.termOptions.find((option) => option.id === paymentOptionId);
+      requestChanged =
+        current.paymentMode !== 'TERM_OPTIONS' ||
+        !previousOption ||
+        !currentOption ||
+        !termOptionMatches(previousOption, currentOption);
+    } else if (!requestChanged) {
+      requestChanged =
+        !sameMoney(record.amountDue, current.amountDue) ||
+        !sameMoney(record.cardConvenienceFee, current.cardConvenienceFee) ||
+        !sameMoney(record.cardTotalAmount, current.cardTotalAmount) ||
+        !sameMoney(record.achConvenienceFee, current.achConvenienceFee) ||
+        !sameMoney(record.achTotalAmount, current.achTotalAmount);
+    }
+    if (requestChanged) {
       await refreshPaymentEligibility();
       throw new PaymentApiError(
         400,
-        'The payment request changed. Please review the updated amount and purpose.'
+        'The payment request changed. Please review the updated amount, purpose, and term options.'
       );
     }
     return current;
@@ -417,7 +490,7 @@ export default function PaymentScreen({
     setIsCheckingEligibility(true);
     setFormError('');
     try {
-      await ensureRecordIsPayable(selectedRecord);
+      await ensureRecordIsPayable(selectedRecord, selectedPaymentOptionId);
       setIsReviewing(true);
     } catch (error) {
       if (error instanceof PaymentApiError && error.status === 404) {
@@ -456,7 +529,7 @@ export default function PaymentScreen({
     setIsSubmitting(true);
     setFormError('');
     try {
-      await ensureRecordIsPayable(selectedRecord);
+      await ensureRecordIsPayable(selectedRecord, selectedPaymentOptionId);
       const requestFingerprint = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
         JSON.stringify(result.request)
@@ -531,6 +604,12 @@ export default function PaymentScreen({
             {formatCurrency(successfulPayment.totalCharged ?? successfulPayment.amount)}
           </Text>
           <ReviewRow label="Payment amount" value={formatCurrency(successfulPayment.amount)} />
+          {successfulPayment.termYears !== null ? (
+            <ReviewRow
+              label="Selected term"
+              value={`${successfulPayment.termYears} ${successfulPayment.termYears === 1 ? 'year' : 'years'}`}
+            />
+          ) : null}
           {successfulPayment.convenienceFee !== null ? (
             <ReviewRow
               label="Convenience fee"
@@ -601,7 +680,7 @@ export default function PaymentScreen({
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle}>Payment Requests</Text>
               <Text style={styles.cardSubtitle}>
-                Each request has an exact amount and purpose set by your agent.
+                Review the exact amount or choose from the quote terms published by your agent.
               </Text>
             </View>
             <View style={styles.optionList}>
@@ -630,7 +709,18 @@ export default function PaymentScreen({
               </View>
 
               <View style={styles.demandDetails}>
-                <ReviewRow label="Amount" value={formatCurrency(selectedRecord.amountDue)} />
+                {selectedRecord.paymentMode === 'FIXED' ? (
+                  <ReviewRow label="Amount" value={formatCurrency(selectedRecord.amountDue)} />
+                ) : (
+                  <ReviewRow
+                    label="Payment amount"
+                    value={
+                      selectedPaymentAmount === null
+                        ? 'Select a term below'
+                        : formatCurrency(selectedPaymentAmount)
+                    }
+                  />
+                )}
                 <ReviewRow
                   label="Purpose"
                   value={getPaymentPurposeLabel(selectedRecord.purpose)}
@@ -646,6 +736,15 @@ export default function PaymentScreen({
                   </View>
                 ) : null}
               </View>
+
+              {selectedRecord.paymentMode === 'TERM_OPTIONS' ? (
+                <TermOptionSelector
+                  options={selectedRecord.termOptions}
+                  selectedOptionId={selectedPaymentOptionId}
+                  disabled={isReviewing || isSubmitting}
+                  onSelect={changePaymentTerm}
+                />
+              ) : null}
 
               <ChoiceGroup
                 label="Payment Method"
@@ -833,8 +932,11 @@ export default function PaymentScreen({
                   <ReviewRow label="Record" value={buildPaymentRecordLabel(selectedRecord)} />
                   <ReviewRow
                     label="Payment amount"
-                    value={formatCurrency(selectedRecord.amountDue)}
+                    value={formatCurrency(selectedPaymentAmount ?? selectedRecord.amountDue)}
                   />
+                  {selectedTermOption ? (
+                    <ReviewRow label="Selected term" value={selectedTermOption.label} />
+                  ) : null}
                   {selectedConvenienceFee !== null ? (
                     <ReviewRow
                       label={
@@ -880,7 +982,9 @@ export default function PaymentScreen({
                   onPress={() => void handleReviewPayment()}
                   loading={isCheckingEligibility}
                   disabled={
-                    isPaymentUnavailable || blockedRecordKey === selectedRecordKey
+                    isPaymentUnavailable ||
+                    blockedRecordKey === selectedRecordKey ||
+                    (selectedRecord.paymentMode === 'TERM_OPTIONS' && !selectedTermOption)
                   }
                 />
               )}
@@ -901,9 +1005,16 @@ export default function PaymentScreen({
               <Ionicons name="wallet-outline" size={22} color={theme.colors.primary} />
             </View>
             <Text style={styles.balanceLabel}>Amount Due</Text>
-            <Text style={styles.balanceValue}>{formatCurrency(selectedRecord.amountDue)}</Text>
+            <Text style={styles.balanceValue}>
+              {selectedRecord.paymentMode === 'TERM_OPTIONS' && selectedPaymentAmount === null
+                ? 'Select a term'
+                : formatCurrency(selectedPaymentAmount ?? selectedRecord.amountDue)}
+            </Text>
             <Text style={styles.balanceRecord}>{buildPaymentRecordLabel(selectedRecord)}</Text>
             <View style={styles.balanceDivider} />
+            {selectedTermOption ? (
+              <ReviewRow label="Selected term" value={selectedTermOption.label} />
+            ) : null}
             <ReviewRow
               label="Purpose"
               value={getPaymentPurposeLabel(selectedRecord.purpose)}
@@ -960,11 +1071,74 @@ function RecordOption({
         <Text style={styles.recordTitle}>{buildPaymentRecordLabel(record)}</Text>
         <Text style={styles.recordMeta}>{getRecordStatusDescription(record)}</Text>
       </View>
-      <Text style={styles.recordAmount}>{formatCurrency(record.amountDue)}</Text>
+      <Text style={styles.recordAmount}>
+        {record.paymentMode === 'TERM_OPTIONS'
+          ? `From ${formatCurrency(getTermOptionAmount(record))}`
+          : formatCurrency(record.amountDue)}
+      </Text>
       <View style={[styles.radioOuter, selected ? styles.radioOuterSelected : null]}>
         {selected ? <View style={styles.radioInner} /> : null}
       </View>
     </Pressable>
+  );
+}
+
+function TermOptionSelector({
+  options,
+  selectedOptionId,
+  disabled,
+  onSelect,
+}: {
+  options: PaymentTermOption[];
+  selectedOptionId: string;
+  disabled: boolean;
+  onSelect: (paymentOptionId: string) => void;
+}) {
+  return (
+    <View style={styles.termSection}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.sectionTitle}>Choose your coverage term</Text>
+        <Text style={styles.cardSubtitle}>
+          Select one option. Your final total depends on the payment method.
+        </Text>
+      </View>
+      <View accessibilityRole="radiogroup" style={styles.optionList}>
+        {options.map((option) => {
+          const selected = option.id === selectedOptionId;
+          const cardTotal =
+            option.cardTotalAmount === null
+              ? 'Card unavailable'
+              : `Card total ${formatCurrency(option.cardTotalAmount)}`;
+          const achTotal =
+            option.achTotalAmount === null
+              ? 'ACH unavailable'
+              : `ACH total ${formatCurrency(option.achTotalAmount)}`;
+          return (
+            <Pressable
+              key={option.id}
+              accessibilityRole="radio"
+              accessibilityLabel={`${option.label}, ${formatCurrency(option.amount)}`}
+              accessibilityState={{ checked: selected, disabled }}
+              disabled={disabled}
+              onPress={() => onSelect(option.id)}
+              style={({ pressed }) => [
+                styles.termOption,
+                selected ? styles.optionSelected : null,
+                pressed ? styles.pressed : null,
+              ]}>
+              <View style={styles.recordCopy}>
+                <Text style={styles.termTitle}>{option.label}</Text>
+                <Text style={styles.termFeeCopy}>{`${cardTotal} • ${achTotal}`}</Text>
+              </View>
+              <Text style={styles.recordAmount}>{formatCurrency(option.amount)}</Text>
+              <View style={[styles.radioOuter, selected ? styles.radioOuterSelected : null]}>
+                {selected ? <View style={styles.radioInner} /> : null}
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
@@ -1064,6 +1238,29 @@ const styles = StyleSheet.create({
     padding: theme.spacing.md,
     gap: theme.spacing.sm,
   },
+  termSection: {
+    gap: theme.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    paddingTop: theme.spacing.lg,
+  },
+  termOption: {
+    minHeight: 76,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceTint,
+    padding: theme.spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  termTitle: {
+    ...theme.typography.body,
+    color: theme.colors.textStrong,
+    fontWeight: '700',
+  },
+  termFeeCopy: { ...theme.typography.caption, color: theme.colors.textMuted },
   agentMessage: {
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,

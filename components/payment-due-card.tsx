@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { theme } from '@/constants/theme';
 import type { PaymentEligibility } from '@/types/payment';
-import { buildPaymentRecordLabel, getPaymentPurposeLabel } from '@/utils/account-payment';
+import { formatLineOfBusiness, getPaymentPurposeLabel } from '@/utils/account-payment';
 import { formatCurrency } from '@/utils/format';
 
 type PaymentDueCardProps = {
@@ -28,11 +28,19 @@ export function PaymentDueCard({
   onMakePayment,
   isDesktopLayout = false,
 }: PaymentDueCardProps) {
-  const recordLabel = buildPaymentRecordLabel(record);
+  const policyType = formatLineOfBusiness(record.lineOfBusiness);
+  const hasTermOptions = record.paymentMode === 'TERM_OPTIONS';
+  const startingAmount = hasTermOptions
+    ? Math.min(...record.termOptions.map((option) => option.amount))
+    : record.amountDue;
+  const amountDescription = hasTermOptions
+    ? `${record.termOptions.length} term options starting at ${formatCurrency(startingAmount)}`
+    : `Amount due ${formatCurrency(record.amountDue)}`;
+  const actionLabel = hasTermOptions ? 'Choose Term & Pay' : 'Pay Now';
 
   return (
     <View
-      accessibilityLabel={`Payment due. Amount due ${formatCurrency(record.amountDue)}. ${formatDueDate(record.dueDate)}.`}
+      accessibilityLabel={`Payment due. ${policyType}. ${amountDescription}. ${formatDueDate(record.dueDate)}.`}
       style={[styles.card, isDesktopLayout ? styles.desktopCard : styles.mobileCard]}>
       <View pointerEvents="none" style={styles.ringOuter} />
       <View pointerEvents="none" style={styles.ringMiddle} />
@@ -48,6 +56,7 @@ export function PaymentDueCard({
             <Text style={styles.actionBadgeText}>Action Required</Text>
           </View>
           <Text style={styles.paymentTitle}>Payment Due</Text>
+          <Text style={styles.policyType}>{policyType}</Text>
           <Text style={styles.paymentDueDate}>{formatDueDate(record.dueDate)}</Text>
         </View>
       </View>
@@ -55,14 +64,20 @@ export function PaymentDueCard({
       {isDesktopLayout ? <View style={styles.desktopDivider} /> : null}
 
       <View style={[styles.amountBlock, isDesktopLayout ? styles.desktopAmountBlock : null]}>
-        <Text style={styles.amountLabel}>Amount Due</Text>
-        <Text style={styles.amountValue}>{formatCurrency(record.amountDue)}</Text>
+        <Text style={styles.amountLabel}>{hasTermOptions ? 'Term Options' : 'Amount Due'}</Text>
+        <Text style={styles.amountValue}>
+          {hasTermOptions ? `From ${formatCurrency(startingAmount)}` : formatCurrency(record.amountDue)}
+        </Text>
       </View>
 
       <View style={[styles.lineItems, isDesktopLayout ? styles.desktopLineItems : null]}>
         <View style={styles.lineItem}>
-          <Text style={styles.lineItemLabel} numberOfLines={1}>{recordLabel}</Text>
-          <Text style={styles.lineItemValue}>{getPaymentPurposeLabel(record.purpose)}</Text>
+          <Text style={styles.lineItemLabel}>{hasTermOptions ? 'Options' : 'Payment'}</Text>
+          <Text style={styles.lineItemValue}>
+            {hasTermOptions
+              ? `${record.termOptions.length} terms available`
+              : getPaymentPurposeLabel(record.purpose)}
+          </Text>
         </View>
         {record.clientMessage ? (
           <Text style={styles.clientMessage} numberOfLines={isDesktopLayout ? 2 : 3}>
@@ -73,7 +88,7 @@ export function PaymentDueCard({
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Pay now"
+        accessibilityLabel={actionLabel}
         onPress={onMakePayment}
         style={({ pressed }) => [
           styles.paymentButton,
@@ -81,7 +96,7 @@ export function PaymentDueCard({
           pressed ? styles.paymentButtonPressed : null,
         ]}>
         <Ionicons name="card-outline" size={18} color={theme.colors.primaryDeep} />
-        <Text style={styles.paymentButtonText}>Pay Now</Text>
+        <Text style={styles.paymentButtonText}>{actionLabel}</Text>
       </Pressable>
     </View>
   );
@@ -178,6 +193,11 @@ const styles = StyleSheet.create({
   paymentTitle: {
     ...theme.typography.title,
     color: theme.colors.white,
+  },
+  policyType: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.white,
+    fontWeight: '700',
   },
   paymentDueDate: {
     ...theme.typography.caption,
