@@ -15,6 +15,7 @@ const mockUpdateInsuredProfile = jest.fn();
 const mockPersistCustomersForEmail = jest.fn();
 const mockToCustomerProfile = jest.fn();
 const mockSendSmtpEmail = jest.fn();
+const mockRegisterForPushNotifications = jest.fn();
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -41,6 +42,10 @@ jest.mock('@/services/portal-config', () => ({
 jest.mock('@/services/smtp-email-api', () => ({
   sendSmtpEmail: (...args: unknown[]) => mockSendSmtpEmail(...args),
 }));
+jest.mock('@/services/push-notifications', () => ({
+  registerForPushNotifications: () => mockRegisterForPushNotifications(),
+  savePushDeviceToken: jest.fn(() => Promise.resolve()),
+}));
 
 const ProfileScreen = require('@/app/(tabs)/profile').default;
 
@@ -48,6 +53,11 @@ describe('ProfileScreen', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mockSendSmtpEmail.mockResolvedValue(undefined);
+    mockRegisterForPushNotifications.mockResolvedValue({
+      status: 'simulator',
+      message: 'Push notifications require a physical iPhone.',
+      token: null,
+    });
     mockToCustomerProfile.mockImplementation((record) =>
       buildCustomer({
         databaseId: record.databaseId,
