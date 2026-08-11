@@ -13,6 +13,7 @@ const mockUseAuth = jest.fn();
 const mockCreateClientContactRequest = jest.fn();
 const mockRefreshDigitalCard = jest.fn();
 const mockRefreshDigitalCardDraftStatus = jest.fn();
+const mockRegisterForPushNotifications = jest.fn();
 
 jest.mock('expo-router', () => ({ __esModule: true, router: mockRouter }));
 jest.mock('@/context/auth-context', () => ({ useAuth: () => mockUseAuth() }));
@@ -32,12 +33,21 @@ jest.mock('@/context/digital-card-context', () => ({
 jest.mock('@/services/contact-request-api', () => ({
   createClientContactRequest: (...args: unknown[]) => mockCreateClientContactRequest(...args),
 }));
+jest.mock('@/services/push-notifications', () => ({
+  registerForPushNotifications: () => mockRegisterForPushNotifications(),
+  savePushDeviceToken: jest.fn(() => Promise.resolve()),
+}));
 
 const ProfileScreen = require('@/app/(tabs)/profile').default;
 
 describe('ProfileScreen', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    mockRegisterForPushNotifications.mockResolvedValue({
+      status: 'simulator',
+      message: 'Push notifications require a physical iPhone.',
+      token: null,
+    });
     mockUseAuth.mockReturnValue({
       customer: buildCustomer({ accountId: 'account-1' }),
       userEmail: 'jane@example.com',

@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
+import { PushNotificationRegistration } from '@/components/push-notification-registration';
 import { theme } from '@/constants/theme';
 import { AuthProvider } from '@/context/auth-context';
 import { DigitalCardProvider } from '@/context/digital-card-context';
@@ -12,15 +13,18 @@ import {
   appendPbiaWebViewDiagnostic,
   installPbiaGlobalErrorDiagnostics,
 } from '@/services/pbia-webview-diagnostics';
+import { configureForegroundNotificationHandling } from '@/services/push-notifications';
 
 export default function RootLayout() {
   useEffect(() => {
     installPbiaGlobalErrorDiagnostics();
+    configureForegroundNotificationHandling();
     void appendPbiaWebViewDiagnostic({ event: 'app-root-mounted' });
   }, []);
 
   return (
     <AuthProvider>
+      <PushNotificationRegistration />
       <PaymentsProvider>
         <DigitalCardProvider>
           <PoliciesProvider>

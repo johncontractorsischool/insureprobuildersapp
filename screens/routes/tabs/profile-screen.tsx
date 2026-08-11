@@ -7,6 +7,7 @@ import { AppButton } from '@/components/app-button';
 import { AppInput } from '@/components/app-input';
 import { ContactUsMenu } from '@/components/contact-us-menu';
 import { DigitalCardEntryPanel } from '@/components/digital-card/digital-card-entry-panel';
+import { PushNotificationTestCard } from '@/components/push-notification-test-card';
 import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
@@ -389,6 +390,7 @@ export default function ProfileScreen({
           <View style={styles.desktopMainColumn}>
             {accountCard}
             <DigitalCardEntryPanel isDesktopLayout />
+            <PushNotificationTestCard isDesktopLayout />
           </View>
           <View style={styles.desktopSideColumn}>{supportBlock}</View>
         </View>
@@ -396,6 +398,7 @@ export default function ProfileScreen({
         <>
           {accountCard}
           <DigitalCardEntryPanel />
+          <PushNotificationTestCard />
           {supportBlock}
         </>
       )}

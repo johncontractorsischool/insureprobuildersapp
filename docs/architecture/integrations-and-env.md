@@ -9,6 +9,7 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
 | `EXPO_PUBLIC_SUPABASE_URL` | Yes | `services/supabase.ts` | Supabase project URL for auth and cached customer data |
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Yes | `services/supabase.ts` | Supabase anon key |
 | `EXPO_PUBLIC_SUPABASE_CUSTOMER_TABLE` | No | `context/auth-context.tsx`, `services/auth-flow.ts` | Overrides the cached customer table name; defaults to `portal_customers` |
+| `EXPO_PUBLIC_SUPABASE_PUSH_DEVICE_TABLE` | No | `services/push-notifications.ts` | Overrides the push-device table name; defaults to `portal_push_devices` |
 | `EXPO_PUBLIC_PBIA_API_BASE_URL` | Yes | `services/pbia-client.ts`, `services/payment-api.ts` | PBIA API or trusted gateway base URL for all client portal and payment calls |
 | `EXPO_PUBLIC_AGENT_NAME` | No | `services/portal-config.ts` | Fallback dashboard agent name |
 | `EXPO_PUBLIC_AGENT_PHONE` | No | `services/portal-config.ts` | Fallback agent phone |
@@ -90,6 +91,20 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
 - Policies:
   - authenticated users can read rows whose `login_email` matches the auth JWT email
   - inserts and updates require an authenticated JWT whose email matches `login_email`
+
+### Push Device Table
+
+- Schema file: `supabase/portal_push_devices.sql`
+- Table purpose:
+  - associate an Expo push token with the authenticated customer who registered it
+  - retain basic device metadata, active state, and last-seen timestamps for later server-side delivery
+- Client behavior:
+  - a physical iPhone registers after Supabase auth hydration
+  - the app upserts on `(user_id, expo_push_token)` so repeat launches refresh the row
+  - the public client uses only the anon key and the customer's authenticated session
+- Policies:
+  - authenticated users can only select, insert, update, or delete their own rows
+  - inserts and updates must also match the email in the auth JWT
 
 ## Local Persistence
 
