@@ -6,28 +6,13 @@ import { AuthProvider, useAuth } from '@/context/auth-context';
 import { buildCustomerLookupRecord } from '@/tests/factories';
 
 const mockGetSupabaseClient = jest.fn();
-const mockFetchCustomersByEmail = jest.fn();
-const mockGetPortalConfig = jest.fn(() => ({
-  demo: {
-    enabled: false,
-    profile: null,
-    data: null,
-  },
-  review: {
-    enabled: false,
-    email: null,
-    code: null,
-  },
-}));
+const mockFetchAccountByBusinessEmail = jest.fn();
 
 jest.mock('@/services/supabase', () => ({
   getSupabaseClient: () => mockGetSupabaseClient(),
 }));
 jest.mock('@/services/customer-api', () => ({
-  fetchCustomersByEmail: (...args: unknown[]) => mockFetchCustomersByEmail(...args),
-}));
-jest.mock('@/services/portal-config', () => ({
-  getPortalConfig: () => mockGetPortalConfig(),
+  fetchAccountByBusinessEmail: (...args: unknown[]) => mockFetchAccountByBusinessEmail(...args),
 }));
 
 function createSupabaseMock({
@@ -87,18 +72,6 @@ function wrapper({ children }: PropsWithChildren) {
 describe('AuthProvider', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
-    mockGetPortalConfig.mockReturnValue({
-      demo: {
-        enabled: false,
-        profile: null,
-        data: null,
-      },
-      review: {
-        enabled: false,
-        email: null,
-        code: null,
-      },
-    });
   });
 
   it('hydrates the current session from the live customer lookup when it is available', async () => {
@@ -106,7 +79,7 @@ describe('AuthProvider', () => {
       sessionEmail: 'jane@example.com',
     });
     mockGetSupabaseClient.mockReturnValue(supabaseMock);
-    mockFetchCustomersByEmail.mockResolvedValue([buildCustomerLookupRecord()]);
+    mockFetchAccountByBusinessEmail.mockResolvedValue(buildCustomerLookupRecord());
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
@@ -129,10 +102,10 @@ describe('AuthProvider', () => {
         smsPhone: '5559990000',
       })
     );
-    expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com');
+    expect(mockFetchAccountByBusinessEmail).toHaveBeenCalledWith('jane@example.com');
   });
 
-  it('hydrates the preferred customer when a persisted insuredId exists for the signed-in email', async () => {
+  it('hydrates the singular primary business-email account when a prior selection exists', async () => {
     await AsyncStorage.setItem(
       'portal_selected_customer',
       JSON.stringify({
@@ -145,21 +118,15 @@ describe('AuthProvider', () => {
       sessionEmail: 'jane@example.com',
     });
     mockGetSupabaseClient.mockReturnValue(supabaseMock);
-    mockFetchCustomersByEmail.mockResolvedValue([
-      buildCustomerLookupRecord({
-        insuredId: 'LIC-111111',
-        commercialName: 'First Builder Co',
-        firstName: 'Jane',
-        lastName: 'Builder',
-      }),
+    mockFetchAccountByBusinessEmail.mockResolvedValue(
       buildCustomerLookupRecord({
         databaseId: 'insured-db-2',
         insuredId: 'LIC-222222',
         commercialName: 'Second Builder Co',
         firstName: 'John',
         lastName: 'Builder',
-      }),
-    ]);
+      })
+    );
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
@@ -204,7 +171,7 @@ describe('AuthProvider', () => {
       ],
     });
     mockGetSupabaseClient.mockReturnValue(supabaseMock);
-    mockFetchCustomersByEmail.mockRejectedValue(new Error('lookup unavailable'));
+    mockFetchAccountByBusinessEmail.mockRejectedValue(new Error('lookup unavailable'));
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
@@ -252,7 +219,7 @@ describe('AuthProvider', () => {
     );
   });
 
-  it('restores the Apple review demo session when no Supabase session exists', async () => {
+  it('does not restore a legacy review session without a Supabase session', async () => {
     await AsyncStorage.setItem(
       'portal_review_session',
       JSON.stringify({
@@ -261,43 +228,17 @@ describe('AuthProvider', () => {
       })
     );
 
-    mockGetPortalConfig.mockReturnValue({
-      demo: {
-        enabled: false,
-        profile: null,
-        data: null,
-      },
-      review: {
-        enabled: true,
-        email: 'demo@insureprobuilders.com',
-        code: '111111',
-      },
-    });
     mockGetSupabaseClient.mockReturnValue(createSupabaseMock({}));
-    mockFetchCustomersByEmail.mockResolvedValue([
-      buildCustomerLookupRecord({
-        eMail: 'demo@insureprobuilders.com',
-        insuredId: '101000937',
-        commercialName: 'UrbanEdge Construction Inc.',
-      }),
-    ]);
-
     const { result } = renderHook(() => useAuth(), { wrapper });
 
-    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
 
-    expect(result.current.isLoadingAuth).toBe(false);
-    expect(result.current.userEmail).toBe('demo@insureprobuilders.com');
-    expect(result.current.pendingEmail).toBe('demo@insureprobuilders.com');
-    expect(result.current.pendingInsuredId).toBe('101000937');
-    expect(result.current.customer).toEqual(
-      expect.objectContaining({
-        commercialName: 'UrbanEdge Construction Inc.',
-        email: 'demo@insureprobuilders.com',
-        insuredId: '101000937',
-      })
-    );
-    expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('demo@insureprobuilders.com');
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(result.current.userEmail).toBeNull();
+    expect(result.current.pendingEmail).toBe('');
+    expect(result.current.pendingInsuredId).toBe('');
+    expect(result.current.customer).toBeNull();
+    expect(mockFetchAccountByBusinessEmail).not.toHaveBeenCalled();
   });
 
   it('signOut clears the local auth state even if Supabase resolves normally', async () => {

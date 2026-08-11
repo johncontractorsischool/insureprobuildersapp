@@ -5,7 +5,7 @@ import { buildCustomer } from '@/tests/factories';
 
 const mockUseLocalSearchParams = jest.fn(() => ({}));
 const mockUseAuth = jest.fn();
-const mockSendSmtpEmail = jest.fn();
+const mockCreateClientContactRequest = jest.fn();
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -17,15 +17,8 @@ jest.mock('expo-router', () => ({
 jest.mock('@/context/auth-context', () => ({
   useAuth: () => mockUseAuth(),
 }));
-jest.mock('@/services/smtp-email-api', () => ({
-  sendSmtpEmail: (...args: unknown[]) => mockSendSmtpEmail(...args),
-}));
-jest.mock('@/services/portal-config', () => ({
-  getPortalConfig: () => ({
-    actions: {
-      supportEmail: 'support@insureprobuilders.com',
-    },
-  }),
+jest.mock('@/services/contact-request-api', () => ({
+  createClientContactRequest: (...args: unknown[]) => mockCreateClientContactRequest(...args),
 }));
 
 const ContactScreen = require('@/app/contact').default;
@@ -38,15 +31,15 @@ describe('ContactScreen', () => {
         commercialName: 'Builder Co',
         email: 'jane@example.com',
         phone: '5551112222',
-        databaseId: 'insured-db-1',
+        accountId: 'account-1',
         insuredId: 'LIC-123456',
       }),
       userEmail: 'jane@example.com',
     });
-    mockSendSmtpEmail.mockResolvedValue(undefined);
+    mockCreateClientContactRequest.mockResolvedValue(undefined);
   });
 
-  it('sends a support email with the support subject', async () => {
+  it('submits a support request through PBIA', async () => {
     mockUseLocalSearchParams.mockReturnValue({ topic: 'support' });
 
     const { getByLabelText, getByText, findByText, queryByText } = render(<ContactScreen />);
@@ -57,20 +50,20 @@ describe('ContactScreen', () => {
     fireEvent.press(getByText('Send Support Request'));
 
     await waitFor(() =>
-      expect(mockSendSmtpEmail).toHaveBeenCalledWith(
+      expect(mockCreateClientContactRequest).toHaveBeenCalledWith(
+        'jane@example.com',
         expect.objectContaining({
-          subject: 'Contact Us - Need Support',
-          to: ['support@insureprobuilders.com'],
+          accountId: 'account-1',
+          callbackNumber: '5559990000',
+          preferredContactMethod: 'EMAIL',
+          description: expect.stringContaining('I need help with my policy.'),
         })
       )
     );
-
-    expect(mockSendSmtpEmail.mock.calls[0][0].html).toContain('I need help with my policy.');
-    expect(mockSendSmtpEmail.mock.calls[0][0].html).toContain('Builder Co');
     expect(await findByText('Your support request has been sent.')).toBeTruthy();
   });
 
-  it('sends a feedback email with the feedback subject', async () => {
+  it('submits feedback through PBIA', async () => {
     mockUseLocalSearchParams.mockReturnValue({ topic: 'feedback' });
 
     const { getByLabelText, getByText, findByText } = render(<ContactScreen />);
@@ -79,15 +72,13 @@ describe('ContactScreen', () => {
     fireEvent.press(getByText('Send Feedback'));
 
     await waitFor(() =>
-      expect(mockSendSmtpEmail).toHaveBeenCalledWith(
+      expect(mockCreateClientContactRequest).toHaveBeenCalledWith(
+        'jane@example.com',
         expect.objectContaining({
-          subject: 'Contact Us - Feedback',
-          to: ['support@insureprobuilders.com'],
+          description: expect.stringContaining('The app is easy to use.'),
         })
       )
     );
-
-    expect(mockSendSmtpEmail.mock.calls[0][0].html).toContain('The app is easy to use.');
     expect(await findByText('Your feedback has been sent.')).toBeTruthy();
   });
 });

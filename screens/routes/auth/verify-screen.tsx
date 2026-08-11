@@ -9,7 +9,8 @@ import { OTPInput } from '@/components/otp-input';
 import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { fetchCustomersByEmail } from '@/services/customer-api';
+import { createClientSignup } from '@/services/client-signup-api';
+import { fetchAccountByBusinessEmail } from '@/services/customer-api';
 import {
   isOtpRateLimitError,
   persistCustomersForEmail,
@@ -18,8 +19,6 @@ import {
   toUserFacingError,
   verifyEmailSignInCode,
 } from '@/services/auth-flow';
-import { getPortalConfig } from '@/services/portal-config';
-import { pickPreferredCustomerLookup } from '@/utils/customer-selection';
 
 function maskEmail(email: string) {
   const [name, domain] = email.split('@');
@@ -32,8 +31,13 @@ function maskEmail(email: string) {
 
 export default function VerifyScreen() {
   const { hint } = useLocalSearchParams<{ hint?: string }>();
-  const { pendingEmail, pendingInsuredId, completeSignIn } = useAuth();
-  const portalConfig = getPortalConfig();
+  const {
+    pendingEmail,
+    pendingInsuredId,
+    pendingSignup,
+    clearPendingSignup,
+    completeSignIn,
+  } = useAuth();
   const { width } = useWindowDimensions();
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -49,16 +53,16 @@ export default function VerifyScreen() {
   }, [pendingEmail]);
 
   useEffect(() => {
-    if (hint === 'apple-review' && portalConfig.review.enabled) {
-      setNotice(`Enter code ${portalConfig.review.code} to continue`);
-      setSecondsRemaining(0);
-      return;
-    }
-
     if (hint !== 'rate-limited') return;
     setNotice('Use your latest verification code, or wait before requesting another email.');
     setSecondsRemaining(60);
-  }, [hint, portalConfig.review.code, portalConfig.review.enabled]);
+  }, [hint]);
+
+  useEffect(() => {
+    if (hint !== 'otp-unavailable') return;
+    setNotice('Your account details are ready, but the first code could not be sent. Tap Resend Code.');
+    setSecondsRemaining(0);
+  }, [hint]);
 
   useEffect(() => {
     if (secondsRemaining <= 0) return;
@@ -70,7 +74,6 @@ export default function VerifyScreen() {
 
   const handleContinue = async () => {
     const normalizedCode = code.replace(/\D/g, '');
-    const isAppleReviewDemoEmail = portalConfig.review.enabled && pendingEmail === portalConfig.review.email;
 
     if (normalizedCode.length !== 6 || !pendingEmail) return;
     if (submitting) return;
@@ -80,47 +83,35 @@ export default function VerifyScreen() {
     setNotice('');
 
     try {
-      if (isAppleReviewDemoEmail) {
-        if (normalizedCode !== portalConfig.review.code) {
-          setError('Invalid review code. Use the Apple review code to continue.');
-          return;
+      const verifiedEmail = await verifyEmailSignInCode(pendingEmail, normalizedCode);
+      const normalizedVerifiedEmail = verifiedEmail.trim().toLowerCase();
+
+      if (pendingSignup) {
+        if (pendingSignup.email.trim().toLowerCase() !== normalizedVerifiedEmail) {
+          throw new Error('The verified email does not match the account signup email.');
         }
-
-        const customers = await fetchCustomersByEmail(pendingEmail);
-        const primaryCustomer = pickPreferredCustomerLookup(customers, pendingInsuredId);
-
-        if (!primaryCustomer) {
-          throw new Error('No account was found for that email address.');
-        }
-
-        const reviewCustomer = toCustomerProfile(primaryCustomer);
-        completeSignIn(pendingEmail, reviewCustomer, reviewCustomer.insuredId ?? pendingInsuredId);
-        router.replace('/(tabs)');
-        return;
+        await createClientSignup(pendingSignup);
+        clearPendingSignup();
       }
 
-      const verifiedEmail = await verifyEmailSignInCode(pendingEmail, code);
-      let customerProfile;
+      const primaryCustomer = await fetchAccountByBusinessEmail(normalizedVerifiedEmail);
+      if (!primaryCustomer) {
+        throw new Error('No PBIA account was found for that verified email address.');
+      }
+
+      const customerProfile = toCustomerProfile(primaryCustomer);
       try {
-        const customers = await fetchCustomersByEmail(verifiedEmail);
-        if (customers.length > 0) {
-          const primaryCustomer = pickPreferredCustomerLookup(customers, pendingInsuredId);
-          if (primaryCustomer) {
-            customerProfile = toCustomerProfile(primaryCustomer);
-            try {
-              await persistCustomersForEmail(verifiedEmail, customers);
-            } catch (persistError) {
-              // Keep the fresh customer profile in memory even if the Supabase cache write is blocked.
-              console.warn('Customer cache sync failed after successful OTP verification.', persistError);
-            }
-          }
-        }
-      } catch (syncError) {
-        // OTP verification already succeeded. Keep sign-in valid even if profile sync is temporarily unavailable.
-        console.warn('Customer sync failed after successful OTP verification.', syncError);
+        await persistCustomersForEmail(normalizedVerifiedEmail, [primaryCustomer]);
+      } catch (persistError) {
+        // Keep the fresh customer profile in memory even if the optional cache write is blocked.
+        console.warn('Customer cache sync failed after successful OTP verification.', persistError);
       }
 
-      completeSignIn(verifiedEmail, customerProfile, customerProfile?.insuredId ?? pendingInsuredId);
+      completeSignIn(
+        normalizedVerifiedEmail,
+        customerProfile,
+        customerProfile.insuredId ?? pendingInsuredId
+      );
       router.replace('/(tabs)');
     } catch (caughtError) {
       setError(toUserFacingError(caughtError, 'Unable to verify code. Please try again.'));
@@ -130,17 +121,10 @@ export default function VerifyScreen() {
   };
 
   const handleResend = async () => {
-    const isAppleReviewDemoEmail = portalConfig.review.enabled && pendingEmail === portalConfig.review.email;
-
     if (!pendingEmail || secondsRemaining > 0) return;
 
     setError('');
     setNotice('');
-
-    if (isAppleReviewDemoEmail) {
-      setNotice(`Enter code ${portalConfig.review.code} to continue`);
-      return;
-    }
 
     try {
       await sendEmailSignInCode(pendingEmail);

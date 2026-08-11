@@ -14,6 +14,10 @@ export type PolicyFileEntry = {
   fileUrl: string | null;
   downloadUrl: string | null;
   url: string | null;
+  mimeType?: string | null;
+  size?: number | null;
+  description?: string | null;
+  parentId?: string | null;
 };
 
 export type PolicyFilesListResponse = {

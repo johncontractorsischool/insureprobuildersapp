@@ -6,15 +6,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppButton } from '@/components/app-button';
 import { AppInput } from '@/components/app-input';
 import { ContactUsMenu } from '@/components/contact-us-menu';
+import { DigitalCardEntryPanel } from '@/components/digital-card/digital-card-entry-panel';
 import { PushNotificationTestCard } from '@/components/push-notification-test-card';
 import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { persistCustomersForEmail, toCustomerProfile } from '@/services/auth-flow';
-import { fetchCustomersByEmail, updateInsuredProfile } from '@/services/customer-api';
-import { getPortalConfig } from '@/services/portal-config';
-import { sendSmtpEmail } from '@/services/smtp-email-api';
-import { Customer, CustomerLookupRecord } from '@/types/customer';
+import { createClientContactRequest } from '@/services/contact-request-api';
+import { Customer } from '@/types/customer';
 import { formatEmailAddress, formatPhoneNumber, getNameFromCustomer } from '@/utils/format';
 
 function isEmailValid(value: string) {
@@ -29,15 +27,6 @@ const webWrapText =
   Platform.OS === 'web'
     ? ({ overflowWrap: 'anywhere', wordBreak: 'break-word' } as any)
     : undefined;
-
-function pickPrimaryCustomer(customers: CustomerLookupRecord[], currentCustomer: Customer | null) {
-  return (
-    customers.find((entry) => entry.databaseId === currentCustomer?.databaseId) ??
-    customers.find((entry) => entry.customerId === currentCustomer?.customerId) ??
-    customers.find((entry) => entry.active) ??
-    customers[0]
-  );
-}
 
 type ProfileFormState = {
   firstName: string;
@@ -60,26 +49,6 @@ function buildFormState(customer: Customer | null, userEmail: string | null): Pr
     email: formatEmailAddress(customer?.email ?? userEmail ?? ''),
     phone: customer?.phone?.trim() ?? '',
     cellPhone: customer?.cellPhone?.trim() ?? '',
-  };
-}
-
-function buildMergedCustomerProfile(
-  existingCustomer: Customer | null,
-  formState: ProfileFormState,
-  fallbackEmail: string | null
-): Customer {
-  const firstName = formState.firstName.trim() || null;
-  const lastName = formState.lastName.trim() || null;
-  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
-
-  return {
-    ...(existingCustomer ?? {}),
-    firstName,
-    lastName,
-    fullName: fullName || existingCustomer?.commercialName || null,
-    email: normalizeEmail(formState.email || fallbackEmail || ''),
-    phone: formState.phone.trim() || null,
-    cellPhone: formState.cellPhone.trim() || null,
   };
 }
 
@@ -160,51 +129,14 @@ function buildProfileFieldChanges(
     .filter((value): value is ProfileFieldChange => Boolean(value));
 }
 
-function buildProfileUpdateEmailBody(
-  existingCustomer: Customer | null,
-  userEmail: string | null,
-  changes: ProfileFieldChange[]
-) {
-  const escapeHtml = (value: string) =>
-    value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
-
-  const fieldRows = changes
-    .map(
-      (change) => `
-        <tr>
-          <td style="padding:8px;border:1px solid #d7ddda;font-weight:600;">${escapeHtml(change.label)}</td>
-          <td style="padding:8px;border:1px solid #d7ddda;overflow-wrap:anywhere;word-break:break-word;">${escapeHtml(change.previousValue)}</td>
-          <td style="padding:8px;border:1px solid #d7ddda;overflow-wrap:anywhere;word-break:break-word;">${escapeHtml(change.nextValue)}</td>
-        </tr>
-      `
-    )
-    .join('');
-
-  return `
-    <div style="font-family:Arial,sans-serif;color:#1f2933;line-height:1.5;">
-      <p>A profile update was submitted in the Insure Pro Builders app.</p>
-      <p><strong>Account Holder:</strong> ${escapeHtml(getNameFromCustomer(existingCustomer, userEmail))}</p>
-      <p><strong>Business Name:</strong> ${escapeHtml(existingCustomer?.commercialName?.trim() || 'Blank')}</p>
-      <p><strong>Login Email:</strong> ${escapeHtml(formatEmailAddress(userEmail ?? existingCustomer?.email) || 'Blank')}</p>
-      <p><strong>Database ID:</strong> ${escapeHtml(existingCustomer?.databaseId?.trim() || 'Blank')}</p>
-      <p><strong>Insured ID:</strong> ${escapeHtml(existingCustomer?.insuredId?.trim() || 'Blank')}</p>
-      <table style="border-collapse:collapse;width:100%;margin-top:16px;">
-        <thead>
-          <tr>
-            <th style="padding:8px;border:1px solid #d7ddda;text-align:left;background:#f4f7f5;">Field</th>
-            <th style="padding:8px;border:1px solid #d7ddda;text-align:left;background:#f4f7f5;">Previous</th>
-            <th style="padding:8px;border:1px solid #d7ddda;text-align:left;background:#f4f7f5;">New</th>
-          </tr>
-        </thead>
-        <tbody>${fieldRows}</tbody>
-      </table>
-    </div>
-  `.trim();
+function buildProfileUpdateDescription(changes: ProfileFieldChange[]) {
+  return [
+    'Profile Update Request',
+    '',
+    ...changes.map(
+      (change) => `${change.label}: ${change.previousValue} -> ${change.nextValue}`
+    ),
+  ].join('\n');
 }
 
 function DetailRow({
@@ -234,8 +166,7 @@ export default function ProfileScreen({
   isDesktopLayout = false,
 }: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
-  const { customer, userEmail, setCustomer, signOut } = useAuth();
-  const supportEmail = getPortalConfig().actions.supportEmail;
+  const { customer, userEmail, signOut } = useAuth();
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState('');
@@ -294,6 +225,19 @@ export default function ProfileScreen({
       return;
     }
 
+    if (profileChanges.length === 0) {
+      setProfileError('No profile changes were entered.');
+      return;
+    }
+
+    const accountId = customer?.accountId?.trim() || customer?.databaseId?.trim() || '';
+    const callbackNumber =
+      formState.cellPhone.trim() || formState.phone.trim() || customer?.phone?.trim() || '';
+    if (!userEmail || !accountId || !callbackNumber) {
+      setProfileError('Your PBIA account and a callback number are required to request profile changes.');
+      return;
+    }
+
     if (isSavingProfile) return;
 
     setIsSavingProfile(true);
@@ -301,76 +245,14 @@ export default function ProfileScreen({
     setProfileNotice('');
 
     try {
-      await updateInsuredProfile({
-        databaseId: customer?.databaseId,
-        type: customer?.type ?? 0,
-        commercialName: customer?.commercialName,
-        firstName: formState.firstName,
-        lastName: formState.lastName,
-        email: normalizedEmail,
-        phone: formState.phone,
-        cellPhone: formState.cellPhone,
+      await createClientContactRequest(userEmail, {
+        accountId,
+        callbackNumber,
+        preferredContactMethod: 'EMAIL',
+        description: buildProfileUpdateDescription(profileChanges),
       });
 
-      const cacheEmail = normalizeEmail(userEmail ?? customer?.email ?? normalizedEmail);
-      const lookupEmails = Array.from(
-        new Set(
-          [normalizedEmail, customer?.email ? normalizeEmail(customer.email) : null, cacheEmail].filter(
-            (value): value is string => Boolean(value)
-          )
-        )
-      );
-
-      let refreshedCustomer: Customer | null = null;
-      let supportNotificationSent = true;
-
-      if (profileChanges.length > 0) {
-        try {
-          await sendSmtpEmail({
-            subject: 'Profile Update Notification',
-            html: buildProfileUpdateEmailBody(customer, userEmail, profileChanges),
-            to: [supportEmail],
-          });
-        } catch {
-          supportNotificationSent = false;
-        }
-      }
-
-      for (const lookupEmail of lookupEmails) {
-        try {
-          const customers = await fetchCustomersByEmail(lookupEmail);
-          if (customers.length === 0) continue;
-
-          const primaryCustomer = pickPrimaryCustomer(customers, customer);
-          refreshedCustomer = toCustomerProfile(primaryCustomer);
-
-          try {
-            await persistCustomersForEmail(cacheEmail, customers);
-          } catch {
-            // Keep the refreshed in-memory user even if cache persistence fails.
-          }
-
-          break;
-        } catch {
-          // Try the next lookup email before falling back to local state.
-        }
-      }
-
-      if (refreshedCustomer) {
-        setCustomer(refreshedCustomer);
-        setProfileNotice(
-          supportNotificationSent
-            ? 'Profile updated successfully.'
-            : 'Profile updated successfully. Unable to send the support notification right now.'
-        );
-      } else {
-        setCustomer(buildMergedCustomerProfile(customer, formState, userEmail));
-        setProfileNotice(
-          supportNotificationSent
-            ? 'Profile updated, but the refreshed account data is still catching up.'
-            : 'Profile updated, but the refreshed account data is still catching up. Unable to send the support notification right now.'
-        );
-      }
+      setProfileNotice('Your profile update request was submitted to PBIA.');
 
       setIsEditingProfile(false);
     } catch (caughtError) {
@@ -452,7 +334,7 @@ export default function ProfileScreen({
           />
 
           <View style={styles.formActions}>
-            <AppButton label="Save Profile" onPress={handleSaveProfile} loading={isSavingProfile} />
+            <AppButton label="Submit Update Request" onPress={handleSaveProfile} loading={isSavingProfile} />
             <AppButton label="Cancel" variant="ghost" onPress={handleCancelEdit} />
           </View>
         </View>
@@ -507,6 +389,7 @@ export default function ProfileScreen({
         <View style={styles.desktopLayout}>
           <View style={styles.desktopMainColumn}>
             {accountCard}
+            <DigitalCardEntryPanel isDesktopLayout />
             <PushNotificationTestCard isDesktopLayout />
           </View>
           <View style={styles.desktopSideColumn}>{supportBlock}</View>
@@ -514,6 +397,7 @@ export default function ProfileScreen({
       ) : (
         <>
           {accountCard}
+          <DigitalCardEntryPanel />
           <PushNotificationTestCard />
           {supportBlock}
         </>

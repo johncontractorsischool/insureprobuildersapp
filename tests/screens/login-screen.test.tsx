@@ -1,8 +1,6 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
-import { buildCustomerLookupRecord } from '@/tests/factories';
-
 const mockRouter = {
   push: jest.fn(),
   replace: jest.fn(),
@@ -11,22 +9,10 @@ const mockRouter = {
 };
 const mockUseLocalSearchParams = jest.fn(() => ({}));
 const mockUseAuth = jest.fn();
-const mockFetchCustomersByEmail = jest.fn();
+const mockFetchAccountByBusinessEmail = jest.fn();
 const mockSendEmailSignInCode = jest.fn();
 const mockIsOtpRateLimitError = jest.fn();
 const mockToUserFacingError = jest.fn((error: Error, fallback: string) => error.message || fallback);
-const mockGetPortalConfig = jest.fn(() => ({
-  demo: {
-    enabled: false,
-    profile: null,
-    data: null,
-  },
-  review: {
-    enabled: false,
-    email: null,
-    code: null,
-  },
-}));
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -37,15 +23,13 @@ jest.mock('@/context/auth-context', () => ({
   useAuth: () => mockUseAuth(),
 }));
 jest.mock('@/services/customer-api', () => ({
-  fetchCustomersByEmail: (...args: unknown[]) => mockFetchCustomersByEmail(...args),
+  fetchAccountByBusinessEmail: (...args: unknown[]) => mockFetchAccountByBusinessEmail(...args),
 }));
 jest.mock('@/services/auth-flow', () => ({
   sendEmailSignInCode: (...args: unknown[]) => mockSendEmailSignInCode(...args),
   isOtpRateLimitError: (...args: unknown[]) => mockIsOtpRateLimitError(...args),
-  toUserFacingError: (...args: unknown[]) => mockToUserFacingError(...args),
-}));
-jest.mock('@/services/portal-config', () => ({
-  getPortalConfig: () => mockGetPortalConfig(),
+  toUserFacingError: (error: Error, fallback: string) =>
+    mockToUserFacingError(error, fallback),
 }));
 
 const LoginScreen = require('@/app/(auth)/login').default;
@@ -58,25 +42,12 @@ describe('LoginScreen', () => {
     });
     mockUseLocalSearchParams.mockReturnValue({});
     mockIsOtpRateLimitError.mockReturnValue(false);
-    mockGetPortalConfig.mockReturnValue({
-      demo: {
-        enabled: false,
-        profile: null,
-        data: null,
-      },
-      review: {
-        enabled: false,
-        email: null,
-        code: null,
-      },
-    });
   });
 
-  it('sends a sign-in code and routes to verify when the email exists', async () => {
+  it('sends a sign-in code before requesting PBIA account data', async () => {
     const setPendingEmail = jest.fn();
     const setCustomer = jest.fn();
     mockUseAuth.mockReturnValue({ setPendingEmail, setCustomer });
-    mockFetchCustomersByEmail.mockResolvedValue([buildCustomerLookupRecord()]);
     mockSendEmailSignInCode.mockResolvedValue(undefined);
 
     const { getByPlaceholderText, getByText } = render(<LoginScreen />);
@@ -84,59 +55,17 @@ describe('LoginScreen', () => {
     fireEvent.changeText(getByPlaceholderText('You@Company.com'), ' Jane@Example.com ');
     fireEvent.press(getByText('Continue'));
 
-    await waitFor(() => expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com'));
-
     expect(mockSendEmailSignInCode).toHaveBeenCalledWith('jane@example.com');
-    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('jane@example.com', 'LIC-123456'));
+    expect(mockFetchAccountByBusinessEmail).not.toHaveBeenCalled();
+    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('jane@example.com'));
     await waitFor(() => expect(setCustomer).toHaveBeenCalledWith(null));
     await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith('/(auth)/verify'));
-  });
-
-  it('requires a license number before sending OTP when multiple customers share the same email', async () => {
-    const setPendingEmail = jest.fn();
-    const setCustomer = jest.fn();
-    mockUseAuth.mockReturnValue({ setPendingEmail, setCustomer });
-    mockFetchCustomersByEmail.mockResolvedValue([
-      buildCustomerLookupRecord({ insuredId: 'LIC-111111', commercialName: 'First Builder Co' }),
-      buildCustomerLookupRecord({ insuredId: 'LIC-222222', commercialName: 'Second Builder Co' }),
-    ]);
-    mockSendEmailSignInCode.mockResolvedValue(undefined);
-
-    const { getByPlaceholderText, getByText, findByText } = render(<LoginScreen />);
-
-    fireEvent.changeText(getByPlaceholderText('You@Company.com'), 'jane@example.com');
-    fireEvent.press(getByText('Continue'));
-
-    expect(
-      await findByText('Multiple accounts were found for that email. Enter your license number to continue.')
-    ).toBeTruthy();
-    expect(mockSendEmailSignInCode).not.toHaveBeenCalled();
-
-    fireEvent.changeText(getByPlaceholderText('CSLB License Number'), 'lic-222222');
-    fireEvent.press(getByText('Continue'));
-
-    await waitFor(() => expect(mockSendEmailSignInCode).toHaveBeenCalledWith('jane@example.com'));
-    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('jane@example.com', 'LIC-222222'));
-    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith('/(auth)/verify'));
-  });
-
-  it('shows an error when no account exists for the entered email', async () => {
-    mockFetchCustomersByEmail.mockResolvedValue([]);
-
-    const { getByPlaceholderText, getByText, findByText } = render(<LoginScreen />);
-
-    fireEvent.changeText(getByPlaceholderText('You@Company.com'), 'jane@example.com');
-    fireEvent.press(getByText('Continue'));
-
-    expect(await findByText('No account was found for that email address.')).toBeTruthy();
-    expect(mockSendEmailSignInCode).not.toHaveBeenCalled();
   });
 
   it('routes to verify with a rate-limit hint when OTP requests are throttled', async () => {
     const setPendingEmail = jest.fn();
     const setCustomer = jest.fn();
     mockUseAuth.mockReturnValue({ setPendingEmail, setCustomer });
-    mockFetchCustomersByEmail.mockResolvedValue([buildCustomerLookupRecord()]);
     mockSendEmailSignInCode.mockRejectedValue(new Error('too many requests'));
     mockIsOtpRateLimitError.mockReturnValue(true);
 
@@ -145,7 +74,7 @@ describe('LoginScreen', () => {
     fireEvent.changeText(getByPlaceholderText('You@Company.com'), 'jane@example.com');
     fireEvent.press(getByText('Continue'));
 
-    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('jane@example.com', 'LIC-123456'));
+    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('jane@example.com'));
     await waitFor(() =>
       expect(mockRouter.push).toHaveBeenCalledWith({
         pathname: '/(auth)/verify',
@@ -154,41 +83,23 @@ describe('LoginScreen', () => {
     );
   });
 
-  it('routes the Apple review demo email directly to verify without sending OTP when review mode is enabled', async () => {
+  it('requires Supabase OTP for the Apple review email', async () => {
     const setPendingEmail = jest.fn();
     const setCustomer = jest.fn();
     mockUseAuth.mockReturnValue({ setPendingEmail, setCustomer });
-    mockGetPortalConfig.mockReturnValue({
-      demo: {
-        enabled: false,
-        profile: null,
-        data: null,
-      },
-      review: {
-        enabled: true,
-        email: 'demo@insureprobuilders.com',
-        code: '111111',
-      },
-    });
-    mockFetchCustomersByEmail.mockResolvedValue([
-      buildCustomerLookupRecord({
-        eMail: 'demo@insureprobuilders.com',
-        insuredId: '101000937',
-      }),
-    ]);
+    mockSendEmailSignInCode.mockResolvedValue(undefined);
 
     const { getByPlaceholderText, getByText } = render(<LoginScreen />);
 
     fireEvent.changeText(getByPlaceholderText('You@Company.com'), 'Demo@InsureProBuilders.com');
     fireEvent.press(getByText('Continue'));
 
-    await waitFor(() => expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('demo@insureprobuilders.com'));
-    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('demo@insureprobuilders.com', '101000937'));
-    expect(mockSendEmailSignInCode).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(mockSendEmailSignInCode).toHaveBeenCalledWith('demo@insureprobuilders.com')
+    );
+    expect(mockFetchAccountByBusinessEmail).not.toHaveBeenCalled();
+    await waitFor(() => expect(setPendingEmail).toHaveBeenCalledWith('demo@insureprobuilders.com'));
     expect(setCustomer).toHaveBeenCalledWith(null);
-    expect(mockRouter.push).toHaveBeenCalledWith({
-      pathname: '/(auth)/verify',
-      params: { hint: 'apple-review' },
-    });
+    expect(mockRouter.push).toHaveBeenCalledWith('/(auth)/verify');
   });
 });

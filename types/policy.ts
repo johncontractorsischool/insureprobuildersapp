@@ -21,10 +21,15 @@ export type PolicyDocument = {
 
 export type Policy = {
   id: string;
+  accountId?: string;
+  recordType?: 'POLICY' | 'QUOTE';
+  lineOfBusiness?: string | null;
   productName: string;
   status: PolicyStatus;
   policyNumber: string;
   carrierName: string;
+  premium?: number;
+  // Compatibility alias retained for older cached/demo policy objects.
   premiumMonthly: number;
   effectiveDate: string;
   expirationDate: string;

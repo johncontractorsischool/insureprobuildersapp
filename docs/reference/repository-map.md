@@ -49,12 +49,12 @@ This file explains every tracked folder and file in the repo and calls out wheth
 ### `app/policy/`
 
 - `app/policy/`: policy drill-down route group.
-- `app/policy/[id].tsx`: policy detail screen with coverage, billing, insured summary, and filtered policy-file preview.
+- `app/policy/[id].tsx`: policy detail screen with PBIA coverage data and a scoped document-browser action.
 
 ### `app/policy-files/`
 
 - `app/policy-files/`: policy-file browser route group.
-- `app/policy-files/index.tsx`: breadcrumb-driven folder/file browser backed by the policy-files API.
+- `app/policy-files/index.tsx`: PBIA account/policy document browser with recursive folder loading.
 
 ## `assets/`
 
@@ -132,6 +132,11 @@ This file explains every tracked folder and file in the repo and calls out wheth
 - `docs/`: canonical project documentation folder.
 - `docs/README.md`: docs index that points readers to architecture, flows, integrations, and repository reference.
 
+### `docs/handoffs/`
+
+- `docs/handoffs/`: implementation-ready specifications for scoped product work.
+- `docs/handoffs/digital-business-card.md`: Expo implementation handoff for the profile entry point, card builder, public QR route, contact sharing, persistence, and Apple/Google Wallet issuance.
+
 ### `docs/architecture/`
 
 - `docs/architecture/`: runtime and integration documentation.
@@ -149,7 +154,8 @@ This file explains every tracked folder and file in the repo and calls out wheth
 - `hooks/`: shared React hooks.
 - `hooks/use-color-scheme.ts`: thin native re-export of React Native's color-scheme hook.
 - `hooks/use-color-scheme.web.ts`: web-safe color-scheme hook that waits for client hydration before trusting the browser value.
-- `hooks/use-company-profile.ts`: CSLB data loader and formatter for dashboard/company detail UI.
+- `hooks/use-client-signup.ts`: validates signup details and starts OTP verification; account creation is deferred until the email is verified.
+- `hooks/use-company-profile.ts`: PBIA CSLB data loader and formatter for dashboard/company detail UI.
 - `hooks/use-theme-color.ts`: Expo starter helper for themed color lookup; mainly used by leftover themed components.
 
 ## `scripts/`
@@ -160,13 +166,18 @@ This file explains every tracked folder and file in the repo and calls out wheth
 ## `services/`
 
 - `services/`: integrations, network clients, and service-layer helpers.
-- `services/agent-api.ts`: insured-agent API client used by the dashboard.
+- `services/agent-api.ts`: PBIA `GET /client/agent` client used by the dashboard.
 - `services/auth-flow.ts`: auth helpers for OTP send/verify, customer persistence, and customer-profile mapping.
-- `services/cslb-api.ts`: CSLB API client plus payload normalization and CSLB URL builder.
-- `services/customer-api.ts`: customer lookup client by email address.
+- `services/client-signup-api.ts`: PBIA `POST /client/signup` client.
+- `services/contact-request-api.ts`: PBIA contact/service request client used by support, COI, and profile-update flows.
+- `services/cslb-api.ts`: PBIA client CSLB lookup/refresh client plus CSLB URL builder.
+- `services/customer-api.ts`: PBIA account clients for the broad email-scoped `GET /client/account` list and the primary-business-email-only `GET /client/account/by-business-email` sign-in lookup.
+- `services/pbia-client.ts`: shared PBIA base URL, required Supabase bearer-token header, session-email matching, error parsing, and request transport.
 - `services/pbia-webview-diagnostics.ts`: AsyncStorage-backed PBIA diagnostic logging, active-session recovery, and global JS error capture.
-- `services/policy-api.ts`: policy lookup client plus normalization into the shared `Policy` type.
-- `services/policy-files-api.ts`: policy-files API client plus response parsing for both root and folder requests.
+- `services/payment-api.ts`: secure PBIA payment eligibility/detail/submission client.
+- `services/policy-api.ts`: PBIA account policy client plus normalization into the shared `Policy` type.
+- `services/policy-coverages-api.ts`: PBIA policy coverage client.
+- `services/policy-files-api.ts`: PBIA account/policy document metadata client.
 - `services/portal-config.ts`: env-backed fallback config for agent, company, and action URLs.
 - `services/supabase.ts`: singleton Supabase client factory with AsyncStorage-backed auth persistence.
 
@@ -212,10 +223,10 @@ This file explains every tracked folder and file in the repo and calls out wheth
 ### `tests/screens/`
 
 - `tests/screens/`: route-screen tests for the highest-signal user flows.
-- `tests/screens/login-screen.test.tsx`: covers sign-in success, missing-account validation, and OTP rate-limit routing.
+- `tests/screens/login-screen.test.tsx`: covers OTP-first sign-in, Apple-review-account OTP enforcement, and OTP rate-limit routing.
 - `tests/screens/policies-screen.test.tsx`: covers policy filtering and policy-detail navigation.
 - `tests/screens/policy-files-screen.test.tsx`: covers folder traversal and file-open actions in the policy-files browser.
-- `tests/screens/verify-screen.test.tsx`: covers OTP verification, login redirect, and rate-limit hint messaging.
+- `tests/screens/verify-screen.test.tsx`: covers OTP verification, authenticated account lookup/signup, login redirect, and rate-limit hint messaging.
 
 ### `tests/services/`
 

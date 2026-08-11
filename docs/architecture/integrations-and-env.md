@@ -10,10 +10,7 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Yes | `services/supabase.ts` | Supabase anon key |
 | `EXPO_PUBLIC_SUPABASE_CUSTOMER_TABLE` | No | `context/auth-context.tsx`, `services/auth-flow.ts` | Overrides the cached customer table name; defaults to `portal_customers` |
 | `EXPO_PUBLIC_SUPABASE_PUSH_DEVICE_TABLE` | No | `services/push-notifications.ts` | Overrides the push-device table name; defaults to `portal_push_devices` |
-| `EXPO_PUBLIC_CUSTOMER_API_BASE_URL` | Usually | `services/customer-api.ts`, fallback for policy/agent/files/CSLB services | Base URL for customer lookup API |
-| `EXPO_PUBLIC_POLICY_API_BASE_URL` | No | `services/policy-api.ts`, `services/policy-files-api.ts`, `services/agent-api.ts`, `services/cslb-api.ts` | Optional shared base URL for policy-adjacent endpoints |
-| `EXPO_PUBLIC_AGENT_API_BASE_URL` | No | `services/agent-api.ts` | Explicit base URL for insured-agent lookup |
-| `EXPO_PUBLIC_CSLB_API_BASE_URL` | No | `services/cslb-api.ts` | Explicit base URL for CSLB lookup |
+| `EXPO_PUBLIC_PBIA_API_BASE_URL` | Yes | `services/pbia-client.ts`, `services/payment-api.ts` | PBIA API or trusted gateway base URL for all client portal and payment calls |
 | `EXPO_PUBLIC_AGENT_NAME` | No | `services/portal-config.ts` | Fallback dashboard agent name |
 | `EXPO_PUBLIC_AGENT_PHONE` | No | `services/portal-config.ts` | Fallback agent phone |
 | `EXPO_PUBLIC_AGENT_EMAIL` | No | `services/portal-config.ts` | Fallback agent email |
@@ -26,44 +23,47 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
 
 ## HTTP Integrations
 
-### Customer Lookup
+### PBIA Client Portal
 
-- Service: `services/customer-api.ts`
-- Endpoint: `GET /getCustomer?Email=<email>`
-- Screen usage:
-  - auth login screen checks whether the email maps to a customer
-  - verify screen refreshes customer data after OTP success
-
-### Policy Lookup
-
-- Service: `services/policy-api.ts`
-- Endpoint: `GET /getPolicy?IId=<databaseId>`
-- Context usage:
-  - `PoliciesProvider` loads live policies after auth hydration
-
-### Agent Lookup
-
-- Service: `services/agent-api.ts`
-- Endpoint: `GET /insuredAgents?insuredId=<databaseId>`
-- Screen usage:
-  - dashboard pulls the assigned agent for the current insured
-
-### CSLB Lookup
-
-- Service: `services/cslb-api.ts`
-- Endpoint: `GET /cslb/<insuredId>`
-- Hook usage:
-  - `useCompanyProfile()` loads and formats CSLB data
-
-### Policy Files Lookup
-
-- Service: `services/policy-files-api.ts`
+- Shared transport: `services/pbia-client.ts`
 - Endpoints:
-  - `GET /getPolicyFilesListByInsuredId?insuredId=<insuredId>`
-  - `GET /getPolicyFilesList?insuredId=<insuredId>&policyId=<policyId>&folderId=<folderId>`
-- Screen usage:
-  - policy detail screen previews policy-related entries
-  - policy files screen powers the breadcrumb-based browser
+  - `GET /client/account`
+  - `GET /client/account/by-business-email`
+  - `POST /client/signup`
+  - `GET /client/policies`
+  - `GET /client/agent`
+  - `GET /client/cslb`
+  - `POST /client/cslb/refresh`
+  - `GET /client/policies/:policyId/coverages`
+  - `GET /client/documents`
+  - `GET /client/policies/:policyId/documents`
+  - `POST /client/contact-requests`
+- Every request requires the current Supabase access token as `Authorization: Bearer <token>`. The shared transport rejects missing sessions and rejects a requested email that differs from the verified session email. It does not send `X-Client-Email` or `X-API-Key`.
+- Sign-in sends and verifies the Supabase OTP before account discovery. Signup details remain in memory until OTP verification succeeds, then `POST /client/signup` runs with the authenticated session before the singular primary-email account lookup.
+- Profile change, support, feedback, and COI requests use `POST /client/contact-requests`; the app no longer calls an SMTP relay directly.
+- PBIA document responses currently provide metadata but no download URL. The app lists the documents and marks download as unavailable rather than constructing a legacy URL.
+- Local Android emulator note: `localhost` API base URLs are translated to `10.0.2.2` at runtime so the emulator can reach services running on the Mac host.
+- Production build note: do not ship `localhost` API URLs. Use deployed HTTPS API base URLs in the EAS build environment.
+
+### PBIA Mobile Payments
+
+- Service: `services/payment-api.ts`
+- Endpoints:
+  - `GET /client/payment-eligibility`
+  - `GET /client/payment-eligibility/:demandId`
+  - `POST /client/payment-eligibility/:demandId/payments`
+- Context: `PaymentsProvider` loads visible agent-published demands for the selected `accountId`. PBIA omits drafts, hidden, processing, paid, and cancelled demands.
+- Every request includes the Supabase access token as `Authorization: Bearer <token>` and requires the supplied app email to match the session email. Demand reload and submission also include `X-Client-Account-Id`.
+- The payment form treats the server `amountDue` and `purpose` as read-only and submits them exactly as published by the agent. Card review requires `cardConvenienceFee` and `cardTotalAmount`; ACH review requires `achConvenienceFee` and `achTotalAmount`. The app displays the selected method's fee and total before confirmation, while still submitting only `amountDue` so Input1 does not apply its fee twice. PBIA currently supplies a percentage-based card preview and a fixed $3.00 ACH preview.
+- The configured base URL must use HTTPS outside local development. Loopback HTTP is allowed only for local Expo development; production must use the trusted HTTPS gateway URL.
+- For Expo web, PBIA must allow the exact app origin plus `GET`, `POST`, `Authorization`, `Content-Type`, `X-Client-Account-Id`, and `Idempotency-Key` in its CORS policy.
+- PBIA validates every bearer token with the same Supabase Auth project and derives the account-scoping email server-side.
+- Only a response with `status: "SUCCEEDED"` is treated as a confirmed payment. The success screen displays Input1's normalized actual `convenienceFee`, optional `addOnConvenienceFee`, and `totalCharged` when receipt details are immediately available.
+- A `502` is treated as an unconfirmed attempt and is never automatically retried.
+- Card and ACH fields remain local to the mounted payment screen, are never persisted, and are cleared after success, failure, or cancellation.
+- Native payment screens block screenshots and screen recordings with `expo-screen-capture`; iOS app-switcher previews are also protected.
+- Payment idempotency keys are generated with `expo-crypto` and contain no payment credentials.
+- Swagger: `${EXPO_PUBLIC_PBIA_API_BASE_URL}/docs`
 
 ## Supabase Responsibilities
 
@@ -78,8 +78,8 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
 
 - Schema file: `supabase/portal_customers.sql`
 - Table purpose:
-  - cache customer records returned by the customer lookup API
-  - rehydrate customer context after app restart without re-running the customer API immediately
+  - cache PBIA account records returned by `GET /client/account`
+  - rehydrate customer context after app restart if the PBIA API is temporarily unavailable
 - Important columns:
   - `database_id`
   - `login_email`
@@ -90,7 +90,7 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
   - `updated_at`
 - Policies:
   - authenticated users can read rows whose `login_email` matches the auth JWT email
-  - inserts and updates are allowed for pre-auth sync scenarios
+  - inserts and updates require an authenticated JWT whose email matches `login_email`
 
 ### Push Device Table
 

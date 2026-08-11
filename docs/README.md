@@ -10,6 +10,7 @@ This `docs/` folder is the project's documentation home. It is organized so a ne
 - [Testing and Validation](architecture/testing-and-validation.md): Jest setup, test folder strategy, coverage workflow, and maintenance expectations
 - [Repository Map](reference/repository-map.md): every tracked folder and file with its purpose and current role
 - [Push Notifications](handoffs/push-notifications.md): iPhone smoke-test setup and deferred notification roadmap
+- [Digital Business Card Handoff](handoffs/digital-business-card.md): implementation specification for the Expo card builder, public QR landing page, contact sharing, and wallet integrations
 
 ## Documentation Rules
 

@@ -5,10 +5,10 @@ import { AppButton } from '@/components/app-button';
 import { AppInput } from '@/components/app-input';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { useCslbMomentumSync } from '@/hooks/use-cslb-momentum-sync';
+import { useClientSignup } from '@/hooks/use-client-signup';
 
-export function CslbMomentumSignUpForm() {
-  const { setPendingEmail, setCustomer } = useAuth();
+export function ClientSignUpForm() {
+  const { setPendingEmail, setPendingSignup, setCustomer } = useAuth();
   const {
     form,
     identifierType,
@@ -22,7 +22,7 @@ export function CslbMomentumSignUpForm() {
     validateIdentifierField,
     validateField,
     submit,
-  } = useCslbMomentumSync();
+  } = useClientSignup();
 
   const identifierValue = identifierType === 'appFee' ? form.appFeeNumber : form.licenseNumber;
   const identifierError = errors.licenseNumber ?? errors.appFeeNumber;
@@ -32,7 +32,13 @@ export function CslbMomentumSignUpForm() {
     if (!result) return;
 
     setPendingEmail(result.email);
+    setPendingSignup(result.request);
     setCustomer(null);
+
+    if (result.otpDeliveryFailed) {
+      router.push({ pathname: '/(auth)/verify', params: { hint: 'otp-unavailable' } });
+      return;
+    }
 
     if (result.rateLimited) {
       router.push({ pathname: '/(auth)/verify', params: { hint: 'rate-limited' } });
@@ -45,6 +51,17 @@ export function CslbMomentumSignUpForm() {
   return (
     <View style={styles.root}>
       <Text style={styles.title}>Create Your Account</Text>
+
+      <AppInput
+        label="Business Name"
+        leftIcon="business-outline"
+        value={form.businessName}
+        onChangeText={(value) => updateField('businessName', value)}
+        onBlur={() => validateField('businessName')}
+        autoCapitalize="words"
+        placeholder="Business Legal Name"
+        errorText={errors.businessName}
+      />
 
       <AppInput
         label="First Name"
@@ -82,6 +99,75 @@ export function CslbMomentumSignUpForm() {
         placeholder="You@Company.com"
         errorText={errors.email}
       />
+
+      <AppInput
+        label="Phone (Optional)"
+        leftIcon="call-outline"
+        value={form.phone}
+        onChangeText={(value) => updateField('phone', value)}
+        onBlur={() => validateField('phone')}
+        keyboardType="phone-pad"
+        placeholder="(555) 555-0100"
+        errorText={errors.phone}
+      />
+
+      <AppInput
+        label="Street Address"
+        leftIcon="location-outline"
+        value={form.addressLine1}
+        onChangeText={(value) => updateField('addressLine1', value)}
+        onBlur={() => validateField('addressLine1')}
+        autoCapitalize="words"
+        placeholder="123 Main Street"
+        errorText={errors.addressLine1}
+      />
+
+      <AppInput
+        label="Address Line 2 (Optional)"
+        leftIcon="location-outline"
+        value={form.addressLine2}
+        onChangeText={(value) => updateField('addressLine2', value)}
+        autoCapitalize="words"
+        placeholder="Suite 100"
+      />
+
+      <AppInput
+        label="City"
+        leftIcon="location-outline"
+        value={form.city}
+        onChangeText={(value) => updateField('city', value)}
+        onBlur={() => validateField('city')}
+        autoCapitalize="words"
+        placeholder="Los Angeles"
+        errorText={errors.city}
+      />
+
+      <View style={styles.addressRow}>
+        <View style={styles.addressStateField}>
+          <AppInput
+            label="State"
+            value={form.state}
+            onChangeText={(value) => updateField('state', value)}
+            onBlur={() => validateField('state')}
+            autoCapitalize="characters"
+            maxLength={2}
+            placeholder="CA"
+            errorText={errors.state}
+          />
+        </View>
+        <View style={styles.addressZipField}>
+          <AppInput
+            label="ZIP Code"
+            value={form.zipCode}
+            onChangeText={(value) => updateField('zipCode', value)}
+            onBlur={() => validateField('zipCode')}
+            keyboardType="number-pad"
+            maxLength={10}
+            placeholder="90001"
+            errorText={errors.zipCode}
+          />
+        </View>
+      </View>
 
       <View style={styles.identifierToggleWrap}>
         <Text style={styles.identifierToggleLabel}>Identifier Type</Text>
@@ -148,7 +234,7 @@ export function CslbMomentumSignUpForm() {
 
       {uiState === 'error' && errorMessage ? (
         <View style={styles.errorCard}>
-          <Text style={styles.errorTitle}>Sync Failed</Text>
+          <Text style={styles.errorTitle}>Account Creation Failed</Text>
           <Text testID="sync-error-message" style={styles.errorBody}>
             {errorMessage}
           </Text>
@@ -161,6 +247,17 @@ export function CslbMomentumSignUpForm() {
 const styles = StyleSheet.create({
   root: {
     gap: theme.spacing.md,
+  },
+  addressRow: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+    alignItems: 'flex-start',
+  },
+  addressStateField: {
+    flex: 1,
+  },
+  addressZipField: {
+    flex: 2,
   },
   identifierToggleWrap: {
     gap: theme.spacing.xs,

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Pro-Builders Insurance Agency",
     "slug": "insureprobuilders",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/pbialogo.png",
     "scheme": "insureprobuilders",
@@ -24,7 +24,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.johncontractorsischool.insureprobuilders"
+      "package": "com.insureprobuilders.app"
     },
     "web": {
       "output": "single",
@@ -33,6 +33,18 @@
     "plugins": [
       "expo-router",
       "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Insure Probuilders to use a profile photo or company logo on your digital business card."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow Insure Probuilders to open a prefilled contact form from a digital business card."
+        }
+      ],
       [
         "expo-splash-screen",
         {

@@ -1,12 +1,7 @@
 import { PolicyFileEntry } from '@/types/policy-file';
 
 export function hasVisiblePolicyDocumentName(name: string | null | undefined) {
-  const normalized = name?.trim();
-  if (!normalized) return false;
-
-  const extensionIndex = normalized.lastIndexOf('.');
-  const baseName = extensionIndex > 0 ? normalized.slice(0, extensionIndex) : normalized;
-  return baseName.endsWith('...');
+  return Boolean(name?.trim());
 }
 
 export function matchesSelectedPolicyFile(

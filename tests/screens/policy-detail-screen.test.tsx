@@ -12,7 +12,7 @@ const mockRouter = {
 const mockUseLocalSearchParams = jest.fn(() => ({}));
 const mockUseAuth = jest.fn();
 const mockUsePolicies = jest.fn();
-const mockFetchPolicyCoveragesByPolicyId = jest.fn();
+const mockFetchPolicyCoverages = jest.fn();
 const mockUseIsDesktopWebLayout = jest.fn(() => false);
 
 jest.mock('expo-router', () => ({
@@ -27,7 +27,7 @@ jest.mock('@/context/policies-context', () => ({
   usePolicies: () => mockUsePolicies(),
 }));
 jest.mock('@/services/policy-coverages-api', () => ({
-  fetchPolicyCoveragesByPolicyId: (...args: unknown[]) => mockFetchPolicyCoveragesByPolicyId(...args),
+  fetchPolicyCoverages: (...args: unknown[]) => mockFetchPolicyCoverages(...args),
 }));
 jest.mock('@/components/web-auth-shell', () => ({
   useIsDesktopWebLayout: () => mockUseIsDesktopWebLayout(),
@@ -40,7 +40,8 @@ describe('PolicyDetailScreen', () => {
     mockUseLocalSearchParams.mockReturnValue({ id: 'policy-1' });
     mockUseAuth.mockReturnValue({
       isAuthenticated: true,
-      customer: buildCustomer({ databaseId: 'insured-db-1' }),
+      userEmail: 'jane@example.com',
+      customer: buildCustomer({ accountId: 'account-1' }),
     });
     mockUsePolicies.mockReturnValue({
       policies: [
@@ -58,7 +59,7 @@ describe('PolicyDetailScreen', () => {
   });
 
   it('renders coverage details and a browse policy files action without inline documents or billing', async () => {
-    mockFetchPolicyCoveragesByPolicyId.mockResolvedValue([
+    mockFetchPolicyCoverages.mockResolvedValue([
       {
         id: 'coverage-1',
         title: "Worker's Compensation",
@@ -71,7 +72,13 @@ describe('PolicyDetailScreen', () => {
 
     const { findByText, getByText, queryByText } = render(<PolicyDetailScreen />);
 
-    await waitFor(() => expect(mockFetchPolicyCoveragesByPolicyId).toHaveBeenCalledWith('policy-1'));
+    await waitFor(() =>
+      expect(mockFetchPolicyCoverages).toHaveBeenCalledWith(
+        'jane@example.com',
+        'account-1',
+        'policy-1'
+      )
+    );
 
     expect(await findByText('Each Accident Limit')).toBeTruthy();
     expect(getByText('Browse Policy Files')).toBeTruthy();
@@ -85,7 +92,7 @@ describe('PolicyDetailScreen', () => {
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/policy-files',
       params: {
-        insuredId: 'insured-db-1',
+        accountId: 'account-1',
         policyId: 'policy-1',
         policyNumber: 'WC-1001',
       },
