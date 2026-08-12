@@ -1,9 +1,10 @@
 import { Stack } from 'expo-router';
-import { useEffect } from 'react';
+import { PropsWithChildren, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
 import { PushNotificationRegistration } from '@/components/push-notification-registration';
+import { DIGITAL_BUSINESS_CARD_ENABLED } from '@/constants/feature-flags';
 import { theme } from '@/constants/theme';
 import { AuthProvider } from '@/context/auth-context';
 import { DigitalCardProvider } from '@/context/digital-card-context';
@@ -14,6 +15,11 @@ import {
   installPbiaGlobalErrorDiagnostics,
 } from '@/services/pbia-webview-diagnostics';
 import { configureForegroundNotificationHandling } from '@/services/push-notifications';
+
+function DigitalCardFeatureProvider({ children }: PropsWithChildren) {
+  if (!DIGITAL_BUSINESS_CARD_ENABLED) return children;
+  return <DigitalCardProvider>{children}</DigitalCardProvider>;
+}
 
 export default function RootLayout() {
   useEffect(() => {
@@ -26,7 +32,7 @@ export default function RootLayout() {
     <AuthProvider>
       <PushNotificationRegistration />
       <PaymentsProvider>
-        <DigitalCardProvider>
+        <DigitalCardFeatureProvider>
           <PoliciesProvider>
             <StatusBar style="dark" />
             <Stack
@@ -109,7 +115,7 @@ export default function RootLayout() {
               />
             </Stack>
           </PoliciesProvider>
-        </DigitalCardProvider>
+        </DigitalCardFeatureProvider>
       </PaymentsProvider>
     </AuthProvider>
   );

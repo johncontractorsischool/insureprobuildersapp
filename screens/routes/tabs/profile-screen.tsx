@@ -9,6 +9,7 @@ import { ContactUsMenu } from '@/components/contact-us-menu';
 import { DigitalCardEntryPanel } from '@/components/digital-card/digital-card-entry-panel';
 import { PushNotificationTestCard } from '@/components/push-notification-test-card';
 import { ScreenContainer } from '@/components/screen-container';
+import { DIGITAL_BUSINESS_CARD_ENABLED } from '@/constants/feature-flags';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { createClientContactRequest } from '@/services/contact-request-api';
@@ -389,7 +390,7 @@ export default function ProfileScreen({
         <View style={styles.desktopLayout}>
           <View style={styles.desktopMainColumn}>
             {accountCard}
-            <DigitalCardEntryPanel isDesktopLayout />
+            {DIGITAL_BUSINESS_CARD_ENABLED ? <DigitalCardEntryPanel isDesktopLayout /> : null}
             <PushNotificationTestCard isDesktopLayout />
           </View>
           <View style={styles.desktopSideColumn}>{supportBlock}</View>
@@ -397,7 +398,7 @@ export default function ProfileScreen({
       ) : (
         <>
           {accountCard}
-          <DigitalCardEntryPanel />
+          {DIGITAL_BUSINESS_CARD_ENABLED ? <DigitalCardEntryPanel /> : null}
           <PushNotificationTestCard />
           {supportBlock}
         </>

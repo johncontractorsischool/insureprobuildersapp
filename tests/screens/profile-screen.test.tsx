@@ -76,4 +76,10 @@ describe('ProfileScreen', () => {
     );
     expect(await findByText('Your profile update request was submitted to PBIA.')).toBeTruthy();
   });
+
+  it('hides the digital business card while the feature is disabled', () => {
+    const { queryByText } = render(<ProfileScreen />);
+
+    expect(queryByText('Digital business card')).toBeNull();
+  });
 });
