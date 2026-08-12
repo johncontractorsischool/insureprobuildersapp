@@ -4,13 +4,14 @@ import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-na
 import { Ionicons } from '@expo/vector-icons';
 
 import { AppButton } from '@/components/app-button';
+import { AppInput } from '@/components/app-input';
 import { BrandMark } from '@/components/brand-mark';
 import { OTPInput } from '@/components/otp-input';
 import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { createClientSignup } from '@/services/client-signup-api';
-import { fetchAccountByBusinessEmail } from '@/services/customer-api';
+import { fetchCustomersByEmail } from '@/services/customer-api';
 import {
   isOtpRateLimitError,
   persistCustomersForEmail,
@@ -19,6 +20,8 @@ import {
   toUserFacingError,
   verifyEmailSignInCode,
 } from '@/services/auth-flow';
+import type { CustomerLookupRecord } from '@/types/customer';
+import { matchesCustomerInsuredId } from '@/utils/customer-selection';
 
 function maskEmail(email: string) {
   const [name, domain] = email.split('@');
@@ -37,6 +40,7 @@ export default function VerifyScreen() {
     pendingSignup,
     clearPendingSignup,
     completeSignIn,
+    signOut,
   } = useAuth();
   const { width } = useWindowDimensions();
   const [code, setCode] = useState('');
@@ -44,9 +48,13 @@ export default function VerifyScreen() {
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [verifiedEmail, setVerifiedEmail] = useState('');
+  const [candidateCustomers, setCandidateCustomers] = useState<CustomerLookupRecord[]>([]);
+  const [licenseNumber, setLicenseNumber] = useState('');
   const isDesktop = width >= 1100;
   const isTablet = width >= 760;
   const maxContentWidth = isDesktop ? 1240 : isTablet ? 820 : undefined;
+  const requiresLicenseNumber = Boolean(verifiedEmail) && candidateCustomers.length > 1;
 
   useEffect(() => {
     if (!pendingEmail) router.replace('/(auth)/login');
@@ -72,7 +80,44 @@ export default function VerifyScreen() {
 
   const maskedEmail = useMemo(() => maskEmail(pendingEmail), [pendingEmail]);
 
+  const completeCustomerSelection = (email: string, selectedCustomer: CustomerLookupRecord) => {
+    const customerProfile = toCustomerProfile(selectedCustomer);
+    completeSignIn(
+      email,
+      customerProfile,
+      customerProfile.insuredId ?? customerProfile.licenseNumber ?? pendingInsuredId
+    );
+    router.replace('/(tabs)');
+  };
+
   const handleContinue = async () => {
+    if (requiresLicenseNumber) {
+      const matchingCustomers = candidateCustomers.filter((customer) =>
+        matchesCustomerInsuredId(
+          customer.licenseNumber ?? customer.insuredId,
+          licenseNumber
+        )
+      );
+
+      if (!licenseNumber.trim()) {
+        setError('Enter the license number for the account you want to open.');
+        return;
+      }
+
+      if (matchingCustomers.length === 0) {
+        setError('That license number is not associated with this verified email address.');
+        return;
+      }
+
+      if (matchingCustomers.length > 1) {
+        setError('More than one account uses that license number. Please contact PBIA for assistance.');
+        return;
+      }
+
+      completeCustomerSelection(verifiedEmail, matchingCustomers[0]);
+      return;
+    }
+
     const normalizedCode = code.replace(/\D/g, '');
 
     if (normalizedCode.length !== 6 || !pendingEmail) return;
@@ -94,30 +139,37 @@ export default function VerifyScreen() {
         clearPendingSignup();
       }
 
-      const primaryCustomer = await fetchAccountByBusinessEmail(normalizedVerifiedEmail);
-      if (!primaryCustomer) {
+      const customers = await fetchCustomersByEmail(normalizedVerifiedEmail);
+      if (customers.length === 0) {
         throw new Error('No PBIA account was found for that verified email address.');
       }
 
-      const customerProfile = toCustomerProfile(primaryCustomer);
       try {
-        await persistCustomersForEmail(normalizedVerifiedEmail, [primaryCustomer]);
+        await persistCustomersForEmail(normalizedVerifiedEmail, customers);
       } catch (persistError) {
         // Keep the fresh customer profile in memory even if the optional cache write is blocked.
         console.warn('Customer cache sync failed after successful OTP verification.', persistError);
       }
 
-      completeSignIn(
-        normalizedVerifiedEmail,
-        customerProfile,
-        customerProfile.insuredId ?? pendingInsuredId
-      );
-      router.replace('/(tabs)');
+      if (customers.length > 1) {
+        setVerifiedEmail(normalizedVerifiedEmail);
+        setCandidateCustomers(customers);
+        setCode('');
+        setNotice('Your email is verified. Enter a license number to choose the account to open.');
+        return;
+      }
+
+      completeCustomerSelection(normalizedVerifiedEmail, customers[0]);
     } catch (caughtError) {
       setError(toUserFacingError(caughtError, 'Unable to verify code. Please try again.'));
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleChangeEmail = async () => {
+    await signOut();
+    router.replace('/(auth)/login');
   };
 
   const handleResend = async () => {
@@ -149,37 +201,75 @@ export default function VerifyScreen() {
             </View>
 
             <View style={[styles.card, isDesktop ? styles.cardDesktop : null]}>
-              <Text style={styles.title}>Enter Verification Code</Text>
+              <Text style={styles.title}>
+                {requiresLicenseNumber ? 'Choose Your Account' : 'Enter Verification Code'}
+              </Text>
               <Text style={styles.subtitle}>
-                We sent a 6-digit code to {maskedEmail || 'your email address'}.
+                {requiresLicenseNumber
+                  ? 'We found multiple PBIA accounts for this verified email. Enter the license number for the account you want to open.'
+                  : `We sent a 6-digit code to ${maskedEmail || 'your email address'}.`}
               </Text>
 
-              <OTPInput value={code} onChange={setCode} />
+              {requiresLicenseNumber ? (
+                <AppInput
+                  label="License Number"
+                  leftIcon="document-text-outline"
+                  value={licenseNumber}
+                  onChangeText={(value) => {
+                    setLicenseNumber(value);
+                    setError('');
+                  }}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  autoFocus
+                  placeholder="CSLB License Number"
+                  returnKeyType="done"
+                  onSubmitEditing={() => void handleContinue()}
+                  errorText={error || undefined}
+                  helperText="This selects the specific account associated with your verified email."
+                />
+              ) : (
+                <OTPInput value={code} onChange={setCode} />
+              )}
 
-              <View style={styles.actions}>
-                <Pressable
-                  onPress={handleResend}
-                  disabled={secondsRemaining > 0}
-                  style={styles.inlineAction}>
-                  <Text style={[styles.link, secondsRemaining > 0 ? styles.linkDisabled : null]}>
-                    {secondsRemaining > 0 ? `Resend in ${secondsRemaining}s` : 'Resend Code'}
-                  </Text>
+              {requiresLicenseNumber ? (
+                <Pressable onPress={() => void handleChangeEmail()} style={styles.inlineAction}>
+                  <Text style={styles.link}>Use a Different Email</Text>
                 </Pressable>
-                <Pressable onPress={() => router.replace('/(auth)/login')} style={styles.inlineAction}>
-                  <Text style={styles.link}>Change Email</Text>
-                </Pressable>
-              </View>
+              ) : (
+                <View style={styles.actions}>
+                  <Pressable
+                    onPress={handleResend}
+                    disabled={secondsRemaining > 0}
+                    style={styles.inlineAction}>
+                    <Text style={[styles.link, secondsRemaining > 0 ? styles.linkDisabled : null]}>
+                      {secondsRemaining > 0 ? `Resend in ${secondsRemaining}s` : 'Resend Code'}
+                    </Text>
+                  </Pressable>
+                  <Pressable onPress={() => void handleChangeEmail()} style={styles.inlineAction}>
+                    <Text style={styles.link}>Change Email</Text>
+                  </Pressable>
+                </View>
+              )}
 
               <AppButton
-                label="Verify and Continue"
+                label={requiresLicenseNumber ? 'Open Account' : 'Verify and Continue'}
                 onPress={handleContinue}
                 loading={submitting}
-                disabled={code.replace(/\D/g, '').length !== 6}
+                disabled={
+                  requiresLicenseNumber
+                    ? licenseNumber.trim().length === 0
+                    : code.replace(/\D/g, '').length !== 6
+                }
               />
 
               {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
-              {error ? <Text style={styles.errorText}>{error}</Text> : null}
-              <Text style={styles.disclaimer}>Use the code sent to your email to complete secure sign in.</Text>
+              {!requiresLicenseNumber && error ? <Text style={styles.errorText}>{error}</Text> : null}
+              <Text style={styles.disclaimer}>
+                {requiresLicenseNumber
+                  ? 'Your license number is used only to select an account already connected to your verified email.'
+                  : 'Use the code sent to your email to complete secure sign in.'}
+              </Text>
             </View>
           </View>
 
