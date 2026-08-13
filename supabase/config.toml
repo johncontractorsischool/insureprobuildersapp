@@ -1,0 +1,4 @@
+project_id = "uuiqbkhqpaexsevanaot"
+
+[functions.send-customer-push]
+verify_jwt = false
