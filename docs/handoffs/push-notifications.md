@@ -36,6 +36,8 @@ Each row records the authenticated user ID and login email, Expo project and tok
 
 Registration is idempotent: later app launches refresh the same row's device metadata and `last_seen_at` timestamp. Permission denial and save failures do not block sign-in or crash the app. During development, successful registration also displays `Saved to Supabase for this signed-in customer.` on the Push Test card. Sending notifications from Supabase is intentionally deferred.
 
+The next implementation phase is specified in the [PBIA custom push notification handoff](../reference/pbia-custom-push-notification-handoff.md). It connects the PBIA Admin account screen to a secured NestJS endpoint and Supabase Edge Function without exposing privileged keys or device tokens to the browser.
+
 ### APNs Credential Setup
 
 The native code and app configuration are stored in this repository, but APNs credentials live in the Expo/Apple accounts and cannot be committed. Before building:
@@ -49,7 +51,7 @@ The native code and app configuration are stored in this repository, but APNs cr
 Once the basic delivery test is reliable, revisit:
 
 - Android and FCM support.
-- Secured Supabase Edge Function sending.
+- Automated or bulk sending beyond the secured one-customer Edge Function handoff.
 - An in-app notification inbox and unread badge.
 - Renewal reminders 60, 30, and 7 days before expiration.
 - Staff-triggered service updates.
