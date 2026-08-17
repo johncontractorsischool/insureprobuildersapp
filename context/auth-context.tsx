@@ -2,7 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ClientSignupRequest } from '@/services/client-signup-api';
-import { fetchCustomersByEmail } from '@/services/customer-api';
+import { resolveMyAccount, resolveMyAccountByLicense } from '@/services/customer-api';
+import { PbiaApiError } from '@/services/pbia-client';
 import { getSupabaseClient } from '@/services/supabase';
 import type { Customer, CustomerLookupRecord } from '@/types/customer';
 import { matchesCustomerInsuredId } from '@/utils/customer-selection';
@@ -196,6 +197,49 @@ function pickBestPortalCustomer(rows: PortalCustomerRow[], preferredInsuredId?: 
   return rows.length === 1 ? rows[0] : null;
 }
 
+type LiveCustomerResolution = {
+  customer: CustomerLookupRecord | null;
+  selectedInsuredId: string;
+  invalidStoredSelection: boolean;
+};
+
+async function resolveLiveCustomerForRestore(
+  email: string,
+  preferredInsuredId?: string | null
+): Promise<LiveCustomerResolution> {
+  const resolution = await resolveMyAccount(email);
+
+  if (resolution.status === 'ACCOUNT_RESOLVED') {
+    return {
+      customer: resolution.account,
+      selectedInsuredId: resolution.account.insuredId?.trim() ?? '',
+      invalidStoredSelection: false,
+    };
+  }
+
+  if (resolution.status !== 'LICENSE_REQUIRED' || !preferredInsuredId?.trim()) {
+    return { customer: null, selectedInsuredId: '', invalidStoredSelection: false };
+  }
+
+  try {
+    const selectedResolution = await resolveMyAccountByLicense(email, preferredInsuredId);
+    return {
+      customer: selectedResolution.account,
+      selectedInsuredId:
+        preferredInsuredId.trim() || selectedResolution.account.insuredId?.trim() || '',
+      invalidStoredSelection: false,
+    };
+  } catch (selectionError) {
+    if (
+      selectionError instanceof PbiaApiError &&
+      [400, 404, 409].includes(selectionError.status)
+    ) {
+      return { customer: null, selectedInsuredId: '', invalidStoredSelection: true };
+    }
+    throw selectionError;
+  }
+}
+
 export function AuthProvider({ children }: PropsWithChildren) {
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -214,31 +258,37 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const normalizedEmail = normalizeEmail(email);
 
         try {
-          const customers = await withTimeout(
-            fetchCustomersByEmail(normalizedEmail),
+          const liveResolution = await withTimeout(
+            resolveLiveCustomerForRestore(normalizedEmail, preferredInsuredId),
             LIVE_CUSTOMER_RESTORE_TIMEOUT_MS
           );
           if (!mounted) return;
 
-          const nextCustomer =
-            customers.find((candidate) =>
-              matchesCustomerInsuredId(candidate.insuredId, preferredInsuredId)
-            ) ?? (customers.length === 1 ? customers[0] : null);
-
-          if (nextCustomer) {
-            setCustomerState(mapCustomerLookupToProfile(nextCustomer));
-            const nextInsuredId = nextCustomer.insuredId?.trim() ?? '';
-            setPendingInsuredIdState(nextInsuredId);
-            void persistSelectedCustomer(normalizedEmail, nextInsuredId);
+          if (liveResolution.invalidStoredSelection) {
+            setCustomerState(null);
+            setPendingInsuredIdState('');
+            void persistSelectedCustomer(normalizedEmail, null);
             return;
           }
 
-          // Never choose an arbitrary account when one email owns multiple records.
-          // The verified user must identify the intended account by license number.
+          if (liveResolution.customer) {
+            setCustomerState(mapCustomerLookupToProfile(liveResolution.customer));
+            setPendingInsuredIdState(liveResolution.selectedInsuredId);
+            void persistSelectedCustomer(normalizedEmail, liveResolution.selectedInsuredId);
+            return;
+          }
+
+          // Never choose an account when signup is allowed or the verified email
+          // has multiple records without a previously selected CSLB identifier.
           setCustomerState(null);
           setPendingInsuredIdState('');
           return;
-        } catch {
+        } catch (liveLookupError) {
+          if (liveLookupError instanceof PbiaApiError && liveLookupError.status === 401) {
+            setCustomerState(null);
+            setPendingInsuredIdState('');
+            return;
+          }
           // Fall back to cached customer data when live lookup is unavailable.
         }
 

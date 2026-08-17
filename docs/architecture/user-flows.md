@@ -5,8 +5,10 @@
 1. `app/_layout.tsx` mounts and installs PBIA global error diagnostics.
 2. `AuthProvider` calls `supabase.auth.getSession()`.
 3. If a Supabase session exists, the provider stores the session email as both `userEmail` and `pendingEmail`.
-4. `AuthProvider` loads the singular primary business-email account from `GET /client/account/by-business-email`; the cached `portal_customers` table is only a fallback when PBIA is temporarily unavailable.
-5. `PoliciesProvider` waits on auth state and, once a PBIA `accountId` exists, requests live policies.
+4. `AuthProvider` calls `GET /client/my-account/resolve` with the authenticated bearer token.
+5. `ACCOUNT_RESOLVED` restores the returned safe account directly. For `LICENSE_REQUIRED`, a previously stored CSLB selector is revalidated through `POST /client/my-account/resolve`; the app never chooses an arbitrary candidate.
+6. The cached `portal_customers` table is only a fallback when PBIA is temporarily unavailable. A successful resolver response that requires signup or a new selection does not fall back to a stale cached account.
+7. `PoliciesProvider` waits on auth state and, once a PBIA `accountId` exists, requests live policies.
 
 ## 2. Landing Screen to Auth Flow
 
@@ -34,14 +36,13 @@
 1. `app/(auth)/verify.tsx` requires `pendingEmail`; otherwise it redirects back to login.
 2. The user enters a six-digit code via `OTPInput`.
 3. `verifyEmailSignInCode(pendingEmail, code)` verifies the code with Supabase.
-4. For signup, the screen verifies that the pending form email equals the verified email, then calls authenticated `POST /client/signup`. Signup data is never sent to PBIA before OTP verification and is not persisted locally.
-5. The screen loads the singular primary business-email account by calling authenticated `fetchAccountByBusinessEmail(verifiedEmail)`.
-6. If the account is returned:
-   - it is persisted into Supabase with `persistCustomersForEmail`
-   - it is converted with `toCustomerProfile`
-7. `completeSignIn(email, customerProfile)` updates auth context.
-8. The user is redirected to `/(tabs)`.
-9. A missing or failed PBIA account lookup blocks entry and remains retryable; failure of only the optional Supabase customer-cache write does not block entry.
+4. The screen calls authenticated `GET /client/my-account/resolve`; the backend derives the email from the verified Supabase token.
+5. For signup, the pending form email must equal the verified email. The app calls `POST /client/signup` only for `SIGNUP_ALLOWED`, then resolves again after creation. Signup data is never sent before OTP verification and is not persisted locally.
+6. `ACCOUNT_RESOLVED` returns one safe account without asking for a license.
+7. `LICENSE_REQUIRED` replaces the OTP input with a CSLB license input. The app sends the selector to `POST /client/my-account/resolve`; it does not download candidate accounts or compare licenses locally.
+8. The resolved account is optionally cached through `persistCustomersForEmail`, converted with `toCustomerProfile`, and committed through `completeSignIn`.
+9. The selected CSLB identifier is stored locally so an existing Supabase session can revalidate the same account on a later launch without prompting again.
+10. The user is redirected to `/(tabs)`. A resolver failure blocks entry and remains retryable; failure of only the optional Supabase customer-cache write does not block entry.
 
 ## 5. Dashboard Hydration Flow
 
@@ -133,5 +134,5 @@
 - Missing `customer.accountId` blocks PBIA policy, agent, CSLB, coverage, document, and contact-request calls and surfaces a user-facing error.
 - Agent lookup failure does not break the dashboard; it falls back to env-configured agent info.
 - A rejected/expired PBIA bearer token requires Supabase session refresh or a new sign-in; the app never falls back to a caller-supplied email header or static review code.
-- PBIA account lookup failure after OTP success blocks protected data access. Only failure of the optional Supabase customer-cache write is tolerated.
+- PBIA account-resolution failure after OTP success blocks protected data access. Only failure of the optional Supabase customer-cache write is tolerated.
 - PBIA WebView failures never throw into the UI intentionally; they log diagnostics and show retryable fallback UI instead.

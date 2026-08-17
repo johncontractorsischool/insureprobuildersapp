@@ -1,4 +1,9 @@
-import { fetchAccountByBusinessEmail, fetchCustomersByEmail } from '@/services/customer-api';
+import {
+  fetchAccountByBusinessEmail,
+  fetchCustomersByEmail,
+  resolveMyAccount,
+  resolveMyAccountByLicense,
+} from '@/services/customer-api';
 
 jest.mock('@/services/supabase', () => ({
   getSupabaseClient: () => ({
@@ -71,6 +76,124 @@ describe('PBIA customer api', () => {
         licenseNumber: '1144038',
         insuredId: '1144038',
       })
+    );
+  });
+
+  it('resolves a single MyAccount without downloading an account list', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'ACCOUNT_RESOLVED',
+        matchCount: 1,
+        account: {
+          id: 'account-1',
+          legalName: 'Builder Co',
+          dba: null,
+          email: 'jane@example.com',
+          phone: '5551112222',
+          licenseNumber: '1144038',
+          status: 'ACTIVE',
+          entityType: 'LLC',
+          agentId: 'agent-1',
+          agent: null,
+          policyCount: 2,
+        },
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const resolution = await resolveMyAccount(' Jane@Example.com ');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3500/client/my-account/resolve',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ Authorization: 'Bearer supabase-token' }),
+      })
+    );
+    expect(resolution).toEqual({
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: 1,
+      account: expect.objectContaining({
+        accountId: 'account-1',
+        databaseId: 'account-1',
+        insuredId: '1144038',
+      }),
+    });
+  });
+
+  it.each([
+    [{ status: 'SIGNUP_ALLOWED', matchCount: 0 }, { status: 'SIGNUP_ALLOWED', matchCount: 0 }],
+    [{ status: 'LICENSE_REQUIRED', matchCount: 3 }, { status: 'LICENSE_REQUIRED', matchCount: 3 }],
+  ])('preserves the non-account MyAccount resolution state', async (payload, expected) => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => payload,
+    }) as unknown as typeof fetch;
+
+    await expect(resolveMyAccount('jane@example.com')).resolves.toEqual(expected);
+  });
+
+  it('submits the license to the server and maps only the resolved account', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'ACCOUNT_RESOLVED',
+        matchCount: 3,
+        account: {
+          id: 'account-2',
+          legalName: 'Selected Builder Co',
+          dba: null,
+          email: 'jane@example.com',
+          phone: null,
+          licenseNumber: '1144038',
+          status: 'ACTIVE',
+          entityType: 'LLC',
+          agentId: null,
+          agent: null,
+          policyCount: 1,
+        },
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const resolution = await resolveMyAccountByLicense(
+      'jane@example.com',
+      '  1144038  '
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3500/client/my-account/resolve',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ licenseNumber: '1144038' }),
+        headers: expect.objectContaining({
+          Authorization: 'Bearer supabase-token',
+          'Content-Type': 'application/json',
+        }),
+      })
+    );
+    expect(resolution).toEqual(
+      expect.objectContaining({
+        status: 'ACCOUNT_RESOLVED',
+        matchCount: 3,
+        account: expect.objectContaining({ accountId: 'account-2', insuredId: '1144038' }),
+      })
+    );
+  });
+
+  it('rejects malformed resolver payloads instead of making an auth decision', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: 'LICENSE_REQUIRED', matchCount: 1 }),
+    }) as unknown as typeof fetch;
+
+    await expect(resolveMyAccount('jane@example.com')).rejects.toThrow(
+      'Unexpected PBIA account resolution response format.'
     );
   });
 

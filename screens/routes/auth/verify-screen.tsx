@@ -11,7 +11,7 @@ import { ScreenContainer } from '@/components/screen-container';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { createClientSignup } from '@/services/client-signup-api';
-import { fetchCustomersByEmail } from '@/services/customer-api';
+import { resolveMyAccount, resolveMyAccountByLicense } from '@/services/customer-api';
 import {
   isOtpRateLimitError,
   persistCustomersForEmail,
@@ -20,8 +20,8 @@ import {
   toUserFacingError,
   verifyEmailSignInCode,
 } from '@/services/auth-flow';
+import { PbiaApiError } from '@/services/pbia-client';
 import type { CustomerLookupRecord } from '@/types/customer';
-import { matchesCustomerInsuredId } from '@/utils/customer-selection';
 
 function maskEmail(email: string) {
   const [name, domain] = email.split('@');
@@ -49,12 +49,11 @@ export default function VerifyScreen() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [verifiedEmail, setVerifiedEmail] = useState('');
-  const [candidateCustomers, setCandidateCustomers] = useState<CustomerLookupRecord[]>([]);
   const [licenseNumber, setLicenseNumber] = useState('');
   const isDesktop = width >= 1100;
   const isTablet = width >= 760;
   const maxContentWidth = isDesktop ? 1240 : isTablet ? 820 : undefined;
-  const requiresLicenseNumber = Boolean(verifiedEmail) && candidateCustomers.length > 1;
+  const requiresLicenseNumber = Boolean(verifiedEmail);
 
   useEffect(() => {
     if (!pendingEmail) router.replace('/(auth)/login');
@@ -80,41 +79,64 @@ export default function VerifyScreen() {
 
   const maskedEmail = useMemo(() => maskEmail(pendingEmail), [pendingEmail]);
 
-  const completeCustomerSelection = (email: string, selectedCustomer: CustomerLookupRecord) => {
+  const completeCustomerSelection = (
+    email: string,
+    selectedCustomer: CustomerLookupRecord,
+    selectedLicenseNumber?: string
+  ) => {
     const customerProfile = toCustomerProfile(selectedCustomer);
     completeSignIn(
       email,
       customerProfile,
-      customerProfile.insuredId ?? customerProfile.licenseNumber ?? pendingInsuredId
+      selectedLicenseNumber?.trim() ||
+        customerProfile.insuredId ||
+        customerProfile.licenseNumber ||
+        pendingInsuredId
     );
     router.replace('/(tabs)');
   };
 
+  const cacheResolvedCustomer = async (email: string, customer: CustomerLookupRecord) => {
+    try {
+      await persistCustomersForEmail(email, [customer]);
+    } catch (persistError) {
+      // Keep the fresh customer profile in memory even if the optional cache write is blocked.
+      console.warn('Customer cache sync failed after successful OTP verification.', persistError);
+    }
+  };
+
   const handleContinue = async () => {
     if (requiresLicenseNumber) {
-      const matchingCustomers = candidateCustomers.filter((customer) =>
-        matchesCustomerInsuredId(
-          customer.licenseNumber ?? customer.insuredId,
-          licenseNumber
-        )
-      );
-
       if (!licenseNumber.trim()) {
         setError('Enter the license number for the account you want to open.');
         return;
       }
 
-      if (matchingCustomers.length === 0) {
-        setError('That license number is not associated with this verified email address.');
-        return;
-      }
+      if (submitting) return;
+      setSubmitting(true);
+      setError('');
 
-      if (matchingCustomers.length > 1) {
-        setError('More than one account uses that license number. Please contact PBIA for assistance.');
-        return;
+      try {
+        const resolution = await resolveMyAccountByLicense(
+          verifiedEmail,
+          licenseNumber
+        );
+        await cacheResolvedCustomer(verifiedEmail, resolution.account);
+        completeCustomerSelection(verifiedEmail, resolution.account, licenseNumber);
+      } catch (caughtError) {
+        if (caughtError instanceof PbiaApiError && caughtError.status === 404) {
+          setError('That license number is not associated with this verified email address.');
+        } else {
+          setError(
+            toUserFacingError(
+              caughtError,
+              'Unable to select that account. Please try again.'
+            )
+          );
+        }
+      } finally {
+        setSubmitting(false);
       }
-
-      completeCustomerSelection(verifiedEmail, matchingCustomers[0]);
       return;
     }
 
@@ -135,31 +157,37 @@ export default function VerifyScreen() {
         if (pendingSignup.email.trim().toLowerCase() !== normalizedVerifiedEmail) {
           throw new Error('The verified email does not match the account signup email.');
         }
+      }
+
+      let resolution = await resolveMyAccount(normalizedVerifiedEmail);
+
+      if (pendingSignup && resolution.status === 'SIGNUP_ALLOWED') {
         await createClientSignup(pendingSignup);
+        clearPendingSignup();
+        resolution = await resolveMyAccount(normalizedVerifiedEmail);
+        if (resolution.status === 'SIGNUP_ALLOWED') {
+          throw new Error(
+            'Your signup was received, but your account is still syncing. Please try signing in again shortly.'
+          );
+        }
+      } else if (pendingSignup) {
+        // An existing eligible account always wins over creating a duplicate signup.
         clearPendingSignup();
       }
 
-      const customers = await fetchCustomersByEmail(normalizedVerifiedEmail);
-      if (customers.length === 0) {
+      if (resolution.status === 'SIGNUP_ALLOWED') {
         throw new Error('No PBIA account was found for that verified email address.');
       }
 
-      try {
-        await persistCustomersForEmail(normalizedVerifiedEmail, customers);
-      } catch (persistError) {
-        // Keep the fresh customer profile in memory even if the optional cache write is blocked.
-        console.warn('Customer cache sync failed after successful OTP verification.', persistError);
-      }
-
-      if (customers.length > 1) {
+      if (resolution.status === 'LICENSE_REQUIRED') {
         setVerifiedEmail(normalizedVerifiedEmail);
-        setCandidateCustomers(customers);
         setCode('');
         setNotice('Your email is verified. Enter a license number to choose the account to open.');
         return;
       }
 
-      completeCustomerSelection(normalizedVerifiedEmail, customers[0]);
+      await cacheResolvedCustomer(normalizedVerifiedEmail, resolution.account);
+      completeCustomerSelection(normalizedVerifiedEmail, resolution.account);
     } catch (caughtError) {
       setError(toUserFacingError(caughtError, 'Unable to verify code. Please try again.'));
     } finally {
@@ -222,6 +250,7 @@ export default function VerifyScreen() {
                   autoCapitalize="characters"
                   autoCorrect={false}
                   autoFocus
+                  maxLength={64}
                   placeholder="CSLB License Number"
                   returnKeyType="done"
                   onSubmitEditing={() => void handleContinue()}

@@ -171,7 +171,7 @@ This file explains every tracked folder and file in the repo and calls out wheth
 - `services/client-signup-api.ts`: PBIA `POST /client/signup` client.
 - `services/contact-request-api.ts`: PBIA contact/service request client used by support, COI, and profile-update flows.
 - `services/cslb-api.ts`: PBIA client CSLB lookup/refresh client plus CSLB URL builder.
-- `services/customer-api.ts`: PBIA account clients for the broad email-scoped `GET /client/account` list and the primary-business-email-only `GET /client/account/by-business-email` sign-in lookup.
+- `services/customer-api.ts`: PBIA MyAccount resolver GET/POST clients with response validation and safe-account mapping, plus compatibility clients for the legacy account-list and primary-business-email routes.
 - `services/pbia-client.ts`: shared PBIA base URL, required Supabase bearer-token header, session-email matching, error parsing, and request transport.
 - `services/pbia-webview-diagnostics.ts`: AsyncStorage-backed PBIA diagnostic logging, active-session recovery, and global JS error capture.
 - `services/payment-api.ts`: secure PBIA payment eligibility/detail/submission client.

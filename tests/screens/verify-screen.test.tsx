@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
+import { PbiaApiError } from '@/services/pbia-client';
 import { buildCustomerLookupRecord } from '@/tests/factories';
 
 const mockRouter = {
@@ -11,7 +12,8 @@ const mockRouter = {
 };
 const mockUseLocalSearchParams = jest.fn(() => ({}));
 const mockUseAuth = jest.fn();
-const mockFetchCustomersByEmail = jest.fn();
+const mockResolveMyAccount = jest.fn();
+const mockResolveMyAccountByLicense = jest.fn();
 const mockCreateClientSignup = jest.fn();
 const mockPersistCustomersForEmail = jest.fn();
 const mockSendEmailSignInCode = jest.fn();
@@ -32,7 +34,9 @@ jest.mock('@/context/auth-context', () => ({
   useAuth: () => mockUseAuth(),
 }));
 jest.mock('@/services/customer-api', () => ({
-  fetchCustomersByEmail: (...args: unknown[]) => mockFetchCustomersByEmail(...args),
+  resolveMyAccount: (...args: unknown[]) => mockResolveMyAccount(...args),
+  resolveMyAccountByLicense: (...args: unknown[]) =>
+    mockResolveMyAccountByLicense(...args),
 }));
 jest.mock('@/services/client-signup-api', () => ({
   createClientSignup: (...args: unknown[]) => mockCreateClientSignup(...args),
@@ -70,6 +74,7 @@ describe('VerifyScreen', () => {
     });
     mockIsOtpRateLimitError.mockReturnValue(false);
     mockPersistCustomersForEmail.mockResolvedValue(undefined);
+    mockResolveMyAccountByLicense.mockReset();
   });
 
   it('verifies the code, syncs customers, and routes into the app', async () => {
@@ -83,7 +88,11 @@ describe('VerifyScreen', () => {
       signOut: jest.fn(),
     });
     mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
-    mockFetchCustomersByEmail.mockResolvedValue([buildCustomerLookupRecord()]);
+    mockResolveMyAccount.mockResolvedValue({
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: 1,
+      account: buildCustomerLookupRecord(),
+    });
     mockPersistCustomersForEmail.mockResolvedValue(undefined);
 
     const { getByTestId, getByText } = render(<VerifyScreen />);
@@ -95,8 +104,10 @@ describe('VerifyScreen', () => {
       expect(mockVerifyEmailSignInCode).toHaveBeenCalledWith('jane@example.com', '123456')
     );
 
-    expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com');
-    expect(mockPersistCustomersForEmail).toHaveBeenCalledWith('jane@example.com', [buildCustomerLookupRecord()]);
+    expect(mockResolveMyAccount).toHaveBeenCalledWith('jane@example.com');
+    expect(mockPersistCustomersForEmail).toHaveBeenCalledWith('jane@example.com', [
+      buildCustomerLookupRecord(),
+    ]);
     expect(completeSignIn).toHaveBeenCalledWith(
       'jane@example.com',
       expect.objectContaining({ insuredId: 'LIC-123456' }),
@@ -117,7 +128,11 @@ describe('VerifyScreen', () => {
       signOut: jest.fn(),
     });
     mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
-    mockFetchCustomersByEmail.mockResolvedValue([buildCustomerLookupRecord()]);
+    mockResolveMyAccount.mockResolvedValue({
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: 1,
+      account: buildCustomerLookupRecord(),
+    });
     mockPersistCustomersForEmail.mockRejectedValue(
       new Error('Unable to save customer profile to Supabase (row level security).')
     );
@@ -128,7 +143,7 @@ describe('VerifyScreen', () => {
     fireEvent.press(getByText('Verify and Continue'));
 
     await waitFor(() =>
-      expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('jane@example.com')
+      expect(mockResolveMyAccount).toHaveBeenCalledWith('jane@example.com')
     );
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       'Customer cache sync failed after successful OTP verification.',
@@ -179,13 +194,15 @@ describe('VerifyScreen', () => {
       completeSignIn,
       signOut: jest.fn(),
     });
-    mockFetchCustomersByEmail.mockResolvedValue([
-      buildCustomerLookupRecord({
+    mockResolveMyAccount.mockResolvedValue({
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: 1,
+      account: buildCustomerLookupRecord({
         eMail: 'demo@insureprobuilders.com',
         insuredId: '101000937',
         commercialName: 'UrbanEdge Construction Inc.',
-      })
-    ]);
+      }),
+    });
 
     mockVerifyEmailSignInCode.mockResolvedValue('demo@insureprobuilders.com');
     const { getByTestId, getByText } = render(<VerifyScreen />);
@@ -204,14 +221,13 @@ describe('VerifyScreen', () => {
       'demo@insureprobuilders.com',
       '111111'
     );
-    expect(mockFetchCustomersByEmail).toHaveBeenCalledWith('demo@insureprobuilders.com');
+    expect(mockResolveMyAccount).toHaveBeenCalledWith('demo@insureprobuilders.com');
     expect(mockPersistCustomersForEmail).toHaveBeenCalled();
     expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)');
   });
 
   it('asks for a license number when the verified email owns multiple accounts', async () => {
     const completeSignIn = jest.fn();
-    const firstCustomer = buildCustomerLookupRecord();
     const secondCustomer = buildCustomerLookupRecord({
       accountId: 'insured-db-2',
       databaseId: 'insured-db-2',
@@ -229,7 +245,12 @@ describe('VerifyScreen', () => {
       signOut: jest.fn(),
     });
     mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
-    mockFetchCustomersByEmail.mockResolvedValue([firstCustomer, secondCustomer]);
+    mockResolveMyAccount.mockResolvedValue({ status: 'LICENSE_REQUIRED', matchCount: 2 });
+    mockResolveMyAccountByLicense.mockResolvedValue({
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: 2,
+      account: secondCustomer,
+    });
 
     const { findByText, getByLabelText, getByTestId, getByText } = render(<VerifyScreen />);
 
@@ -242,6 +263,15 @@ describe('VerifyScreen', () => {
     fireEvent.changeText(getByLabelText('License Number'), 'LIC-222222');
     fireEvent.press(getByText('Open Account'));
 
+    await waitFor(() =>
+      expect(mockResolveMyAccountByLicense).toHaveBeenCalledWith(
+        'jane@example.com',
+        'LIC-222222'
+      )
+    );
+    expect(mockPersistCustomersForEmail).toHaveBeenCalledWith('jane@example.com', [
+      secondCustomer,
+    ]);
     expect(completeSignIn).toHaveBeenCalledWith(
       'jane@example.com',
       expect.objectContaining({ insuredId: 'LIC-222222' }),
@@ -261,15 +291,10 @@ describe('VerifyScreen', () => {
       signOut: jest.fn(),
     });
     mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
-    mockFetchCustomersByEmail.mockResolvedValue([
-      buildCustomerLookupRecord(),
-      buildCustomerLookupRecord({
-        accountId: 'insured-db-2',
-        databaseId: 'insured-db-2',
-        licenseNumber: 'LIC-222222',
-        insuredId: 'LIC-222222',
-      }),
-    ]);
+    mockResolveMyAccount.mockResolvedValue({ status: 'LICENSE_REQUIRED', matchCount: 2 });
+    mockResolveMyAccountByLicense.mockRejectedValue(
+      new PbiaApiError(404, 'Client account could not be resolved')
+    );
 
     const { findByText, getByLabelText, getByTestId, getByText } = render(<VerifyScreen />);
 
@@ -310,20 +335,64 @@ describe('VerifyScreen', () => {
     });
     mockVerifyEmailSignInCode.mockResolvedValue('new@example.com');
     mockCreateClientSignup.mockResolvedValue({ id: 'signup-1' });
-    mockFetchCustomersByEmail.mockResolvedValue([
-      buildCustomerLookupRecord({ eMail: 'new@example.com' })
-    ]);
+    mockResolveMyAccount
+      .mockResolvedValueOnce({ status: 'SIGNUP_ALLOWED', matchCount: 0 })
+      .mockResolvedValueOnce({
+        status: 'ACCOUNT_RESOLVED',
+        matchCount: 1,
+        account: buildCustomerLookupRecord({ eMail: 'new@example.com' }),
+      });
 
     const { getByTestId, getByText } = render(<VerifyScreen />);
     fireEvent.changeText(getByTestId('otp-input'), '123456');
     fireEvent.press(getByText('Verify and Continue'));
 
     await waitFor(() => expect(mockCreateClientSignup).toHaveBeenCalledWith(pendingSignup));
+    expect(mockResolveMyAccount).toHaveBeenCalledTimes(2);
     expect(clearPendingSignup).toHaveBeenCalled();
     expect(completeSignIn).toHaveBeenCalledWith(
       'new@example.com',
       expect.any(Object),
       expect.anything()
     );
+  });
+
+  it('does not create a duplicate signup when the verified email already resolves', async () => {
+    const completeSignIn = jest.fn();
+    const clearPendingSignup = jest.fn();
+    const pendingSignup = {
+      legalName: 'Builder Co',
+      email: 'existing@example.com',
+      status: 'PROSPECT' as const,
+      licenseNumber: '1144038',
+      primaryContactFirstName: 'Existing',
+      primaryContactLastName: 'Client',
+      addressLine1: '123 Main St',
+      city: 'Los Angeles',
+      state: 'CA',
+      zipCode: '90001',
+    };
+    mockUseAuth.mockReturnValue({
+      pendingEmail: 'existing@example.com',
+      pendingInsuredId: '',
+      pendingSignup,
+      clearPendingSignup,
+      completeSignIn,
+      signOut: jest.fn(),
+    });
+    mockVerifyEmailSignInCode.mockResolvedValue('existing@example.com');
+    mockResolveMyAccount.mockResolvedValue({
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: 1,
+      account: buildCustomerLookupRecord({ eMail: 'existing@example.com' }),
+    });
+
+    const { getByTestId, getByText } = render(<VerifyScreen />);
+    fireEvent.changeText(getByTestId('otp-input'), '123456');
+    fireEvent.press(getByText('Verify and Continue'));
+
+    await waitFor(() => expect(completeSignIn).toHaveBeenCalled());
+    expect(mockCreateClientSignup).not.toHaveBeenCalled();
+    expect(clearPendingSignup).toHaveBeenCalled();
   });
 });

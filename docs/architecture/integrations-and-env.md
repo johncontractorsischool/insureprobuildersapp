@@ -27,6 +27,8 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
 
 - Shared transport: `services/pbia-client.ts`
 - Endpoints:
+  - `GET /client/my-account/resolve`
+  - `POST /client/my-account/resolve`
   - `GET /client/account`
   - `GET /client/account/by-business-email`
   - `POST /client/signup`
@@ -39,7 +41,8 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
   - `GET /client/policies/:policyId/documents`
   - `POST /client/contact-requests`
 - Every request requires the current Supabase access token as `Authorization: Bearer <token>`. The shared transport rejects missing sessions and rejects a requested email that differs from the verified session email. It does not send `X-Client-Email` or `X-API-Key`.
-- Sign-in sends and verifies the Supabase OTP before account discovery. Signup details remain in memory until OTP verification succeeds, then `POST /client/signup` runs with the authenticated session before the singular primary-email account lookup.
+- Sign-in sends and verifies the Supabase OTP before account discovery. `GET /client/my-account/resolve` returns the authenticated email's sign-in/signup decision. A single account opens immediately; multiple eligible accounts require a CSLB selector through `POST /client/my-account/resolve`; and signup proceeds only for `SIGNUP_ALLOWED`.
+- Signup details remain in memory until OTP verification succeeds. `POST /client/signup` runs only after the resolver confirms `SIGNUP_ALLOWED`, and the backend independently repeats its existing-account check.
 - Profile change, support, feedback, and COI requests use `POST /client/contact-requests`; the app no longer calls an SMTP relay directly.
 - PBIA document responses currently provide metadata but no download URL. The app lists the documents and marks download as unavailable rather than constructing a legacy URL.
 - Local Android emulator note: `localhost` API base URLs are translated to `10.0.2.2` at runtime so the emulator can reach services running on the Mac host.
@@ -78,7 +81,7 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
 
 - Schema file: `supabase/portal_customers.sql`
 - Table purpose:
-  - cache PBIA account records returned by `GET /client/account`
+  - cache the safe account returned by the MyAccount resolver
   - rehydrate customer context after app restart if the PBIA API is temporarily unavailable
 - Important columns:
   - `database_id`
