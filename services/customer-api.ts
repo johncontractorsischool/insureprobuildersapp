@@ -31,6 +31,33 @@ type ClientAccountList = {
   totalPages: number;
 };
 
+type MyAccountSignupAllowed = {
+  status: 'SIGNUP_ALLOWED';
+  matchCount: 0;
+};
+
+type MyAccountLicenseRequired = {
+  status: 'LICENSE_REQUIRED';
+  matchCount: number;
+};
+
+type MyAccountResolvedPayload = {
+  status: 'ACCOUNT_RESOLVED';
+  matchCount: number;
+  account: ClientAccountRecord;
+};
+
+export type MyAccountResolution =
+  | MyAccountSignupAllowed
+  | MyAccountLicenseRequired
+  | {
+      status: 'ACCOUNT_RESOLVED';
+      matchCount: number;
+      account: CustomerLookupRecord;
+    };
+
+export type ResolvedMyAccount = Extract<MyAccountResolution, { status: 'ACCOUNT_RESOLVED' }>;
+
 function isClientAccountRecord(value: unknown): value is ClientAccountRecord {
   if (!value || typeof value !== 'object') return false;
   const account = value as Partial<ClientAccountRecord>;
@@ -81,6 +108,78 @@ function toCustomerLookupRecord(account: ClientAccountRecord): CustomerLookupRec
     customerId: account.id,
     insuredId: account.licenseNumber,
   };
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function parseMyAccountResolution(value: unknown): MyAccountResolution {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Unexpected PBIA account resolution response format.');
+  }
+
+  const resolution = value as Partial<
+    MyAccountSignupAllowed | MyAccountLicenseRequired | MyAccountResolvedPayload
+  >;
+  if (!isNonNegativeInteger(resolution.matchCount)) {
+    throw new Error('Unexpected PBIA account resolution response format.');
+  }
+
+  if (resolution.status === 'SIGNUP_ALLOWED' && resolution.matchCount === 0) {
+    return { status: 'SIGNUP_ALLOWED', matchCount: 0 };
+  }
+
+  if (resolution.status === 'LICENSE_REQUIRED' && resolution.matchCount >= 2) {
+    return { status: 'LICENSE_REQUIRED', matchCount: resolution.matchCount };
+  }
+
+  if (
+    resolution.status === 'ACCOUNT_RESOLVED' &&
+    resolution.matchCount >= 1 &&
+    isClientAccountRecord(resolution.account)
+  ) {
+    return {
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: resolution.matchCount,
+      account: toCustomerLookupRecord(resolution.account),
+    };
+  }
+
+  throw new Error('Unexpected PBIA account resolution response format.');
+}
+
+export async function resolveMyAccount(email: string): Promise<MyAccountResolution> {
+  const payload = await pbiaRequest<unknown>(
+    '/client/my-account/resolve',
+    { method: 'GET', clientEmail: email },
+    'We could not resolve your PBIA account right now.'
+  );
+
+  return parseMyAccountResolution(payload);
+}
+
+export async function resolveMyAccountByLicense(
+  email: string,
+  licenseNumber: string
+): Promise<ResolvedMyAccount> {
+  const payload = await pbiaRequest<unknown>(
+    '/client/my-account/resolve',
+    {
+      method: 'POST',
+      clientEmail: email,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ licenseNumber: licenseNumber.trim() }),
+    },
+    'We could not resolve that PBIA account right now.'
+  );
+  const resolution = parseMyAccountResolution(payload);
+
+  if (resolution.status !== 'ACCOUNT_RESOLVED') {
+    throw new Error('Unexpected PBIA account resolution response format.');
+  }
+
+  return resolution;
 }
 
 export async function fetchCustomersByEmail(email: string): Promise<CustomerLookupRecord[]> {

@@ -1,14 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ClientSignupRequest } from '@/services/client-signup-api';
-import { fetchAccountByBusinessEmail } from '@/services/customer-api';
+import { resolveMyAccount, resolveMyAccountByLicense } from '@/services/customer-api';
+import { PbiaApiError } from '@/services/pbia-client';
 import { getSupabaseClient } from '@/services/supabase';
 import type { Customer, CustomerLookupRecord } from '@/types/customer';
 import { matchesCustomerInsuredId } from '@/utils/customer-selection';
 
 const CUSTOMER_TABLE = process.env.EXPO_PUBLIC_SUPABASE_CUSTOMER_TABLE?.trim() || 'portal_customers';
 const SELECTED_CUSTOMER_STORAGE_KEY = 'portal_selected_customer';
+const LIVE_CUSTOMER_RESTORE_TIMEOUT_MS = 5000;
+const CACHED_CUSTOMER_RESTORE_TIMEOUT_MS = 3000;
 
 type AuthContextValue = {
   isLoadingAuth: boolean;
@@ -33,6 +36,24 @@ function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error('Customer account lookup timed out.')),
+          timeoutMs
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 type PersistedCustomerSelection = {
   email: string;
   insuredId: string;
@@ -51,10 +72,6 @@ type PortalCustomerRow = {
   insured_id: string | null;
   is_active: boolean | null;
 };
-
-function hasText(value: string | null | undefined) {
-  return Boolean(value?.trim());
-}
 
 async function readPersistedCustomerSelection() {
   try {
@@ -173,14 +190,54 @@ function mapPortalCustomer(row: PortalCustomerRow, loginEmail: string): Customer
 }
 
 function pickBestPortalCustomer(rows: PortalCustomerRow[], preferredInsuredId?: string | null) {
-  return (
-    rows.find((row) => matchesCustomerInsuredId(row.insured_id, preferredInsuredId)) ??
-    rows.find((row) => row.is_active !== false && hasText(row.insured_id)) ??
-    rows.find((row) => row.is_active !== false) ??
-    rows.find((row) => hasText(row.insured_id)) ??
-    rows[0] ??
-    null
+  const preferredCustomer = rows.find((row) =>
+    matchesCustomerInsuredId(row.insured_id, preferredInsuredId)
   );
+  if (preferredCustomer) return preferredCustomer;
+  return rows.length === 1 ? rows[0] : null;
+}
+
+type LiveCustomerResolution = {
+  customer: CustomerLookupRecord | null;
+  selectedInsuredId: string;
+  invalidStoredSelection: boolean;
+};
+
+async function resolveLiveCustomerForRestore(
+  email: string,
+  preferredInsuredId?: string | null
+): Promise<LiveCustomerResolution> {
+  const resolution = await resolveMyAccount(email);
+
+  if (resolution.status === 'ACCOUNT_RESOLVED') {
+    return {
+      customer: resolution.account,
+      selectedInsuredId: resolution.account.insuredId?.trim() ?? '',
+      invalidStoredSelection: false,
+    };
+  }
+
+  if (resolution.status !== 'LICENSE_REQUIRED' || !preferredInsuredId?.trim()) {
+    return { customer: null, selectedInsuredId: '', invalidStoredSelection: false };
+  }
+
+  try {
+    const selectedResolution = await resolveMyAccountByLicense(email, preferredInsuredId);
+    return {
+      customer: selectedResolution.account,
+      selectedInsuredId:
+        preferredInsuredId.trim() || selectedResolution.account.insuredId?.trim() || '',
+      invalidStoredSelection: false,
+    };
+  } catch (selectionError) {
+    if (
+      selectionError instanceof PbiaApiError &&
+      [400, 404, 409].includes(selectionError.status)
+    ) {
+      return { customer: null, selectedInsuredId: '', invalidStoredSelection: true };
+    }
+    throw selectionError;
+  }
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -190,6 +247,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [pendingEmail, setPendingEmailState] = useState('');
   const [pendingInsuredId, setPendingInsuredIdState] = useState('');
   const [pendingSignup, setPendingSignupState] = useState<ClientSignupRequest | null>(null);
+  const accountSelectionPendingRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -200,29 +258,52 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const normalizedEmail = normalizeEmail(email);
 
         try {
-          const nextCustomer = await fetchAccountByBusinessEmail(normalizedEmail);
+          const liveResolution = await withTimeout(
+            resolveLiveCustomerForRestore(normalizedEmail, preferredInsuredId),
+            LIVE_CUSTOMER_RESTORE_TIMEOUT_MS
+          );
           if (!mounted) return;
 
-          if (nextCustomer) {
-            setCustomerState(mapCustomerLookupToProfile(nextCustomer));
-            const nextInsuredId = nextCustomer.insuredId?.trim() ?? '';
-            setPendingInsuredIdState(nextInsuredId);
-            void persistSelectedCustomer(normalizedEmail, nextInsuredId);
+          if (liveResolution.invalidStoredSelection) {
+            setCustomerState(null);
+            setPendingInsuredIdState('');
+            void persistSelectedCustomer(normalizedEmail, null);
             return;
           }
-        } catch {
+
+          if (liveResolution.customer) {
+            setCustomerState(mapCustomerLookupToProfile(liveResolution.customer));
+            setPendingInsuredIdState(liveResolution.selectedInsuredId);
+            void persistSelectedCustomer(normalizedEmail, liveResolution.selectedInsuredId);
+            return;
+          }
+
+          // Never choose an account when signup is allowed or the verified email
+          // has multiple records without a previously selected CSLB identifier.
+          setCustomerState(null);
+          setPendingInsuredIdState('');
+          return;
+        } catch (liveLookupError) {
+          if (liveLookupError instanceof PbiaApiError && liveLookupError.status === 401) {
+            setCustomerState(null);
+            setPendingInsuredIdState('');
+            return;
+          }
           // Fall back to cached customer data when live lookup is unavailable.
         }
 
         const supabase = getSupabaseClient();
-        const { data, error } = await supabase
-          .from(CUSTOMER_TABLE)
-          .select(
-            'database_id, commercial_name, first_name, last_name, source_payload, email, phone, cell_phone, customer_id, insured_id, is_active'
-          )
-          .eq('login_email', normalizedEmail)
-          .order('is_active', { ascending: false })
-          .order('updated_at', { ascending: false });
+        const { data, error } = await withTimeout(
+          supabase
+            .from(CUSTOMER_TABLE)
+            .select(
+              'database_id, commercial_name, first_name, last_name, source_payload, email, phone, cell_phone, customer_id, insured_id, is_active'
+            )
+            .eq('login_email', normalizedEmail)
+            .order('is_active', { ascending: false })
+            .order('updated_at', { ascending: false }),
+          CACHED_CUSTOMER_RESTORE_TIMEOUT_MS
+        );
 
         if (!mounted || error || !data || data.length === 0) return;
         const cachedCustomer = pickBestPortalCustomer(data as PortalCustomerRow[], preferredInsuredId);
@@ -252,14 +333,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
         if (sessionEmail) setPendingEmailState(sessionEmail);
         setPendingInsuredIdState(preferredInsuredId);
         if (sessionEmail) {
-          void hydrateCustomerForEmail(sessionEmail, preferredInsuredId);
+          await hydrateCustomerForEmail(sessionEmail, preferredInsuredId);
         }
         setIsLoadingAuth(false);
 
         const authListener = supabase.auth.onAuthStateChange(async (_event, session) => {
+          const shouldWaitForAccountSelection = accountSelectionPendingRef.current;
           const nextEmail = session?.user?.email ?? null;
           setUserEmail(nextEmail);
           if (!nextEmail) {
+            accountSelectionPendingRef.current = false;
             setPendingEmailState('');
             setPendingInsuredIdState('');
             setPendingSignupState(null);
@@ -267,11 +350,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
             void AsyncStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
             return;
           }
+
+          setPendingEmailState(nextEmail);
+          if (shouldWaitForAccountSelection) {
+            // OTP verification establishes the Supabase session before the app has
+            // resolved which account a multi-account email is allowed to open.
+            setPendingInsuredIdState('');
+            setCustomerState(null);
+            return;
+          }
+
           const nextSelection = await readPersistedCustomerSelection();
           if (!mounted) return;
           const nextInsuredId =
             nextSelection?.email === normalizeEmail(nextEmail) ? nextSelection.insuredId : '';
-          setPendingEmailState(nextEmail);
           setPendingInsuredIdState(nextInsuredId);
           void hydrateCustomerForEmail(nextEmail, nextInsuredId);
         });
@@ -292,6 +384,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const setPendingEmail = (email: string, insuredId?: string | null) => {
+    accountSelectionPendingRef.current = true;
     setPendingEmailState(normalizeEmail(email));
     setPendingInsuredIdState(insuredId?.trim() ?? '');
   };
@@ -315,6 +408,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const completeSignIn = useCallback((email: string, customerData?: Customer | null, insuredId?: string | null) => {
     const normalized = normalizeEmail(email);
     const normalizedInsuredId = insuredId?.trim() ?? customerData?.insuredId?.trim() ?? '';
+    accountSelectionPendingRef.current = false;
     setUserEmail(normalized);
     setPendingEmailState(normalized);
     setPendingInsuredIdState(normalizedInsuredId);
@@ -331,6 +425,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const supabase = getSupabaseClient();
       await supabase.auth.signOut();
     } finally {
+      accountSelectionPendingRef.current = false;
       setUserEmail(null);
       setPendingEmailState('');
       setPendingInsuredIdState('');
@@ -343,7 +438,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const value = useMemo<AuthContextValue>(
     () => ({
       isLoadingAuth,
-      isAuthenticated: Boolean(userEmail),
+      isAuthenticated: Boolean(userEmail && customer),
       userEmail,
       customer,
       pendingEmail,

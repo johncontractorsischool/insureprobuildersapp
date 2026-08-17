@@ -3,16 +3,26 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 
 import { AuthProvider, useAuth } from '@/context/auth-context';
+import { PbiaApiError } from '@/services/pbia-client';
 import { buildCustomerLookupRecord } from '@/tests/factories';
 
 const mockGetSupabaseClient = jest.fn();
-const mockFetchAccountByBusinessEmail = jest.fn();
+const mockResolveMyAccount = jest.fn();
+const mockResolveMyAccountByLicense = jest.fn();
+
+type MockAuthSession = { user: { email: string } } | null;
+type MockAuthChangeHandler = (
+  event: string,
+  session: MockAuthSession
+) => void | Promise<void>;
 
 jest.mock('@/services/supabase', () => ({
   getSupabaseClient: () => mockGetSupabaseClient(),
 }));
 jest.mock('@/services/customer-api', () => ({
-  fetchAccountByBusinessEmail: (...args: unknown[]) => mockFetchAccountByBusinessEmail(...args),
+  resolveMyAccount: (...args: unknown[]) => mockResolveMyAccount(...args),
+  resolveMyAccountByLicense: (...args: unknown[]) =>
+    mockResolveMyAccountByLicense(...args),
 }));
 
 function createSupabaseMock({
@@ -24,6 +34,7 @@ function createSupabaseMock({
 }) {
   const signOut = jest.fn().mockResolvedValue(undefined);
   const unsubscribe = jest.fn();
+  let authChangeHandler: MockAuthChangeHandler | null = null;
   const query = {
     select: jest.fn(),
     eq: jest.fn(),
@@ -49,19 +60,26 @@ function createSupabaseMock({
             : null,
         },
       }),
-      onAuthStateChange: jest.fn(() => ({
-        data: {
-          subscription: {
-            unsubscribe,
+      onAuthStateChange: jest.fn((handler: MockAuthChangeHandler) => {
+        authChangeHandler = handler;
+        return {
+          data: {
+            subscription: {
+              unsubscribe,
+            },
           },
-        },
-      })),
+        };
+      }),
       signOut,
     },
     from: jest.fn(() => query),
     __query: query,
     __unsubscribe: unsubscribe,
     __signOut: signOut,
+    __emitAuthChange: async (event: string, email: string | null) => {
+      if (!authChangeHandler) throw new Error('Auth listener is not registered.');
+      await authChangeHandler(event, email ? { user: { email } } : null);
+    },
   };
 }
 
@@ -72,6 +90,8 @@ function wrapper({ children }: PropsWithChildren) {
 describe('AuthProvider', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
+    mockResolveMyAccount.mockReset();
+    mockResolveMyAccountByLicense.mockReset();
   });
 
   it('hydrates the current session from the live customer lookup when it is available', async () => {
@@ -79,7 +99,11 @@ describe('AuthProvider', () => {
       sessionEmail: 'jane@example.com',
     });
     mockGetSupabaseClient.mockReturnValue(supabaseMock);
-    mockFetchAccountByBusinessEmail.mockResolvedValue(buildCustomerLookupRecord());
+    mockResolveMyAccount.mockResolvedValue({
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: 1,
+      account: buildCustomerLookupRecord(),
+    });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
@@ -102,10 +126,10 @@ describe('AuthProvider', () => {
         smsPhone: '5559990000',
       })
     );
-    expect(mockFetchAccountByBusinessEmail).toHaveBeenCalledWith('jane@example.com');
+    expect(mockResolveMyAccount).toHaveBeenCalledWith('jane@example.com');
   });
 
-  it('hydrates the singular primary business-email account when a prior selection exists', async () => {
+  it('hydrates the previously selected license when the session email owns multiple accounts', async () => {
     await AsyncStorage.setItem(
       'portal_selected_customer',
       JSON.stringify({
@@ -118,21 +142,30 @@ describe('AuthProvider', () => {
       sessionEmail: 'jane@example.com',
     });
     mockGetSupabaseClient.mockReturnValue(supabaseMock);
-    mockFetchAccountByBusinessEmail.mockResolvedValue(
-      buildCustomerLookupRecord({
-        databaseId: 'insured-db-2',
-        insuredId: 'LIC-222222',
-        commercialName: 'Second Builder Co',
-        firstName: 'John',
-        lastName: 'Builder',
-      })
-    );
+    const selectedCustomer = buildCustomerLookupRecord({
+      databaseId: 'insured-db-2',
+      licenseNumber: 'LIC-222222',
+      insuredId: 'LIC-222222',
+      commercialName: 'Second Builder Co',
+      firstName: 'John',
+      lastName: 'Builder',
+    });
+    mockResolveMyAccount.mockResolvedValue({ status: 'LICENSE_REQUIRED', matchCount: 2 });
+    mockResolveMyAccountByLicense.mockResolvedValue({
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: 2,
+      account: selectedCustomer,
+    });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
     await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
 
     expect(result.current.pendingInsuredId).toBe('LIC-222222');
+    expect(mockResolveMyAccountByLicense).toHaveBeenCalledWith(
+      'jane@example.com',
+      'LIC-222222'
+    );
     expect(result.current.customer).toEqual(
       expect.objectContaining({
         databaseId: 'insured-db-2',
@@ -140,6 +173,84 @@ describe('AuthProvider', () => {
         fullName: 'John Builder',
       })
     );
+  });
+
+  it('does not choose an arbitrary account when no stored license resolves multiple matches', async () => {
+    const supabaseMock = createSupabaseMock({
+      sessionEmail: 'jane@example.com',
+    });
+    mockGetSupabaseClient.mockReturnValue(supabaseMock);
+    mockResolveMyAccount.mockResolvedValue({ status: 'LICENSE_REQUIRED', matchCount: 2 });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
+
+    expect(result.current.userEmail).toBe('jane@example.com');
+    expect(result.current.customer).toBeNull();
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(mockResolveMyAccountByLicense).not.toHaveBeenCalled();
+  });
+
+  it('clears an invalid stored selection without restoring a stale cached account', async () => {
+    await AsyncStorage.setItem(
+      'portal_selected_customer',
+      JSON.stringify({ email: 'jane@example.com', insuredId: 'LIC-OLD' })
+    );
+    const supabaseMock = createSupabaseMock({
+      sessionEmail: 'jane@example.com',
+      portalRows: [
+        {
+          database_id: 'stale-account',
+          commercial_name: 'Stale Builder Co',
+          email: 'jane@example.com',
+          insured_id: 'LIC-OLD',
+          is_active: true,
+        },
+      ],
+    });
+    mockGetSupabaseClient.mockReturnValue(supabaseMock);
+    mockResolveMyAccount.mockResolvedValue({ status: 'LICENSE_REQUIRED', matchCount: 2 });
+    mockResolveMyAccountByLicense.mockRejectedValue(
+      new PbiaApiError(404, 'Client account could not be resolved')
+    );
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
+
+    expect(result.current.customer).toBeNull();
+    expect(result.current.pendingInsuredId).toBe('');
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(AsyncStorage.getItem('portal_selected_customer')).resolves.toBeNull()
+    );
+  });
+
+  it('finishes restoring the session when the live customer lookup never responds', async () => {
+    jest.useFakeTimers();
+    try {
+      const supabaseMock = createSupabaseMock({
+        sessionEmail: 'jane@example.com',
+      });
+      mockGetSupabaseClient.mockReturnValue(supabaseMock);
+      mockResolveMyAccount.mockReturnValue(new Promise(() => {}));
+
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      await waitFor(() => expect(mockResolveMyAccount).toHaveBeenCalled());
+      await act(async () => {
+        jest.advanceTimersByTime(5000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(result.current.isLoadingAuth).toBe(false);
+      expect(result.current.customer).toBeNull();
+      expect(result.current.isAuthenticated).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('falls back to cached portal_customers rows when the live customer lookup fails', async () => {
@@ -171,7 +282,7 @@ describe('AuthProvider', () => {
       ],
     });
     mockGetSupabaseClient.mockReturnValue(supabaseMock);
-    mockFetchAccountByBusinessEmail.mockRejectedValue(new Error('lookup unavailable'));
+    mockResolveMyAccount.mockRejectedValue(new Error('lookup unavailable'));
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
@@ -219,6 +330,49 @@ describe('AuthProvider', () => {
     );
   });
 
+  it('keeps OTP sessions pending until account selection completes without clearing later sessions', async () => {
+    const supabaseMock = createSupabaseMock({});
+    mockGetSupabaseClient.mockReturnValue(supabaseMock);
+    mockResolveMyAccount.mockResolvedValue({
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: 1,
+      account: buildCustomerLookupRecord(),
+    });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
+
+    act(() => {
+      result.current.setPendingEmail('jane@example.com');
+    });
+    await act(async () => {
+      await supabaseMock.__emitAuthChange('SIGNED_IN', 'jane@example.com');
+    });
+
+    expect(result.current.userEmail).toBe('jane@example.com');
+    expect(result.current.customer).toBeNull();
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(mockResolveMyAccount).not.toHaveBeenCalled();
+
+    act(() => {
+      result.current.completeSignIn('jane@example.com', {
+        insuredId: 'LIC-123456',
+        fullName: 'Jane Builder',
+      });
+    });
+
+    expect(result.current.isAuthenticated).toBe(true);
+
+    await act(async () => {
+      await supabaseMock.__emitAuthChange('SIGNED_IN', 'jane@example.com');
+    });
+
+    expect(result.current.customer).toEqual(
+      expect.objectContaining({ insuredId: 'LIC-123456' })
+    );
+    expect(result.current.isAuthenticated).toBe(true);
+  });
+
   it('does not restore a legacy review session without a Supabase session', async () => {
     await AsyncStorage.setItem(
       'portal_review_session',
@@ -238,12 +392,17 @@ describe('AuthProvider', () => {
     expect(result.current.pendingEmail).toBe('');
     expect(result.current.pendingInsuredId).toBe('');
     expect(result.current.customer).toBeNull();
-    expect(mockFetchAccountByBusinessEmail).not.toHaveBeenCalled();
+    expect(mockResolveMyAccount).not.toHaveBeenCalled();
   });
 
   it('signOut clears the local auth state even if Supabase resolves normally', async () => {
     const supabaseMock = createSupabaseMock({ sessionEmail: 'jane@example.com' });
     mockGetSupabaseClient.mockReturnValue(supabaseMock);
+    mockResolveMyAccount.mockResolvedValue({
+      status: 'ACCOUNT_RESOLVED',
+      matchCount: 1,
+      account: buildCustomerLookupRecord(),
+    });
     const { result } = renderHook(() => useAuth(), { wrapper });
 
     await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
