@@ -43,12 +43,12 @@ export default function LandingScreen() {
 
   if (isLoadingAuth) {
     return (
-      <ScreenContainer
-        scroll={false}
-        maxContentWidth={maxContentWidth}
-        includeTopInset={!showMobileVisual}
-        style={showMobileVisual ? styles.mobileScreenContainer : undefined}>
-        <LoadingState title="Restoring session" description="Checking your secure login state..." />
+      <ScreenContainer scroll={false}>
+        <LoadingState
+          title="Restoring session"
+          description="Checking your secure login state..."
+          variant="centered"
+        />
       </ScreenContainer>
     );
   }
