@@ -155,12 +155,6 @@ export default function DigitalCardScreen() {
   const chooseImage = async () => {
     setImageError('');
 
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setImageError('Allow photo access to choose a profile photo or company logo.');
-      return;
-    }
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,

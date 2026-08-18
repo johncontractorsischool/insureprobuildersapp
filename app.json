@@ -16,6 +16,10 @@
       }
     },
     "android": {
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/pbialogo.png",
@@ -36,7 +40,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Insure Probuilders to use a profile photo or company logo on your digital business card."
+          "photosPermission": "Allow Insure Probuilders to use a profile photo or company logo on your digital business card.",
+          "microphonePermission": false
         }
       ],
       [
