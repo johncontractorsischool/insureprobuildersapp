@@ -116,7 +116,7 @@ function formatExpirationInput(value: string) {
   return digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
 }
 
-function getPaymentFailureMessage(error: unknown) {
+function getPaymentFailureMessage(error: unknown, paymentWasDefinitelyRejected = false) {
   if (!(error instanceof PaymentApiError)) {
     return 'Something went wrong while processing your payment. Please try again later.';
   }
@@ -126,9 +126,15 @@ function getPaymentFailureMessage(error: unknown) {
   }
   if (error.status === 404) return 'This payment request is no longer available.';
   if (error.status === 409) {
+    if (error.message.toLowerCase().includes('idempotency-key')) {
+      return 'This payment attempt changed after it started. Reload the payment request before trying again.';
+    }
     return 'This payment is already being processed. Reload before trying again.';
   }
   if (error.status === 502) {
+    if (paymentWasDefinitelyRejected) {
+      return 'Your payment was not accepted. Verify the cardholder and billing information, then try again. Your card was not charged.';
+    }
     return 'We could not confirm your payment. Please contact PBIA before trying again.';
   }
   if (error.status === 503) {
@@ -553,16 +559,33 @@ export default function PaymentScreen({
       if (error instanceof PaymentApiError && error.status === 404) {
         await refreshPaymentEligibility();
       }
-      const isUnconfirmed = error instanceof PaymentApiError && error.status === 502;
+      let paymentWasDefinitelyRejected = false;
+      if (error instanceof PaymentApiError && error.status === 502) {
+        try {
+          await getPaymentEligibility(userEmail, accountId, selectedRecord.demandId);
+          paymentWasDefinitelyRejected = true;
+          await refreshPaymentEligibility();
+        } catch {
+          // A demand that is still hidden remains blocked until PBIA reconciles it.
+        }
+      }
+      const isUnconfirmed =
+        error instanceof PaymentApiError &&
+        error.status === 502 &&
+        !paymentWasDefinitelyRejected;
       const isInvalidOrConflicting =
         error instanceof PaymentApiError && (error.status === 400 || error.status === 409);
       if (isUnconfirmed) setBlockedRecordKey(recordKey);
+      if (paymentWasDefinitelyRejected) {
+        setBlockedRecordKey((current) => (current === recordKey ? null : current));
+      }
       if (error instanceof PaymentApiError && error.status === 503) {
         setIsPaymentUnavailable(true);
       }
       if (isUnconfirmed || isInvalidOrConflicting) paymentIntentRef.current = null;
-      clearAllPaymentFields();
-      setFormError(getPaymentFailureMessage(error));
+      clearSensitiveFields();
+      setIsReviewing(false);
+      setFormError(getPaymentFailureMessage(error, paymentWasDefinitelyRejected));
     } finally {
       setIsSubmitting(false);
     }

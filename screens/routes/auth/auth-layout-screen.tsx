@@ -10,7 +10,11 @@ export default function AuthLayout() {
   if (isLoadingAuth) {
     return (
       <ScreenContainer scroll={false}>
-        <LoadingState title="Restoring session" description="Checking your secure login state..." />
+        <LoadingState
+          title="Restoring session"
+          description="Checking your secure login state..."
+          variant="centered"
+        />
       </ScreenContainer>
     );
   }

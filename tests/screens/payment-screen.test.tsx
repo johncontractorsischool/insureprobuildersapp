@@ -21,6 +21,7 @@ const mockGetPaymentEligibility = jest.fn();
 const mockSubmitPayment = jest.fn();
 const mockRefreshPaymentEligibility = jest.fn();
 const mockRandomUUID = jest.fn();
+const mockDigestStringAsync = jest.fn();
 const mockPreventScreenCapture = jest.fn((_key?: string) => Promise.resolve());
 const mockAllowScreenCapture = jest.fn((_key?: string) => Promise.resolve());
 const mockEnableAppSwitcherProtection = jest.fn(() => Promise.resolve());
@@ -34,7 +35,7 @@ jest.mock('expo-router', () => ({
 }));
 jest.mock('expo-crypto', () => ({
   randomUUID: () => mockRandomUUID(),
-  digestStringAsync: () => Promise.resolve('payment-intent-hash'),
+  digestStringAsync: (...args: unknown[]) => mockDigestStringAsync(...args),
   CryptoDigestAlgorithm: { SHA256: 'SHA-256' },
 }));
 jest.mock('expo-screen-capture', () => ({
@@ -78,6 +79,7 @@ describe('PaymentScreen', () => {
     mockRandomUUID
       .mockReturnValueOnce('740f67f1-71bf-44b6-ae37-f42e728998d7')
       .mockReturnValue('different-payment-key');
+    mockDigestStringAsync.mockResolvedValue('payment-intent-hash');
     mockRouter.canGoBack.mockReturnValue(true);
     mockUseLocalSearchParams.mockReturnValue({});
     const payableRecord = buildPaymentEligibility({
@@ -407,6 +409,11 @@ describe('PaymentScreen', () => {
 
   it('clears credentials and blocks resubmission when PBIA cannot confirm the charge', async () => {
     const { PaymentApiError } = require('@/services/payment-api');
+    const currentRecord = mockUsePayments().payableRecords[0];
+    mockGetPaymentEligibility
+      .mockResolvedValueOnce(currentRecord)
+      .mockResolvedValueOnce(currentRecord)
+      .mockRejectedValueOnce(new PaymentApiError(404, 'Payment demand was not found'));
     mockSubmitPayment.mockRejectedValue(
       new PaymentApiError(
         502,
@@ -430,6 +437,70 @@ describe('PaymentScreen', () => {
     expect(getByLabelText('Card Number')).toHaveProp('value', '');
     expect(await findByRole('button', { name: 'Review Payment' })).toBeDisabled();
     expect(mockSubmitPayment).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a different payer to retry when PBIA republishes a definitely rejected payment', async () => {
+    const { PaymentApiError } = require('@/services/payment-api');
+    mockDigestStringAsync
+      .mockResolvedValueOnce('original-payer-payment-intent')
+      .mockResolvedValueOnce('replacement-payer-payment-intent');
+    mockSubmitPayment
+      .mockRejectedValueOnce(
+        new PaymentApiError(
+          502,
+          'Input1 payment request failed: Input1 pay request failed with HTTP 400'
+        )
+      )
+      .mockResolvedValueOnce({
+        id: 'payment-request-2',
+        demandId: 'demand-1',
+        paymentOptionId: null,
+        termYears: null,
+        status: 'SUCCEEDED',
+        amount: 1248.5,
+        convenienceFee: 37.46,
+        addOnConvenienceFee: 0,
+        totalCharged: 1285.96,
+        currency: 'USD',
+        purpose: 'DOWN_PAYMENT',
+        receiptId: 'input1-receipt-2',
+        completedAt: '2026-08-05T18:05:00.000Z',
+      });
+    const { getAllByText, getByLabelText, getByText, findByRole, findByText } = render(<PaymentScreen />);
+
+    await waitFor(() => expect(getAllByText('$1,248.50').length).toBeGreaterThan(0));
+    fireEvent.changeText(getByLabelText('Card Number'), '4111111111111111');
+    fireEvent.changeText(getByLabelText('Expiration (MM/YY)'), '1230');
+    fireEvent.changeText(getByLabelText('Security Code'), '123');
+    fireEvent.press(getByText('Review Payment'));
+    fireEvent.press(await findByRole('button', { name: 'Confirm Payment' }));
+
+    expect(
+      await findByText(
+        'Your payment was not accepted. Verify the cardholder and billing information, then try again. Your card was not charged.'
+      )
+    ).toBeTruthy();
+    expect(getByLabelText('First Name')).toHaveProp('value', 'Jane');
+    expect(getByLabelText('Address')).toHaveProp('value', '123 Main Street');
+    expect(getByLabelText('Card Number')).toHaveProp('value', '');
+
+    fireEvent.changeText(getByLabelText('First Name'), 'Grace');
+    fireEvent.changeText(getByLabelText('Last Name'), 'Hopper');
+    fireEvent.changeText(getByLabelText('Card Number'), '4111111111111111');
+    fireEvent.changeText(getByLabelText('Expiration (MM/YY)'), '1230');
+    fireEvent.changeText(getByLabelText('Security Code'), '123');
+    fireEvent.press(getByText('Review Payment'));
+    fireEvent.press(await findByRole('button', { name: 'Confirm Payment' }));
+
+    expect(await findByText('input1-receipt-2')).toBeTruthy();
+    expect(mockSubmitPayment).toHaveBeenCalledTimes(2);
+    expect(mockSubmitPayment.mock.calls[1][3]).not.toBe(mockSubmitPayment.mock.calls[0][3]);
+    expect(mockSubmitPayment.mock.calls[1][4]).toEqual(
+      expect.objectContaining({
+        card: expect.objectContaining({ firstName: 'Grace', lastName: 'Hopper' }),
+      })
+    );
+    expect(mockRefreshPaymentEligibility).toHaveBeenCalled();
   });
 
   it('reuses the idempotency key only when the exact failed payment is re-entered', async () => {
