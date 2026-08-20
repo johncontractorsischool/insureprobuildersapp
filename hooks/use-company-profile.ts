@@ -228,7 +228,11 @@ function normalizeDemoGroups(groups: DemoCompanyData['bonding'] | DemoCompanyDat
 export function useCompanyProfile() {
   const { customer, userEmail } = useAuth();
   const portalConfig = useMemo(() => getPortalConfig(), []);
-  const demoCompany = portalConfig.demo.data?.company ?? null;
+  const isReviewDemoSession =
+    portalConfig.review.enabled && userEmail === portalConfig.review.email;
+  const demoCompany =
+    portalConfig.demo.data?.company ??
+    (isReviewDemoSession ? portalConfig.review.data?.company ?? null : null);
   const [cslbLicense, setCslbLicense] = useState<CslbLicense | null>(null);
   const [isLoadingCompany, setIsLoadingCompany] = useState(false);
   const [companyLookupNotice, setCompanyLookupNotice] = useState<string | null>(null);

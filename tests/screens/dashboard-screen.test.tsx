@@ -77,6 +77,12 @@ describe('DashboardScreen', () => {
         profile: null,
         data: null,
       },
+      review: {
+        enabled: false,
+        email: null,
+        code: null,
+        data: null,
+      },
       agent: {
         name: 'Fallback Agent',
         phone: null,
@@ -363,11 +369,24 @@ describe('DashboardScreen', () => {
     );
   });
 
-  it('uses the demo profile and blocks side-effect actions when demo mode is enabled', async () => {
+  it('uses the demo profile and blocks side effects for the fixed-code demo session', async () => {
+    mockUseAuth.mockReturnValue({
+      customer: buildCustomer({
+        email: 'demo@insureprobuilders.com',
+        insuredId: '101000937',
+      }),
+      userEmail: 'demo@insureprobuilders.com',
+    });
     mockGetPortalConfig.mockReturnValue({
       demo: {
-        enabled: true,
+        enabled: false,
         profile: 'marketing',
+        data: null,
+      },
+      review: {
+        enabled: true,
+        email: 'demo@insureprobuilders.com',
+        code: '111111',
         data: {
           id: 'marketing',
           label: 'Marketing Demo',

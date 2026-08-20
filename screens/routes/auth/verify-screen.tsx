@@ -21,6 +21,7 @@ import {
   verifyEmailSignInCode,
 } from '@/services/auth-flow';
 import { PbiaApiError } from '@/services/pbia-client';
+import { getPortalConfig } from '@/services/portal-config';
 import type { CustomerLookupRecord } from '@/types/customer';
 
 function maskEmail(email: string) {
@@ -42,6 +43,7 @@ export default function VerifyScreen() {
     completeSignIn,
     signOut,
   } = useAuth();
+  const portalConfig = getPortalConfig();
   const { width } = useWindowDimensions();
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -60,10 +62,16 @@ export default function VerifyScreen() {
   }, [pendingEmail]);
 
   useEffect(() => {
+    if (hint === 'apple-review' && portalConfig.review.enabled) {
+      setNotice(`Enter code ${portalConfig.review.code} to continue`);
+      setSecondsRemaining(0);
+      return;
+    }
+
     if (hint !== 'rate-limited') return;
     setNotice('Use your latest verification code, or wait before requesting another email.');
     setSecondsRemaining(60);
-  }, [hint]);
+  }, [hint, portalConfig.review.code, portalConfig.review.enabled]);
 
   useEffect(() => {
     if (hint !== 'otp-unavailable') return;
@@ -141,6 +149,8 @@ export default function VerifyScreen() {
     }
 
     const normalizedCode = code.replace(/\D/g, '');
+    const isReviewDemoEmail =
+      portalConfig.review.enabled && pendingEmail === portalConfig.review.email;
 
     if (normalizedCode.length !== 6 || !pendingEmail) return;
     if (submitting) return;
@@ -150,6 +160,26 @@ export default function VerifyScreen() {
     setNotice('');
 
     try {
+      if (isReviewDemoEmail) {
+        if (normalizedCode !== portalConfig.review.code) {
+          setError('Invalid demo code. Use the configured demo code to continue.');
+          return;
+        }
+
+        const demoCustomer = portalConfig.review.data?.customer;
+        if (!demoCustomer) {
+          throw new Error('The demo profile is unavailable.');
+        }
+
+        completeSignIn(
+          pendingEmail,
+          demoCustomer,
+          demoCustomer.insuredId ?? demoCustomer.licenseNumber
+        );
+        router.replace('/(tabs)');
+        return;
+      }
+
       const verifiedEmail = await verifyEmailSignInCode(pendingEmail, normalizedCode);
       const normalizedVerifiedEmail = verifiedEmail.trim().toLowerCase();
 
@@ -205,6 +235,11 @@ export default function VerifyScreen() {
 
     setError('');
     setNotice('');
+
+    if (portalConfig.review.enabled && pendingEmail === portalConfig.review.email) {
+      setNotice(`Enter code ${portalConfig.review.code} to continue`);
+      return;
+    }
 
     try {
       await sendEmailSignInCode(pendingEmail);

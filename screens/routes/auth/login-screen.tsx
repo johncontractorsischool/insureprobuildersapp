@@ -11,6 +11,7 @@ import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { ClientSignUpForm } from '@/screens/routes/auth/client-sign-up-form';
 import { isOtpRateLimitError, sendEmailSignInCode, toUserFacingError } from '@/services/auth-flow';
+import { getPortalConfig } from '@/services/portal-config';
 
 function isEmailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -28,6 +29,7 @@ function getAuthModeFromParam(value: string | string[] | undefined): AuthMode {
 export default function LoginScreen() {
   const params = useLocalSearchParams<{ mode?: string | string[] }>();
   const { setPendingEmail, setCustomer } = useAuth();
+  const portalConfig = getPortalConfig();
   const { width } = useWindowDimensions();
   const [mode, setMode] = useState<AuthMode>(getAuthModeFromParam(params.mode));
   const [email, setEmail] = useState('');
@@ -56,6 +58,17 @@ export default function LoginScreen() {
     setError('');
 
     try {
+      if (
+        portalConfig.review.enabled &&
+        normalizedEmail === portalConfig.review.email &&
+        portalConfig.review.data
+      ) {
+        setPendingEmail(normalizedEmail, portalConfig.review.data.customer.insuredId);
+        setCustomer(null);
+        router.push({ pathname: '/(auth)/verify', params: { hint: 'apple-review' } });
+        return;
+      }
+
       await sendEmailSignInCode(normalizedEmail);
 
       setPendingEmail(normalizedEmail);

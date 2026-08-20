@@ -9,6 +9,7 @@ import { buildCustomerLookupRecord } from '@/tests/factories';
 const mockGetSupabaseClient = jest.fn();
 const mockResolveMyAccount = jest.fn();
 const mockResolveMyAccountByLicense = jest.fn();
+const mockGetPortalConfig = jest.fn();
 
 type MockAuthSession = { user: { email: string } } | null;
 type MockAuthChangeHandler = (
@@ -23,6 +24,9 @@ jest.mock('@/services/customer-api', () => ({
   resolveMyAccount: (...args: unknown[]) => mockResolveMyAccount(...args),
   resolveMyAccountByLicense: (...args: unknown[]) =>
     mockResolveMyAccountByLicense(...args),
+}));
+jest.mock('@/services/portal-config', () => ({
+  getPortalConfig: () => mockGetPortalConfig(),
 }));
 
 function createSupabaseMock({
@@ -90,6 +94,10 @@ function wrapper({ children }: PropsWithChildren) {
 describe('AuthProvider', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
+    mockGetPortalConfig.mockReturnValue({
+      demo: { enabled: false, profile: null, data: null },
+      review: { enabled: false, email: null, code: null, data: null },
+    });
     mockResolveMyAccount.mockReset();
     mockResolveMyAccountByLicense.mockReset();
   });
@@ -373,7 +381,7 @@ describe('AuthProvider', () => {
     expect(result.current.isAuthenticated).toBe(true);
   });
 
-  it('does not restore a legacy review session without a Supabase session', async () => {
+  it('restores a configured demo session without a Supabase session', async () => {
     await AsyncStorage.setItem(
       'portal_review_session',
       JSON.stringify({
@@ -382,17 +390,92 @@ describe('AuthProvider', () => {
       })
     );
 
+    mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: false,
+        profile: 'marketing',
+        data: null,
+      },
+      review: {
+        enabled: true,
+        email: 'demo@insureprobuilders.com',
+        code: '111111',
+        data: {
+          customer: {
+            email: 'demo@insureprobuilders.com',
+            insuredId: '101000937',
+            commercialName: 'UrbanEdge Construction Inc.',
+          },
+        },
+      },
+    });
+
     mockGetSupabaseClient.mockReturnValue(createSupabaseMock({}));
     const { result } = renderHook(() => useAuth(), { wrapper });
 
     await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
 
-    expect(result.current.isAuthenticated).toBe(false);
-    expect(result.current.userEmail).toBeNull();
-    expect(result.current.pendingEmail).toBe('');
-    expect(result.current.pendingInsuredId).toBe('');
-    expect(result.current.customer).toBeNull();
+    expect(result.current.isAuthenticated).toBe(true);
+    expect(result.current.userEmail).toBe('demo@insureprobuilders.com');
+    expect(result.current.pendingEmail).toBe('demo@insureprobuilders.com');
+    expect(result.current.pendingInsuredId).toBe('101000937');
+    expect(result.current.customer).toEqual(
+      expect.objectContaining({
+        insuredId: '101000937',
+        commercialName: 'UrbanEdge Construction Inc.',
+      })
+    );
     expect(mockResolveMyAccount).not.toHaveBeenCalled();
+  });
+
+  it('persists a configured demo sign-in and clears it on sign-out', async () => {
+    mockGetPortalConfig.mockReturnValue({
+      demo: { enabled: false, profile: 'marketing', data: null },
+      review: {
+        enabled: true,
+        email: 'demo@insureprobuilders.com',
+        code: '111111',
+        data: {
+          customer: {
+            email: 'demo@insureprobuilders.com',
+            insuredId: '101000937',
+            commercialName: 'UrbanEdge Construction Inc.',
+          },
+        },
+      },
+    });
+    mockGetSupabaseClient.mockReturnValue(createSupabaseMock({}));
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
+
+    act(() => {
+      result.current.completeSignIn(
+        'demo@insureprobuilders.com',
+        {
+          email: 'demo@insureprobuilders.com',
+          insuredId: '101000937',
+          commercialName: 'UrbanEdge Construction Inc.',
+        },
+        '101000937'
+      );
+    });
+
+    await waitFor(async () => {
+      expect(await AsyncStorage.getItem('portal_review_session')).toBe(
+        JSON.stringify({
+          email: 'demo@insureprobuilders.com',
+          insuredId: '101000937',
+        })
+      );
+    });
+
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    expect(await AsyncStorage.getItem('portal_review_session')).toBeNull();
+    expect(result.current.isAuthenticated).toBe(false);
   });
 
   it('signOut clears the local auth state even if Supabase resolves normally', async () => {

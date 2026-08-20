@@ -4,12 +4,14 @@ import { PropsWithChildren, createContext, useCallback, useContext, useEffect, u
 import type { ClientSignupRequest } from '@/services/client-signup-api';
 import { resolveMyAccount, resolveMyAccountByLicense } from '@/services/customer-api';
 import { PbiaApiError } from '@/services/pbia-client';
+import { getPortalConfig } from '@/services/portal-config';
 import { getSupabaseClient } from '@/services/supabase';
 import type { Customer, CustomerLookupRecord } from '@/types/customer';
 import { matchesCustomerInsuredId } from '@/utils/customer-selection';
 
 const CUSTOMER_TABLE = process.env.EXPO_PUBLIC_SUPABASE_CUSTOMER_TABLE?.trim() || 'portal_customers';
 const SELECTED_CUSTOMER_STORAGE_KEY = 'portal_selected_customer';
+const REVIEW_SESSION_STORAGE_KEY = 'portal_review_session';
 const LIVE_CUSTOMER_RESTORE_TIMEOUT_MS = 5000;
 const CACHED_CUSTOMER_RESTORE_TIMEOUT_MS = 3000;
 
@@ -55,6 +57,11 @@ async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number) {
 }
 
 type PersistedCustomerSelection = {
+  email: string;
+  insuredId: string;
+};
+
+type PersistedReviewSession = {
   email: string;
   insuredId: string;
 };
@@ -108,6 +115,44 @@ async function persistSelectedCustomer(email: string, insuredId: string | null |
       email: normalizedEmail,
       insuredId: normalizedInsuredId,
     } satisfies PersistedCustomerSelection)
+  );
+}
+
+async function readPersistedReviewSession() {
+  try {
+    const raw = await AsyncStorage.getItem(REVIEW_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<PersistedReviewSession>;
+    if (typeof parsed.email !== 'string' || typeof parsed.insuredId !== 'string') {
+      return null;
+    }
+
+    const email = normalizeEmail(parsed.email);
+    const insuredId = parsed.insuredId.trim();
+    if (!email || !insuredId) return null;
+
+    return { email, insuredId };
+  } catch {
+    return null;
+  }
+}
+
+async function persistReviewSession(email: string, insuredId: string | null | undefined) {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedInsuredId = insuredId?.trim() ?? '';
+
+  if (!normalizedEmail || !normalizedInsuredId) {
+    await AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
+    return;
+  }
+
+  await AsyncStorage.setItem(
+    REVIEW_SESSION_STORAGE_KEY,
+    JSON.stringify({
+      email: normalizedEmail,
+      insuredId: normalizedInsuredId,
+    } satisfies PersistedReviewSession)
   );
 }
 
@@ -241,6 +286,10 @@ async function resolveLiveCustomerForRestore(
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
+  const portalConfig = getPortalConfig();
+  const reviewEnabled = portalConfig.review.enabled;
+  const reviewEmail = portalConfig.review.email;
+  const reviewCustomer = portalConfig.review.data?.customer ?? null;
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [customer, setCustomerState] = useState<Customer | null>(null);
@@ -324,16 +373,33 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
         const sessionEmail = data.session?.user?.email ?? null;
         const persistedSelection = await readPersistedCustomerSelection();
+        const reviewSession = reviewEnabled ? await readPersistedReviewSession() : null;
+        if (!reviewEnabled) {
+          void AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
+        }
         if (!mounted) return;
         const preferredInsuredId =
           sessionEmail && persistedSelection?.email === normalizeEmail(sessionEmail)
             ? persistedSelection.insuredId
             : '';
-        setUserEmail(sessionEmail);
-        if (sessionEmail) setPendingEmailState(sessionEmail);
-        setPendingInsuredIdState(preferredInsuredId);
+        const canRestoreReviewSession =
+          !sessionEmail &&
+          reviewEnabled &&
+          reviewSession?.email === reviewEmail &&
+          Boolean(reviewCustomer);
+
+        setUserEmail(sessionEmail ?? (canRestoreReviewSession ? reviewSession?.email ?? null : null));
+        setPendingEmailState(sessionEmail ?? (canRestoreReviewSession ? reviewSession?.email ?? '' : ''));
+        setPendingInsuredIdState(
+          canRestoreReviewSession ? reviewSession?.insuredId ?? '' : preferredInsuredId
+        );
         if (sessionEmail) {
           await hydrateCustomerForEmail(sessionEmail, preferredInsuredId);
+        } else if (canRestoreReviewSession && reviewCustomer) {
+          setCustomerState({
+            ...reviewCustomer,
+            email: reviewSession?.email ?? reviewCustomer.email,
+          });
         }
         setIsLoadingAuth(false);
 
@@ -342,12 +408,27 @@ export function AuthProvider({ children }: PropsWithChildren) {
           const nextEmail = session?.user?.email ?? null;
           setUserEmail(nextEmail);
           if (!nextEmail) {
+            const storedReviewSession = reviewEnabled ? await readPersistedReviewSession() : null;
+            if (
+              mounted &&
+              reviewEnabled &&
+              storedReviewSession?.email === reviewEmail &&
+              reviewCustomer
+            ) {
+              setUserEmail(storedReviewSession.email);
+              setPendingEmailState(storedReviewSession.email);
+              setPendingInsuredIdState(storedReviewSession.insuredId);
+              setCustomerState({ ...reviewCustomer, email: storedReviewSession.email });
+              return;
+            }
+
             accountSelectionPendingRef.current = false;
             setPendingEmailState('');
             setPendingInsuredIdState('');
             setPendingSignupState(null);
             setCustomerState(null);
             void AsyncStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
+            void AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
             return;
           }
 
@@ -365,6 +446,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
           const nextInsuredId =
             nextSelection?.email === normalizeEmail(nextEmail) ? nextSelection.insuredId : '';
           setPendingInsuredIdState(nextInsuredId);
+          void AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
           void hydrateCustomerForEmail(nextEmail, nextInsuredId);
         });
         unsubscribe = () => authListener.data.subscription.unsubscribe();
@@ -381,7 +463,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       mounted = false;
       unsubscribe();
     };
-  }, []);
+  }, [reviewCustomer, reviewEmail, reviewEnabled]);
 
   const setPendingEmail = (email: string, insuredId?: string | null) => {
     accountSelectionPendingRef.current = true;
@@ -408,6 +490,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const completeSignIn = useCallback((email: string, customerData?: Customer | null, insuredId?: string | null) => {
     const normalized = normalizeEmail(email);
     const normalizedInsuredId = insuredId?.trim() ?? customerData?.insuredId?.trim() ?? '';
+    const isReviewSession = reviewEnabled && normalized === reviewEmail;
     accountSelectionPendingRef.current = false;
     setUserEmail(normalized);
     setPendingEmailState(normalized);
@@ -418,7 +501,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     });
     setPendingSignupState(null);
     void persistSelectedCustomer(normalized, normalizedInsuredId);
-  }, []);
+    void (isReviewSession
+      ? persistReviewSession(normalized, normalizedInsuredId)
+      : AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY));
+  }, [reviewEmail, reviewEnabled]);
 
   const signOut = async () => {
     try {
@@ -432,6 +518,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       setPendingSignupState(null);
       setCustomerState(null);
       await AsyncStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
+      await AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
     }
   };
 

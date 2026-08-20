@@ -24,6 +24,7 @@ const mockToCustomerProfile = jest.fn((customer: { insuredId?: string | null }) 
 const mockToUserFacingError = jest.fn((error: Error, fallback: string) => error.message || fallback);
 const mockVerifyEmailSignInCode = jest.fn();
 const mockIsOtpRateLimitError = jest.fn();
+const mockGetPortalConfig = jest.fn();
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -51,6 +52,9 @@ jest.mock('@/services/auth-flow', () => ({
   verifyEmailSignInCode: (...args: unknown[]) => mockVerifyEmailSignInCode(...args),
   isOtpRateLimitError: (...args: unknown[]) => mockIsOtpRateLimitError(...args),
 }));
+jest.mock('@/services/portal-config', () => ({
+  getPortalConfig: () => mockGetPortalConfig(),
+}));
 jest.mock('@/components/otp-input', () => ({
   OTPInput: ({ value, onChange }: { value: string; onChange: (next: string) => void }) => {
     const React = require('react');
@@ -63,6 +67,10 @@ const VerifyScreen = require('@/app/(auth)/verify').default;
 
 describe('VerifyScreen', () => {
   beforeEach(() => {
+    mockGetPortalConfig.mockReturnValue({
+      demo: { enabled: false, profile: null, data: null },
+      review: { enabled: false, email: null, code: null, data: null },
+    });
     mockUseLocalSearchParams.mockReturnValue({});
     mockUseAuth.mockReturnValue({
       pendingEmail: 'jane@example.com',
@@ -183,7 +191,7 @@ describe('VerifyScreen', () => {
     ).toBeTruthy();
   });
 
-  it('requires Supabase verification for the Apple review email', async () => {
+  it('accepts the configured demo code without calling Supabase or PBIA', async () => {
     const completeSignIn = jest.fn();
     mockUseLocalSearchParams.mockReturnValue({ hint: 'apple-review' });
     mockUseAuth.mockReturnValue({
@@ -194,17 +202,26 @@ describe('VerifyScreen', () => {
       completeSignIn,
       signOut: jest.fn(),
     });
-    mockResolveMyAccount.mockResolvedValue({
-      status: 'ACCOUNT_RESOLVED',
-      matchCount: 1,
-      account: buildCustomerLookupRecord({
-        eMail: 'demo@insureprobuilders.com',
-        insuredId: '101000937',
-        commercialName: 'UrbanEdge Construction Inc.',
-      }),
+    mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: false,
+        profile: 'marketing',
+        data: null,
+      },
+      review: {
+        enabled: true,
+        email: 'demo@insureprobuilders.com',
+        code: '111111',
+        data: {
+          customer: {
+            email: 'demo@insureprobuilders.com',
+            insuredId: '101000937',
+            commercialName: 'UrbanEdge Construction Inc.',
+          },
+        },
+      },
     });
 
-    mockVerifyEmailSignInCode.mockResolvedValue('demo@insureprobuilders.com');
     const { getByTestId, getByText } = render(<VerifyScreen />);
 
     fireEvent.changeText(getByTestId('otp-input'), '111111');
@@ -213,17 +230,51 @@ describe('VerifyScreen', () => {
     await waitFor(() =>
       expect(completeSignIn).toHaveBeenCalledWith(
         'demo@insureprobuilders.com',
-        expect.objectContaining({ insuredId: '101000937' }),
+        expect.objectContaining({ commercialName: 'UrbanEdge Construction Inc.' }),
         '101000937'
       )
     );
-    expect(mockVerifyEmailSignInCode).toHaveBeenCalledWith(
-      'demo@insureprobuilders.com',
-      '111111'
-    );
-    expect(mockResolveMyAccount).toHaveBeenCalledWith('demo@insureprobuilders.com');
-    expect(mockPersistCustomersForEmail).toHaveBeenCalled();
+    expect(mockVerifyEmailSignInCode).not.toHaveBeenCalled();
+    expect(mockResolveMyAccount).not.toHaveBeenCalled();
+    expect(mockPersistCustomersForEmail).not.toHaveBeenCalled();
     expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)');
+  });
+
+  it('rejects an incorrect fixed code for the configured demo email', async () => {
+    const completeSignIn = jest.fn();
+    mockUseLocalSearchParams.mockReturnValue({ hint: 'apple-review' });
+    mockUseAuth.mockReturnValue({
+      pendingEmail: 'demo@insureprobuilders.com',
+      pendingInsuredId: '101000937',
+      pendingSignup: null,
+      clearPendingSignup: jest.fn(),
+      completeSignIn,
+      signOut: jest.fn(),
+    });
+    mockGetPortalConfig.mockReturnValue({
+      demo: {
+        enabled: false,
+        profile: 'marketing',
+        data: null,
+      },
+      review: {
+        enabled: true,
+        email: 'demo@insureprobuilders.com',
+        code: '111111',
+        data: { customer: { insuredId: '101000937' } },
+      },
+    });
+
+    const { findByText, getByTestId, getByText } = render(<VerifyScreen />);
+
+    fireEvent.changeText(getByTestId('otp-input'), '222222');
+    fireEvent.press(getByText('Verify and Continue'));
+
+    expect(
+      await findByText('Invalid demo code. Use the configured demo code to continue.')
+    ).toBeTruthy();
+    expect(completeSignIn).not.toHaveBeenCalled();
+    expect(mockVerifyEmailSignInCode).not.toHaveBeenCalled();
   });
 
   it('asks for a license number when the verified email owns multiple accounts', async () => {

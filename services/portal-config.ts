@@ -11,6 +11,7 @@ type PortalConfig = {
     enabled: boolean;
     email: string | null;
     code: string | null;
+    data: DemoProfile | null;
   };
   agent: {
     name: string;
@@ -62,6 +63,9 @@ export function getPortalConfig(): PortalConfig {
   const isAppleReviewModeEnabled = normalizeBooleanFlag(process.env.EXPO_PUBLIC_APPLE_REVIEW_DEMO_LOGIN);
   const requestedDemoProfile = normalizeText(process.env.EXPO_PUBLIC_DEMO_PROFILE);
   const demoProfile = isDemoModeEnabled ? getDemoProfileById(requestedDemoProfile ?? DEFAULT_DEMO_PROFILE_ID) : null;
+  const reviewDemoProfile = isAppleReviewModeEnabled
+    ? getDemoProfileById(requestedDemoProfile ?? DEFAULT_DEMO_PROFILE_ID)
+    : null;
   const appleReviewEmail =
     normalizeEmail(process.env.EXPO_PUBLIC_APPLE_REVIEW_EMAIL) ?? 'demo@insureprobuilders.com';
   const appleReviewCode = normalizeText(process.env.EXPO_PUBLIC_APPLE_REVIEW_CODE) ?? '111111';
@@ -76,6 +80,7 @@ export function getPortalConfig(): PortalConfig {
       enabled: isAppleReviewModeEnabled,
       email: isAppleReviewModeEnabled ? appleReviewEmail : null,
       code: isAppleReviewModeEnabled ? appleReviewCode : null,
+      data: reviewDemoProfile,
     },
     agent: {
       name: demoProfile?.agent.name ?? normalizeText(process.env.EXPO_PUBLIC_AGENT_NAME) ?? 'Assigned agent',

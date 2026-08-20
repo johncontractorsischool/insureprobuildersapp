@@ -357,8 +357,12 @@ export default function DashboardScreen({
   const { customer, userEmail } = useAuth();
   const { payableRecords } = usePayments();
   const portalConfig = useMemo(() => getPortalConfig(), []);
-  const demoProfile = portalConfig.demo.data;
-  const isDemoMode = portalConfig.demo.enabled && Boolean(demoProfile);
+  const isReviewDemoSession =
+    portalConfig.review.enabled && userEmail === portalConfig.review.email;
+  const demoProfile =
+    portalConfig.demo.data ??
+    (isReviewDemoSession ? portalConfig.review.data : null);
+  const isDemoMode = Boolean(demoProfile);
   const demoUi = demoProfile?.ui;
   const resolvedCustomer = demoProfile?.customer ?? customer;
   const resolvedUserEmail = demoProfile?.customer.email ?? userEmail;
@@ -453,13 +457,18 @@ export default function DashboardScreen({
       .join(" ");
 
     return {
-      name: fullName || portalConfig.agent.name,
+      name: fullName || demoProfile?.agent.name || portalConfig.agent.name,
       phone:
-        normalizeText(agent?.phone) ?? normalizeText(portalConfig.agent.phone),
+        normalizeText(agent?.phone) ??
+        normalizeText(demoProfile?.agent.phone) ??
+        normalizeText(portalConfig.agent.phone),
       email:
-        normalizeText(agent?.email) ?? normalizeText(portalConfig.agent.email),
+        normalizeText(agent?.email) ??
+        normalizeText(demoProfile?.agent.email) ??
+        normalizeText(portalConfig.agent.email),
       smsPhone:
         normalizeText(agent?.phone) ??
+        normalizeText(demoProfile?.agent.smsPhone) ??
         normalizeText(portalConfig.agent.smsPhone),
     };
   }, [
@@ -467,6 +476,10 @@ export default function DashboardScreen({
     agent?.firstName,
     agent?.lastName,
     agent?.phone,
+    demoProfile?.agent.email,
+    demoProfile?.agent.name,
+    demoProfile?.agent.phone,
+    demoProfile?.agent.smsPhone,
     portalConfig.agent.email,
     portalConfig.agent.name,
     portalConfig.agent.phone,
@@ -484,8 +497,9 @@ export default function DashboardScreen({
   const resolvedScheduleUrl = useMemo(
     () =>
       AGENT_SCHEDULE_URLS[toAvatarKey(resolvedAgent.name)] ??
+      demoProfile?.agent.scheduleUrl ??
       portalConfig.agent.scheduleUrl,
-    [portalConfig.agent.scheduleUrl, resolvedAgent.name],
+    [demoProfile?.agent.scheduleUrl, portalConfig.agent.scheduleUrl, resolvedAgent.name],
   );
 
   const agentActions = useMemo<AgentAction[]>(
@@ -611,6 +625,7 @@ export default function DashboardScreen({
   ]);
   const dataCurrentValue = lookupSummaryValue(licenseRows, ["data current"]);
   const agencyMailingAddress =
+    normalizeText(demoProfile?.agent.mailingAddress) ??
     normalizeText(portalConfig.agent.mailingAddress) ??
     buildAgencyMailingAddress(businessRows);
   const agencyMailingAddressLink =
@@ -640,7 +655,8 @@ export default function DashboardScreen({
           customer: resolvedCustomer,
           userEmail: resolvedUserEmail,
           cslbLicense,
-          fallbackLicenseNumber: portalConfig.company.licenseNumber,
+          fallbackLicenseNumber:
+            demoProfile?.company.licenseNumber ?? portalConfig.company.licenseNumber,
         }),
       );
       const result = await openInAppBrowser(

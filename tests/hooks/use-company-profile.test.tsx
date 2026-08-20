@@ -31,6 +31,12 @@ describe('useCompanyProfile', () => {
         profile: null,
         data: null,
       },
+      review: {
+        enabled: false,
+        email: null,
+        code: null,
+        data: null,
+      },
       agent: {
         name: 'Fallback Agent',
         phone: null,
@@ -237,6 +243,12 @@ describe('useCompanyProfile', () => {
             disabledMessage: 'This action is disabled in demo mode.',
           },
         },
+      },
+      review: {
+        enabled: false,
+        email: null,
+        code: null,
+        data: null,
       },
       agent: {
         name: 'Emily Carter',
