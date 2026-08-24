@@ -8,6 +8,9 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "web:export:production": "EXPO_NO_DOTENV=1 sh -c 'set -a; . ./.env; set +a; EXPO_PUBLIC_PBIA_API_BASE_URL=https://api.ams.insureprobuilders.com expo export --platform web --clear'",
+    "web:verify:production": "if rg -q 'http://localhost:4000' dist; then echo 'Production web bundle still contains http://localhost:4000'; exit 1; fi; rg -q 'https://api.ams.insureprobuilders.com' dist && echo 'Production web bundle verified: AMS-PBIA production URL is present'",
+    "web:deploy:production": "npm run web:export:production && npm run web:verify:production && npx eas-cli@latest deploy --prod --environment production",
     "lint": "expo lint",
     "test": "jest --config jest.config.cjs --watchman=false"
   },
