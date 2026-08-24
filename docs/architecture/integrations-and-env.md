@@ -40,6 +40,7 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
   - `GET /client/documents`
   - `GET /client/policies/:policyId/documents`
   - `POST /client/contact-requests`
+- Account deletion uses the authenticated `delete-account` Edge Function. Before deleting the login or app-owned portal data, the function creates/ confirms an access block in AMS-PBIA through the private `POST /internal/client-account-access-blocks` endpoint. It then deletes the authentication user and Supabase-owned portal data (`portal_customers`, `portal_signups`, digital business card records/media, and cascaded push-device/card rows) without deleting Momentum/CRM policy or insurance records. If the PBIA block cannot be created, deletion fails closed.
 - Every request requires the current Supabase access token as `Authorization: Bearer <token>`. The shared transport rejects missing sessions and rejects a requested email that differs from the verified session email. It does not send `X-Client-Email` or `X-API-Key`.
 - Sign-in sends and verifies the Supabase OTP before account discovery. `GET /client/my-account/resolve` returns the authenticated email's sign-in/signup decision. A single account opens immediately; multiple eligible accounts require a CSLB selector through `POST /client/my-account/resolve`; and signup proceeds only for `SIGNUP_ALLOWED`.
 - Signup details remain in memory until OTP verification succeeds. `POST /client/signup` runs only after the resolver confirms `SIGNUP_ALLOWED`, and the backend independently repeats its existing-account check.
@@ -76,6 +77,8 @@ The app reads Expo public env vars at runtime. Values are not committed here; de
 - `verifyEmailSignInCode()` calls `supabase.auth.verifyOtp`.
 - `AuthProvider` listens to `supabase.auth.onAuthStateChange`.
 - Sessions persist locally through AsyncStorage.
+- The Profile screen invokes the authenticated `delete-account` Edge Function after explicit confirmation. The function verifies the bearer token, creates the AMS-PBIA access block, removes app-owned portal data, deletes the authentication user, and leaves Momentum/CRM records untouched.
+- The `delete-account` function requires server-only Edge Function secrets: `SUPABASE_SERVICE_ROLE_KEY`, `PBIA_INTERNAL_API_BASE_URL`, and `PBIA_INTERNAL_SERVICE_TOKEN`. Never add these values to `EXPO_PUBLIC_*`, the app bundle, or this repository.
 
 ### Cached Customer Table
 

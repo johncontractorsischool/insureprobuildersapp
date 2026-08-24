@@ -2,6 +2,7 @@ import { resolveApiBaseUrl } from '@/services/api-base-url';
 import { getSupabaseClient } from '@/services/supabase';
 
 type PbiaErrorPayload = {
+  code?: unknown;
   message?: unknown;
 };
 
@@ -12,11 +13,13 @@ type PbiaRequestOptions = Omit<RequestInit, 'headers'> & {
 
 export class PbiaApiError extends Error {
   readonly status: number;
+  readonly code?: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = 'PbiaApiError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -93,6 +96,12 @@ function errorMessage(payload: unknown, fallback: string) {
   return fallback;
 }
 
+function errorCode(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const code = (payload as PbiaErrorPayload).code;
+  return typeof code === 'string' && code.trim() ? code.trim() : undefined;
+}
+
 export async function pbiaRequest<T>(
   path: string,
   options: PbiaRequestOptions,
@@ -106,7 +115,11 @@ export async function pbiaRequest<T>(
   const payload = await readJson(response);
 
   if (!response.ok) {
-    throw new PbiaApiError(response.status, errorMessage(payload, fallbackError));
+    throw new PbiaApiError(
+      response.status,
+      errorMessage(payload, fallbackError),
+      errorCode(payload)
+    );
   }
 
   return payload as T;

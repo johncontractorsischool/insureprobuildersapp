@@ -166,6 +166,40 @@ describe('VerifyScreen', () => {
     consoleWarnSpy.mockRestore();
   });
 
+  it('signs out and blocks access when PBIA reports a deleted account', async () => {
+    const completeSignIn = jest.fn();
+    const signOut = jest.fn().mockResolvedValue(undefined);
+    mockUseAuth.mockReturnValue({
+      pendingEmail: 'jane@example.com',
+      pendingInsuredId: 'LIC-123456',
+      pendingSignup: null,
+      clearPendingSignup: jest.fn(),
+      completeSignIn,
+      signOut,
+    });
+    mockVerifyEmailSignInCode.mockResolvedValue('jane@example.com');
+    mockResolveMyAccount.mockRejectedValue(
+      new PbiaApiError(
+        403,
+        'This account is unavailable. Contact support if you need to re-establish access.',
+        'ACCOUNT_ACCESS_BLOCKED'
+      )
+    );
+
+    const { findByText, getByTestId, getByText } = render(<VerifyScreen />);
+
+    fireEvent.changeText(getByTestId('otp-input'), '123456');
+    fireEvent.press(getByText('Verify and Continue'));
+
+    expect(
+      await findByText(
+        'This account is unavailable. Contact support if you need to re-establish access.'
+      )
+    ).toBeTruthy();
+    expect(signOut).toHaveBeenCalled();
+    expect(completeSignIn).not.toHaveBeenCalled();
+  });
+
   it('redirects back to login when there is no pending email', async () => {
     mockUseAuth.mockReturnValue({
       pendingEmail: '',

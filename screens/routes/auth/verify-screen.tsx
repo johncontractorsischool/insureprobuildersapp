@@ -132,7 +132,10 @@ export default function VerifyScreen() {
         await cacheResolvedCustomer(verifiedEmail, resolution.account);
         completeCustomerSelection(verifiedEmail, resolution.account, licenseNumber);
       } catch (caughtError) {
-        if (caughtError instanceof PbiaApiError && caughtError.status === 404) {
+        if (caughtError instanceof PbiaApiError && caughtError.code === 'ACCOUNT_ACCESS_BLOCKED') {
+          await signOut();
+          setError(caughtError.message);
+        } else if (caughtError instanceof PbiaApiError && caughtError.status === 404) {
           setError('That license number is not associated with this verified email address.');
         } else {
           setError(
@@ -219,7 +222,12 @@ export default function VerifyScreen() {
       await cacheResolvedCustomer(normalizedVerifiedEmail, resolution.account);
       completeCustomerSelection(normalizedVerifiedEmail, resolution.account);
     } catch (caughtError) {
-      setError(toUserFacingError(caughtError, 'Unable to verify code. Please try again.'));
+      if (caughtError instanceof PbiaApiError && caughtError.code === 'ACCOUNT_ACCESS_BLOCKED') {
+        await signOut();
+        setError(caughtError.message);
+      } else {
+        setError(toUserFacingError(caughtError, 'Unable to verify code. Please try again.'));
+      }
     } finally {
       setSubmitting(false);
     }

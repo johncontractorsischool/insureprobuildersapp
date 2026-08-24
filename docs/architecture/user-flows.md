@@ -129,7 +129,16 @@
 2. `AuthProvider` signs out from Supabase and clears local auth/customer state.
 3. The protected tab layout redirects the user back to `/(auth)/login`.
 
-## 13. Failure and Degradation Rules
+## 13. Account Deletion Flow
+
+1. The authenticated user opens the Profile tab and selects **Delete Account** in the visible account-danger zone.
+2. The app explains that the action permanently deletes the account and associated app data, while required insurance records remain retained and coverage is not cancelled.
+3. After explicit confirmation, the app invokes the authenticated `delete-account` Supabase Edge Function.
+4. The function verifies the bearer token and creates/ confirms the email access block in AMS-PBIA before deleting any app-owned data.
+5. After the block succeeds, the function deletes app-owned portal rows and digital-card media, deletes the authentication user, and relies on existing foreign-key cascades for user-owned push/card records. Momentum/CRM records are not modified.
+6. The app confirms completion and signs the user out. If the Edge Function or AMS-PBIA block fails, the account remains signed in and the user receives a retryable error.
+
+## 14. Failure and Degradation Rules
 
 - Missing `customer.accountId` blocks PBIA policy, agent, CSLB, coverage, document, and contact-request calls and surfaces a user-facing error.
 - Agent lookup failure does not break the dashboard; it falls back to env-configured agent info.

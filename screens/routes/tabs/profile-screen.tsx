@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/app-button';
@@ -13,6 +13,8 @@ import { DIGITAL_BUSINESS_CARD_ENABLED } from '@/constants/feature-flags';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { createClientContactRequest } from '@/services/contact-request-api';
+import { deleteCurrentSupabaseAccount } from '@/services/account-deletion-api';
+import { getPortalConfig } from '@/services/portal-config';
 import { Customer } from '@/types/customer';
 import { formatEmailAddress, formatPhoneNumber, getNameFromCustomer } from '@/utils/format';
 
@@ -41,6 +43,11 @@ type ProfileFieldChange = {
   label: string;
   previousValue: string;
   nextValue: string;
+};
+
+type DeletionCompletion = {
+  title: string;
+  message: string;
 };
 
 function buildFormState(customer: Customer | null, userEmail: string | null): ProfileFormState {
@@ -168,10 +175,17 @@ export default function ProfileScreen({
 }: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { customer, userEmail, signOut } = useAuth();
+  const portalConfig = getPortalConfig();
+  const isReviewDemoSession =
+    portalConfig.review.enabled && normalizeEmail(userEmail ?? '') === portalConfig.review.email;
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [profileNotice, setProfileNotice] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [accountDeletionError, setAccountDeletionError] = useState('');
+  const [isDeleteConfirmationVisible, setIsDeleteConfirmationVisible] = useState(false);
+  const [deletionCompletion, setDeletionCompletion] = useState<DeletionCompletion | null>(null);
   const [formState, setFormState] = useState<ProfileFormState>(() => buildFormState(customer, userEmail));
   const accountHolderName = getNameFromCustomer(customer, userEmail);
   const accountEmail = formatProfileDisplayValue(customer?.email ?? userEmail, 'email');
@@ -192,6 +206,61 @@ export default function ProfileScreen({
   const handleLogout = async () => {
     await signOut();
   };
+
+  const submitAccountDeletion = async () => {
+    if (isDeletingAccount) return;
+
+    if (!userEmail) {
+      setAccountDeletionError('Your signed-in account could not be identified. Please sign in again.');
+      return;
+    }
+
+    setIsDeletingAccount(true);
+    setAccountDeletionError('');
+
+    try {
+      if (!isReviewDemoSession) {
+        await deleteCurrentSupabaseAccount();
+      }
+
+      const completionMessage = isReviewDemoSession
+        ? 'The shared review-only demo session was cleared. Required insurance records were not changed.'
+        : 'Your account and associated app data have been deleted. Required insurance records are retained.';
+      setDeletionCompletion({
+        title: isReviewDemoSession ? 'Demo session cleared' : 'Account deleted',
+        message: completionMessage,
+      });
+    } catch (caughtError) {
+      setAccountDeletionError(
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : 'Unable to delete your account right now. Please try again.'
+      );
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    if (isDeletingAccount) return;
+    setIsDeleteConfirmationVisible(true);
+  };
+
+  const confirmAccountDeletion = () => {
+    setIsDeleteConfirmationVisible(false);
+    void submitAccountDeletion();
+  };
+
+  const accountDialog = deletionCompletion
+    ? { mode: 'completion' as const, ...deletionCompletion }
+    : isDeleteConfirmationVisible
+      ? {
+          mode: 'confirmation' as const,
+          title: 'Delete your account?',
+          message:
+            'This permanently deletes your account and associated app data. Required insurance records are retained. This action does not cancel coverage.',
+        }
+      : null;
 
   const handleFormChange = (field: keyof ProfileFormState, value: string) => {
     setFormState((previous) => ({
@@ -370,8 +439,23 @@ export default function ProfileScreen({
         />
       </View>
 
-      <View style={styles.footer}>
-        <AppButton label="Log out" variant="danger" onPress={handleLogout} />
+      <View style={[styles.deletionCard, isDesktopLayout ? styles.desktopCard : null]}>
+        <Text style={styles.deletionTitle}>Delete account</Text>
+        <Text style={styles.deletionDetail}>
+          Permanently delete your account and associated app data. Required insurance records are retained.
+        </Text>
+        {accountDeletionError ? <Text style={styles.errorText}>{accountDeletionError}</Text> : null}
+        <AppButton
+          label="Delete Account"
+          variant="danger"
+          onPress={handleDeleteAccount}
+          loading={isDeletingAccount}
+        />
+      </View>
+
+      <View style={styles.logoutSection}>
+        <Text style={styles.logoutHint}>Sign out of this device</Text>
+        <AppButton label="Log out" variant="secondary" onPress={handleLogout} />
       </View>
     </View>
   );
@@ -403,6 +487,53 @@ export default function ProfileScreen({
           {supportBlock}
         </>
       )}
+      {accountDialog ? (
+        <Modal
+          transparent
+          visible
+          animationType="fade"
+          onRequestClose={() => {
+            if (accountDialog.mode === 'confirmation') {
+              setIsDeleteConfirmationVisible(false);
+            } else {
+              setDeletionCompletion(null);
+            }
+          }}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.accountDialog}>
+              <Text style={styles.dialogTitle}>{accountDialog.title}</Text>
+              <Text style={styles.dialogMessage}>{accountDialog.message}</Text>
+              {accountDialog.mode === 'confirmation' ? (
+                <View style={styles.dialogActions}>
+                  <View style={styles.dialogAction}>
+                    <AppButton
+                      label="Cancel"
+                      variant="secondary"
+                      onPress={() => setIsDeleteConfirmationVisible(false)}
+                    />
+                  </View>
+                  <View style={styles.dialogAction}>
+                    <AppButton
+                      label="Delete Account"
+                      variant="danger"
+                      onPress={confirmAccountDeletion}
+                      loading={isDeletingAccount}
+                    />
+                  </View>
+                </View>
+              ) : (
+                <AppButton
+                  label="OK"
+                  onPress={() => {
+                    setDeletionCompletion(null);
+                    void signOut();
+                  }}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
+      ) : null}
     </ScreenContainer>
   );
 }
@@ -537,7 +668,64 @@ const styles = StyleSheet.create({
     ...theme.typography.bodySmall,
     color: theme.colors.textMuted,
   },
-  footer: {
+  deletionCard: {
+    borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.danger,
+    backgroundColor: theme.colors.dangerSoft,
+    padding: theme.spacing.lg,
     gap: theme.spacing.sm,
+  },
+  deletionTitle: {
+    ...theme.typography.title,
+    color: theme.colors.danger,
+  },
+  deletionDetail: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textMuted,
+  },
+  logoutSection: {
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    paddingTop: theme.spacing.md,
+    marginTop: theme.spacing.xs,
+    gap: theme.spacing.sm,
+  },
+  logoutHint: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.35,
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: theme.spacing.lg,
+    backgroundColor: 'rgba(8, 20, 15, 0.58)',
+  },
+  accountDialog: {
+    width: '100%',
+    maxWidth: 460,
+    borderRadius: theme.radius.lg,
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.xl,
+    gap: theme.spacing.md,
+    ...theme.shadows.elevated,
+  },
+  dialogTitle: {
+    ...theme.typography.h2,
+    color: theme.colors.textStrong,
+  },
+  dialogMessage: {
+    ...theme.typography.body,
+    color: theme.colors.textMuted,
+  },
+  dialogActions: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
+  dialogAction: {
+    flex: 1,
   },
 });

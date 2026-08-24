@@ -169,6 +169,7 @@ This file explains every tracked folder and file in the repo and calls out wheth
 - `services/agent-api.ts`: PBIA `GET /client/agent` client used by the dashboard.
 - `services/auth-flow.ts`: auth helpers for OTP send/verify, customer persistence, and customer-profile mapping.
 - `services/client-signup-api.ts`: PBIA `POST /client/signup` client.
+- `services/account-deletion-api.ts`: invokes the authenticated Supabase `delete-account` Edge Function.
 - `services/contact-request-api.ts`: PBIA contact/service request client used by support, COI, and profile-update flows.
 - `services/cslb-api.ts`: PBIA client CSLB lookup/refresh client plus CSLB URL builder.
 - `services/customer-api.ts`: PBIA MyAccount resolver GET/POST clients with response validation and safe-account mapping, plus compatibility clients for the legacy account-list and primary-business-email routes.
@@ -185,6 +186,7 @@ This file explains every tracked folder and file in the repo and calls out wheth
 
 - `supabase/`: SQL and related backend setup artifacts for the portal's Supabase side.
 - `supabase/portal_customers.sql`: creates the cached customer table and row-level-security policies used by auth/customer hydration.
+- `supabase/functions/delete-account/index.ts`: verifies the caller, creates the AMS-PBIA access block, removes app-owned portal data, and deletes the authentication user without modifying Momentum/CRM records.
 
 ## `types/`
 

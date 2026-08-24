@@ -333,6 +333,22 @@ export function AuthProvider({ children }: PropsWithChildren) {
           setPendingInsuredIdState('');
           return;
         } catch (liveLookupError) {
+          if (
+            liveLookupError instanceof PbiaApiError &&
+            liveLookupError.code === 'ACCOUNT_ACCESS_BLOCKED'
+          ) {
+            await getSupabaseClient().auth.signOut();
+            if (!mounted) return;
+            accountSelectionPendingRef.current = false;
+            setUserEmail(null);
+            setPendingEmailState('');
+            setPendingInsuredIdState('');
+            setPendingSignupState(null);
+            setCustomerState(null);
+            await AsyncStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
+            await AsyncStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
+            return;
+          }
           if (liveLookupError instanceof PbiaApiError && liveLookupError.status === 401) {
             setCustomerState(null);
             setPendingInsuredIdState('');

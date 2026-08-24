@@ -11,6 +11,7 @@ const mockRouter = {
 };
 const mockUseAuth = jest.fn();
 const mockCreateClientContactRequest = jest.fn();
+const mockDeleteCurrentSupabaseAccount = jest.fn();
 const mockRefreshDigitalCard = jest.fn();
 const mockRefreshDigitalCardDraftStatus = jest.fn();
 const mockRegisterForPushNotifications = jest.fn();
@@ -33,6 +34,9 @@ jest.mock('@/context/digital-card-context', () => ({
 jest.mock('@/services/contact-request-api', () => ({
   createClientContactRequest: (...args: unknown[]) => mockCreateClientContactRequest(...args),
 }));
+jest.mock('@/services/account-deletion-api', () => ({
+  deleteCurrentSupabaseAccount: (...args: unknown[]) => mockDeleteCurrentSupabaseAccount(...args),
+}));
 jest.mock('@/services/push-notifications', () => ({
   registerForPushNotifications: () => mockRegisterForPushNotifications(),
   savePushDeviceToken: jest.fn(() => Promise.resolve()),
@@ -54,6 +58,7 @@ describe('ProfileScreen', () => {
       signOut: jest.fn(),
     });
     mockCreateClientContactRequest.mockResolvedValue(undefined);
+    mockDeleteCurrentSupabaseAccount.mockResolvedValue(undefined);
   });
 
   it('submits profile changes as a PBIA contact request', async () => {
@@ -81,5 +86,36 @@ describe('ProfileScreen', () => {
     const { queryByText } = render(<ProfileScreen />);
 
     expect(queryByText('Digital business card')).toBeNull();
+  });
+
+  it('deletes the account after confirmation', async () => {
+    const signOut = jest.fn().mockResolvedValue(undefined);
+    mockUseAuth.mockReturnValue({
+      customer: buildCustomer({ accountId: 'account-1' }),
+      userEmail: 'jane@example.com',
+      signOut,
+    });
+
+    const { getAllByText, getByText } = render(<ProfileScreen />);
+
+    fireEvent.press(getByText('Delete Account'));
+    fireEvent.press(getAllByText('Delete Account')[1]);
+
+    await waitFor(() => expect(mockDeleteCurrentSupabaseAccount).toHaveBeenCalledWith());
+    fireEvent.press(getByText('OK'));
+    await waitFor(() => expect(signOut).toHaveBeenCalled());
+  });
+
+  it('shows an account deletion error when the request fails', async () => {
+    mockDeleteCurrentSupabaseAccount.mockRejectedValue(
+      new Error('Account deletion service is unavailable.')
+    );
+
+    const { findByText, getAllByText, getByText } = render(<ProfileScreen />);
+
+    fireEvent.press(getByText('Delete Account'));
+    fireEvent.press(getAllByText('Delete Account')[1]);
+
+    expect(await findByText('Account deletion service is unavailable.')).toBeTruthy();
   });
 });

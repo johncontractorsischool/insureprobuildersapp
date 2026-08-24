@@ -314,6 +314,39 @@ describe('AuthProvider', () => {
     expect(supabaseMock.from).toHaveBeenCalledWith('portal_customers');
   });
 
+  it('clears the session instead of restoring cached data when access is blocked', async () => {
+    const supabaseMock = createSupabaseMock({
+      sessionEmail: 'jane@example.com',
+      portalRows: [
+        {
+          database_id: 'stale-account',
+          commercial_name: 'Stale Builder Co',
+          email: 'jane@example.com',
+          insured_id: 'LIC-123456',
+          is_active: true,
+        },
+      ],
+    });
+    mockGetSupabaseClient.mockReturnValue(supabaseMock);
+    mockResolveMyAccount.mockRejectedValue(
+      new PbiaApiError(
+        403,
+        'This account is unavailable. Contact support if you need to re-establish access.',
+        'ACCOUNT_ACCESS_BLOCKED'
+      )
+    );
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isLoadingAuth).toBe(false));
+
+    expect(supabaseMock.__signOut).toHaveBeenCalled();
+    expect(result.current.userEmail).toBeNull();
+    expect(result.current.customer).toBeNull();
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+  });
+
   it('completeSignIn stores the normalized email and supplied customer', async () => {
     mockGetSupabaseClient.mockReturnValue(createSupabaseMock({}));
     const { result } = renderHook(() => useAuth(), { wrapper });
