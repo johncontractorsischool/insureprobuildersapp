@@ -12,7 +12,11 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_PBIA_API_BASE_URL": "https://api.ams.insureprobuilders.com"
+      }
     }
   },
   "submit": {
