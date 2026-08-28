@@ -23,6 +23,7 @@ import type {
   AchBankAccountType,
   CardType,
   PaymentEligibility,
+  PaymentInstallment,
   PaymentMethod,
   PaymentTermOption,
   SubmitPaymentRequest,
@@ -70,6 +71,11 @@ function isRecordPayable(record: PaymentEligibility) {
 function getRecordStatusDescription(record: PaymentEligibility) {
   if (record.paymentMode === 'TERM_OPTIONS') {
     return `${record.termOptions.length} term options available`;
+  }
+  if (record.paymentPlanId) {
+    return record.planPaymentChoice === 'AVAILABLE'
+      ? 'Pay in full or choose an installment'
+      : 'Installment schedule available';
   }
   return `${getPaymentPurposeLabel(record.purpose)} due`;
 }
@@ -164,6 +170,8 @@ export default function PaymentScreen({
   } = usePayments();
   const [selectedRecordKey, setSelectedRecordKey] = useState('');
   const [selectedPaymentOptionId, setSelectedPaymentOptionId] = useState('');
+  const [selectedPlanChoice, setSelectedPlanChoice] = useState<'FULL' | 'INSTALLMENTS'>('FULL');
+  const [selectedInstallmentId, setSelectedInstallmentId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CARD');
   const [firstName, setFirstName] = useState(customer?.firstName?.trim() ?? '');
   const [lastName, setLastName] = useState(customer?.lastName?.trim() ?? '');
@@ -205,26 +213,44 @@ export default function PaymentScreen({
     selectedRecord?.paymentMode === 'TERM_OPTIONS'
       ? (selectedRecord.termOptions.find((option) => option.id === selectedPaymentOptionId) ?? null)
       : null;
+  const selectedInstallment = selectedRecord?.installments.find(
+    (installment) => installment.id === selectedInstallmentId
+  ) ?? null;
+  const isInstallmentSelection =
+    Boolean(selectedRecord?.paymentPlanId) && selectedPlanChoice === 'INSTALLMENTS';
+  const selectedPaymentRecord = isInstallmentSelection && selectedInstallment
+    ? paymentRecords.find((record) => record.demandId === selectedInstallment.id) ?? null
+    : selectedRecord;
   const selectedPaymentAmount = selectedRecord
-    ? selectedRecord.paymentMode === 'TERM_OPTIONS'
+    ? isInstallmentSelection
+      ? (selectedInstallment?.amount ?? null)
+      : selectedRecord.paymentMode === 'TERM_OPTIONS'
       ? (selectedTermOption?.amount ?? null)
       : selectedRecord.amountDue
     : null;
   const selectedConvenienceFee = selectedRecord
     ? paymentMethod === 'CARD'
-      ? selectedRecord.paymentMode === 'TERM_OPTIONS'
+      ? isInstallmentSelection
+        ? (selectedInstallment?.cardConvenienceFee ?? null)
+        : selectedRecord.paymentMode === 'TERM_OPTIONS'
         ? (selectedTermOption?.cardConvenienceFee ?? null)
         : selectedRecord.cardConvenienceFee
-      : selectedRecord.paymentMode === 'TERM_OPTIONS'
+      : isInstallmentSelection
+        ? (selectedInstallment?.achConvenienceFee ?? null)
+        : selectedRecord.paymentMode === 'TERM_OPTIONS'
         ? (selectedTermOption?.achConvenienceFee ?? null)
         : selectedRecord.achConvenienceFee
     : null;
   const selectedTotalAmount = selectedRecord
     ? paymentMethod === 'CARD'
-      ? selectedRecord.paymentMode === 'TERM_OPTIONS'
+      ? isInstallmentSelection
+        ? (selectedInstallment?.cardTotalAmount ?? null)
+        : selectedRecord.paymentMode === 'TERM_OPTIONS'
         ? (selectedTermOption?.cardTotalAmount ?? null)
         : selectedRecord.cardTotalAmount
-      : selectedRecord.paymentMode === 'TERM_OPTIONS'
+      : isInstallmentSelection
+        ? (selectedInstallment?.achTotalAmount ?? null)
+        : selectedRecord.paymentMode === 'TERM_OPTIONS'
         ? (selectedTermOption?.achTotalAmount ?? null)
         : selectedRecord.achTotalAmount
     : null;
@@ -274,6 +300,13 @@ export default function PaymentScreen({
   useEffect(() => {
     if (!selectedRecord) return;
     setSelectedPaymentOptionId('');
+    setSelectedPlanChoice(selectedRecord.planPaymentChoice === 'AVAILABLE' ? 'FULL' : 'INSTALLMENTS');
+    setSelectedInstallmentId(
+      selectedRecord.installments.find((installment) => installment.status === 'PUBLISHED')?.id ??
+        selectedRecord.installments.find((installment) => installment.status === 'PROCESSING')?.id ??
+        selectedRecord.installments[0]?.id ??
+        null
+    );
     setIsReviewing(false);
     setFormError('');
     setCardNumber('');
@@ -349,10 +382,27 @@ export default function PaymentScreen({
     resetReview();
   };
 
+  const changePlanChoice = (choice: 'FULL' | 'INSTALLMENTS') => {
+    if (choice === selectedPlanChoice) return;
+    setSelectedPlanChoice(choice);
+    paymentIntentRef.current = null;
+    resetReview();
+  };
+
+  const changeInstallment = (installmentId: string) => {
+    if (installmentId === selectedInstallmentId) return;
+    setSelectedInstallmentId(installmentId);
+    paymentIntentRef.current = null;
+    resetReview();
+  };
+
   const buildPaymentRequest = (): { request: SubmitPaymentRequest } | { error: string } => {
     if (!selectedRecord) return { error: 'Select a payment request.' };
     if (selectedRecord.paymentMode === 'TERM_OPTIONS' && !selectedTermOption) {
       return { error: 'Select a payment term.' };
+    }
+    if (isInstallmentSelection && !selectedInstallment) {
+      return { error: 'Select an available installment.' };
     }
 
     const signedInEmail = userEmail?.trim().toLowerCase();
@@ -382,7 +432,10 @@ export default function PaymentScreen({
     const paymentSelection =
       selectedRecord.paymentMode === 'TERM_OPTIONS'
         ? { paymentOptionId: selectedTermOption!.id }
-        : { amount: selectedRecord.amountDue, purpose: selectedRecord.purpose };
+        : {
+            amount: selectedPaymentAmount ?? selectedRecord.amountDue,
+            purpose: selectedRecord.purpose,
+          };
 
     if (paymentMethod === 'CARD') {
       if (selectedConvenienceFee === null || selectedTotalAmount === null) {
@@ -496,7 +549,7 @@ export default function PaymentScreen({
     setIsCheckingEligibility(true);
     setFormError('');
     try {
-      await ensureRecordIsPayable(selectedRecord, selectedPaymentOptionId);
+      await ensureRecordIsPayable(selectedPaymentRecord ?? selectedRecord, selectedPaymentOptionId);
       setIsReviewing(true);
     } catch (error) {
       if (error instanceof PaymentApiError && error.status === 404) {
@@ -522,7 +575,7 @@ export default function PaymentScreen({
       return;
     }
 
-    const recordKey = getRecordKey(selectedRecord);
+    const recordKey = selectedPaymentRecord?.demandId ?? getRecordKey(selectedRecord);
     if (isPaymentUnavailable) {
       setFormError('Mobile payments are temporarily unavailable. Please try again later.');
       return;
@@ -535,7 +588,7 @@ export default function PaymentScreen({
     setIsSubmitting(true);
     setFormError('');
     try {
-      await ensureRecordIsPayable(selectedRecord, selectedPaymentOptionId);
+      await ensureRecordIsPayable(selectedPaymentRecord ?? selectedRecord, selectedPaymentOptionId);
       const requestFingerprint = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
         JSON.stringify(result.request)
@@ -547,7 +600,7 @@ export default function PaymentScreen({
       const payment = await submitPayment(
         userEmail,
         accountId,
-        selectedRecord.demandId,
+        selectedPaymentRecord?.demandId ?? selectedRecord.demandId,
         paymentIntentRef.current.key,
         result.request
       );
@@ -562,7 +615,7 @@ export default function PaymentScreen({
       let paymentWasDefinitelyRejected = false;
       if (error instanceof PaymentApiError && error.status === 502) {
         try {
-          await getPaymentEligibility(userEmail, accountId, selectedRecord.demandId);
+          await getPaymentEligibility(userEmail, accountId, recordKey);
           paymentWasDefinitelyRejected = true;
           await refreshPaymentEligibility();
         } catch {
@@ -679,6 +732,8 @@ export default function PaymentScreen({
     );
   }
 
+  const requestRecords = payableRecords.length > 0 ? payableRecords : paymentRecords;
+
   const paymentSummary = selectedRecord ? (
     <View
       testID="payment-summary-card"
@@ -701,6 +756,12 @@ export default function PaymentScreen({
       <View style={styles.balanceDivider} />
       {selectedTermOption ? (
         <ReviewRow label="Selected term" value={selectedTermOption.label} />
+      ) : null}
+      {selectedInstallment ? (
+        <ReviewRow
+          label="Selected installment"
+          value={`Installment ${selectedInstallment.installmentNumber}`}
+        />
       ) : null}
       <ReviewRow
         label="Purpose"
@@ -757,7 +818,7 @@ export default function PaymentScreen({
               </Text>
             </View>
             <View style={styles.optionList}>
-              {paymentRecords.map((record) => {
+              {requestRecords.map((record) => {
                 const recordIsPayable = isRecordPayable(record);
                 return (
                   <RecordOption
@@ -784,7 +845,7 @@ export default function PaymentScreen({
               </View>
 
               <View style={styles.demandDetails}>
-                {selectedRecord.paymentMode === 'FIXED' ? (
+                {selectedRecord.paymentMode === 'FIXED' && !isInstallmentSelection ? (
                   <ReviewRow label="Amount" value={formatCurrency(selectedRecord.amountDue)} />
                 ) : (
                   <ReviewRow
@@ -818,6 +879,17 @@ export default function PaymentScreen({
                   selectedOptionId={selectedPaymentOptionId}
                   disabled={isReviewing || isSubmitting}
                   onSelect={changePaymentTerm}
+                />
+              ) : null}
+
+              {selectedRecord.paymentPlanId ? (
+                <PlanPaymentSelector
+                  record={selectedRecord}
+                  selectedChoice={selectedPlanChoice}
+                  selectedInstallmentId={selectedInstallmentId}
+                  disabled={isReviewing || isSubmitting}
+                  onChoice={changePlanChoice}
+                  onInstallment={changeInstallment}
                 />
               ) : null}
 
@@ -1012,6 +1084,12 @@ export default function PaymentScreen({
                   {selectedTermOption ? (
                     <ReviewRow label="Selected term" value={selectedTermOption.label} />
                   ) : null}
+                  {selectedInstallment ? (
+                    <ReviewRow
+                      label="Selected installment"
+                      value={`Installment ${selectedInstallment.installmentNumber}`}
+                    />
+                  ) : null}
                   {selectedConvenienceFee !== null ? (
                     <ReviewRow
                       label={
@@ -1058,7 +1136,8 @@ export default function PaymentScreen({
                   loading={isCheckingEligibility}
                   disabled={
                     isPaymentUnavailable ||
-                    blockedRecordKey === selectedRecordKey ||
+                    blockedRecordKey === (selectedPaymentRecord?.demandId ?? selectedRecordKey) ||
+                    (isInstallmentSelection && !selectedInstallment) ||
                     (selectedRecord.paymentMode === 'TERM_OPTIONS' && !selectedTermOption)
                   }
                 />
@@ -1177,6 +1256,120 @@ function TermOptionSelector({
   );
 }
 
+function PlanPaymentSelector({
+  record,
+  selectedChoice,
+  selectedInstallmentId,
+  disabled,
+  onChoice,
+  onInstallment,
+}: {
+  record: PaymentEligibility;
+  selectedChoice: 'FULL' | 'INSTALLMENTS';
+  selectedInstallmentId: string | null;
+  disabled: boolean;
+  onChoice: (choice: 'FULL' | 'INSTALLMENTS') => void;
+  onInstallment: (installmentId: string) => void;
+}) {
+  const fullAvailable = record.planPaymentChoice === 'AVAILABLE';
+  return (
+    <View style={styles.planSection}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.sectionTitle}>How would you like to pay?</Text>
+        <Text style={styles.cardSubtitle}>
+          Pay the remaining balance now or choose one available installment.
+        </Text>
+      </View>
+      <View accessibilityRole="radiogroup" style={styles.optionList}>
+        {fullAvailable ? (
+          <Pressable
+            accessibilityRole="radio"
+            accessibilityLabel={`Pay in full, ${formatCurrency(record.amountDue)}`}
+            accessibilityState={{ checked: selectedChoice === 'FULL', disabled }}
+            disabled={disabled}
+            onPress={() => onChoice('FULL')}
+            style={({ pressed }) => [
+              styles.termOption,
+              selectedChoice === 'FULL' ? styles.optionSelected : null,
+              pressed ? styles.pressed : null,
+            ]}>
+            <View style={styles.recordCopy}>
+              <Text style={styles.termTitle}>Pay in full</Text>
+              <Text style={styles.termFeeCopy}>Settle the remaining plan balance</Text>
+            </View>
+            <Text style={styles.recordAmount}>{formatCurrency(record.amountDue)}</Text>
+            <View style={[styles.radioOuter, selectedChoice === 'FULL' ? styles.radioOuterSelected : null]}>
+              {selectedChoice === 'FULL' ? <View style={styles.radioInner} /> : null}
+            </View>
+          </Pressable>
+        ) : null}
+        <Pressable
+          accessibilityRole="radio"
+          accessibilityLabel="Pay in installments"
+          accessibilityState={{ checked: selectedChoice === 'INSTALLMENTS', disabled }}
+          disabled={disabled}
+          onPress={() => onChoice('INSTALLMENTS')}
+          style={({ pressed }) => [
+            styles.termOption,
+            selectedChoice === 'INSTALLMENTS' ? styles.optionSelected : null,
+            pressed ? styles.pressed : null,
+          ]}>
+          <View style={styles.recordCopy}>
+            <Text style={styles.termTitle}>Pay in installments</Text>
+            <Text style={styles.termFeeCopy}>Choose an unpaid scheduled payment</Text>
+          </View>
+          <View style={[styles.radioOuter, selectedChoice === 'INSTALLMENTS' ? styles.radioOuterSelected : null]}>
+            {selectedChoice === 'INSTALLMENTS' ? <View style={styles.radioInner} /> : null}
+          </View>
+        </Pressable>
+      </View>
+      {selectedChoice === 'INSTALLMENTS' ? (
+        <View accessibilityRole="radiogroup" style={styles.optionList}>
+          {record.installments.map((installment: PaymentInstallment) => {
+            const available = installment.status === 'PUBLISHED';
+            const selected = installment.id === selectedInstallmentId;
+            return (
+              <Pressable
+                key={installment.id}
+                accessibilityRole="radio"
+                accessibilityLabel={`Installment ${installment.installmentNumber}, ${formatCurrency(installment.amount)}`}
+                accessibilityState={{ checked: selected, disabled: disabled || !available }}
+                disabled={disabled || !available}
+                onPress={() => onInstallment(installment.id)}
+                style={({ pressed }) => [
+                  styles.termOption,
+                  selected ? styles.optionSelected : null,
+                  !available ? styles.optionDisabled : null,
+                  pressed ? styles.pressed : null,
+                ]}>
+                <View style={styles.recordCopy}>
+                  <Text style={styles.termTitle}>
+                    Installment {installment.installmentNumber}{record.installmentCount ? ` of ${record.installmentCount}` : ''}
+                  </Text>
+                  <Text style={styles.termFeeCopy}>
+                    {installment.dueDate ? `Due ${formatDemandDueDate(installment.dueDate)} · ` : ''}
+                    {installment.status === 'PAID'
+                      ? 'Paid'
+                      : installment.status === 'PROCESSING'
+                        ? 'Processing'
+                        : available
+                          ? 'Available'
+                          : 'Unavailable'}
+                  </Text>
+                </View>
+                <Text style={styles.recordAmount}>{formatCurrency(installment.amount)}</Text>
+                <View style={[styles.radioOuter, selected ? styles.radioOuterSelected : null]}>
+                  {selected ? <View style={styles.radioInner} /> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function ChoiceGroup({
   label,
   options,
@@ -1279,6 +1472,12 @@ const styles = StyleSheet.create({
     borderTopColor: theme.colors.border,
     paddingTop: theme.spacing.lg,
   },
+  planSection: {
+    gap: theme.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    paddingTop: theme.spacing.lg,
+  },
   termOption: {
     minHeight: 76,
     borderRadius: theme.radius.md,
@@ -1290,6 +1489,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.spacing.sm,
   },
+  optionDisabled: { opacity: 0.55 },
   termTitle: {
     ...theme.typography.body,
     color: theme.colors.textStrong,

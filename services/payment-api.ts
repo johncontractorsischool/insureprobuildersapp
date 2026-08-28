@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/services/supabase';
 import type {
   PaymentEligibility,
   PaymentEligibilityList,
+  PaymentInstallment,
   PaymentRecordType,
   PaymentTermOption,
   SubmitPaymentRequest,
@@ -140,6 +141,32 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
     termOptions.every(isPaymentTermOption) &&
     new Set(termOptions.map((option) => option.id)).size === termOptions.length &&
     new Set(termOptions.map((option) => option.termYears)).size === termOptions.length;
+  const installments = Array.isArray(record.installments) ? record.installments : [];
+  const installmentsAreValid =
+    Array.isArray(record.installments) &&
+    installments.every(isPaymentInstallment) &&
+    new Set(installments.map((installment) => installment.id)).size === installments.length &&
+    new Set(installments.map((installment) => installment.installmentNumber)).size === installments.length;
+  const planFieldsAreValid =
+    (record.paymentPlanId === null &&
+      record.planPaymentChoice === null &&
+      record.fullPaymentDemandId === null &&
+      record.installmentNumber === null &&
+      record.installmentCount === null &&
+      record.planTotalAmount === null &&
+      installments.length === 0) ||
+    (typeof record.paymentPlanId === 'string' &&
+      Boolean(record.paymentPlanId.trim()) &&
+      (record.planPaymentChoice === 'AVAILABLE' || record.planPaymentChoice === 'INSTALLMENTS_ONLY') &&
+      (record.fullPaymentDemandId === null ||
+        (typeof record.fullPaymentDemandId === 'string' && Boolean(record.fullPaymentDemandId.trim()))) &&
+      (record.installmentNumber === null ||
+        (typeof record.installmentNumber === 'number' && Number.isInteger(record.installmentNumber) && record.installmentNumber >= 1)) &&
+      (record.installmentCount === null ||
+        (typeof record.installmentCount === 'number' && Number.isInteger(record.installmentCount) && record.installmentCount >= 2 && record.installmentCount <= 24)) &&
+      (record.planTotalAmount === null ||
+        (typeof record.planTotalAmount === 'number' && Number.isFinite(record.planTotalAmount) && record.planTotalAmount > 0)) &&
+      installmentsAreValid);
   return (
     typeof record.demandId === 'string' &&
     (record.source === 'REPLICA' || record.source === 'CRM') &&
@@ -151,16 +178,22 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
     typeof record.premium === 'number' &&
     typeof record.paidAmount === 'number' &&
     typeof record.amountDue === 'number' &&
-    (record.paymentMode === 'FIXED' || record.paymentMode === 'TERM_OPTIONS') &&
+    (record.paymentMode === 'FIXED' ||
+      record.paymentMode === 'TERM_OPTIONS' ||
+      record.paymentMode === 'INSTALLMENTS') &&
     (record.selectedOptionId === null || typeof record.selectedOptionId === 'string') &&
     termOptionsAreValid &&
     ((record.paymentMode === 'FIXED' &&
       record.selectedOptionId === null &&
       termOptions.length === 0) ||
-      (record.paymentMode === 'TERM_OPTIONS' &&
-        record.selectedOptionId === null &&
-        termOptions.length >= 2 &&
-        termOptions.length <= 5)) &&
+    (record.paymentMode === 'TERM_OPTIONS' &&
+      record.selectedOptionId === null &&
+      termOptions.length >= 2 &&
+      termOptions.length <= 5) ||
+    (record.paymentMode === 'INSTALLMENTS' &&
+      record.selectedOptionId === null &&
+      termOptions.length === 0)) &&
+    planFieldsAreValid &&
     (record.cardConvenienceFee === null || typeof record.cardConvenienceFee === 'number') &&
     (record.cardTotalAmount === null || typeof record.cardTotalAmount === 'number') &&
     ((record.cardConvenienceFee === null && record.cardTotalAmount === null) ||
@@ -176,6 +209,7 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
         typeof record.achTotalAmount === 'number' &&
         record.achTotalAmount >= record.amountDue)) &&
     (record.purpose === 'PREMIUM' ||
+      record.purpose === 'PREMIUM_AUDIT' ||
       record.purpose === 'DOWN_PAYMENT' ||
       record.purpose === 'INSTALLMENT' ||
       record.purpose === 'POLICY_FEE' ||
@@ -183,10 +217,38 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
     record.status === 'PUBLISHED' &&
     record.paymentState === 'DUE' &&
     record.paymentNeeded === true &&
+    (record.dueStatus === 'UPCOMING' ||
+      record.dueStatus === 'DUE' ||
+      record.dueStatus === 'OVERDUE') &&
     Array.isArray(record.missing) &&
     record.missing.every((entry) => typeof entry === 'string') &&
     (record.dueDate === null || typeof record.dueDate === 'string') &&
     (record.clientMessage === null || typeof record.clientMessage === 'string')
+  );
+}
+
+function isPaymentInstallment(value: unknown): value is PaymentInstallment {
+  if (!value || typeof value !== 'object') return false;
+  const installment = value as Partial<PaymentInstallment>;
+  return (
+    typeof installment.id === 'string' &&
+    Boolean(installment.id.trim()) &&
+    typeof installment.installmentNumber === 'number' &&
+    Number.isInteger(installment.installmentNumber) &&
+    installment.installmentNumber >= 1 &&
+    typeof installment.amount === 'number' &&
+    Number.isFinite(installment.amount) &&
+    installment.amount > 0 &&
+    (installment.dueDate === null || typeof installment.dueDate === 'string') &&
+    (installment.status === 'DRAFT' ||
+      installment.status === 'PUBLISHED' ||
+      installment.status === 'PROCESSING' ||
+      installment.status === 'PAID' ||
+      installment.status === 'CANCELLED') &&
+    (installment.paymentLinkIssuedAt === null || typeof installment.paymentLinkIssuedAt === 'string') &&
+    (installment.paymentLinkExpiresAt === null || typeof installment.paymentLinkExpiresAt === 'string') &&
+    isFeePreview(installment.amount, installment.cardConvenienceFee, installment.cardTotalAmount) &&
+    isFeePreview(installment.amount, installment.achConvenienceFee, installment.achTotalAmount)
   );
 }
 

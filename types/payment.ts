@@ -2,10 +2,13 @@ export type PaymentRecordType = 'POLICY' | 'QUOTE';
 
 export type PaymentDemandSource = 'REPLICA' | 'CRM';
 
-export type PaymentMode = 'FIXED' | 'TERM_OPTIONS';
+export type PaymentMode = 'FIXED' | 'TERM_OPTIONS' | 'INSTALLMENTS';
+
+export type PaymentPlanChoice = 'AVAILABLE' | 'INSTALLMENTS_ONLY';
 
 export type PaymentPurpose =
   | 'PREMIUM'
+  | 'PREMIUM_AUDIT'
   | 'DOWN_PAYMENT'
   | 'INSTALLMENT'
   | 'POLICY_FEE'
@@ -17,6 +20,20 @@ export type PaymentTermOption = {
   amount: number;
   currency: string;
   label: string;
+  cardConvenienceFee: number | null;
+  cardTotalAmount: number | null;
+  achConvenienceFee: number | null;
+  achTotalAmount: number | null;
+};
+
+export type PaymentInstallment = {
+  id: string;
+  installmentNumber: number;
+  amount: number;
+  dueDate: string | null;
+  status: 'DRAFT' | 'PUBLISHED' | 'PROCESSING' | 'PAID' | 'CANCELLED';
+  paymentLinkIssuedAt: string | null;
+  paymentLinkExpiresAt: string | null;
   cardConvenienceFee: number | null;
   cardTotalAmount: number | null;
   achConvenienceFee: number | null;
@@ -39,7 +56,14 @@ export type PaymentEligibility = {
   premium: number;
   paidAmount: number;
   amountDue: number;
+  paymentPlanId: string | null;
   paymentMode: PaymentMode;
+  planPaymentChoice: PaymentPlanChoice | null;
+  fullPaymentDemandId: string | null;
+  installmentNumber: number | null;
+  installmentCount: number | null;
+  planTotalAmount: number | null;
+  installments: PaymentInstallment[];
   selectedOptionId: string | null;
   termOptions: PaymentTermOption[];
   cardConvenienceFee: number | null;
@@ -51,6 +75,7 @@ export type PaymentEligibility = {
   paymentNeeded: true;
   missing: string[];
   dueDate: string | null;
+  dueStatus: 'UPCOMING' | 'DUE' | 'OVERDUE';
   clientMessage: string | null;
 };
 

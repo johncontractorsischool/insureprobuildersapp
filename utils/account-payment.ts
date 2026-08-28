@@ -13,6 +13,7 @@ export type AccountPaymentSummary = {
 
 export const PAYMENT_PURPOSE_OPTIONS: Array<{ value: PaymentPurpose; label: string }> = [
   { value: 'PREMIUM', label: 'Full Premium' },
+  { value: 'PREMIUM_AUDIT', label: 'Premium Audit' },
   { value: 'DOWN_PAYMENT', label: 'Down Payment' },
   { value: 'INSTALLMENT', label: 'Installment' },
   { value: 'POLICY_FEE', label: 'Policy Fee' },

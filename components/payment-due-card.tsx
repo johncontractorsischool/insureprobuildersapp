@@ -30,13 +30,16 @@ export function PaymentDueCard({
 }: PaymentDueCardProps) {
   const policyType = formatLineOfBusiness(record.lineOfBusiness);
   const hasTermOptions = record.paymentMode === 'TERM_OPTIONS';
+  const hasInstallmentPlan = Boolean(record.paymentPlanId);
   const startingAmount = hasTermOptions
     ? Math.min(...record.termOptions.map((option) => option.amount))
     : record.amountDue;
   const amountDescription = hasTermOptions
     ? `${record.termOptions.length} term options starting at ${formatCurrency(startingAmount)}`
-    : `Amount due ${formatCurrency(record.amountDue)}`;
-  const actionLabel = hasTermOptions ? 'Choose Term & Pay' : 'Pay Now';
+    : hasInstallmentPlan
+      ? `${record.installments.length} installment options or pay in full`
+      : `Amount due ${formatCurrency(record.amountDue)}`;
+  const actionLabel = hasTermOptions ? 'Choose Term & Pay' : hasInstallmentPlan ? 'Choose Payment' : 'Pay Now';
 
   return (
     <View
@@ -64,7 +67,9 @@ export function PaymentDueCard({
       {isDesktopLayout ? <View style={styles.desktopDivider} /> : null}
 
       <View style={[styles.amountBlock, isDesktopLayout ? styles.desktopAmountBlock : null]}>
-        <Text style={styles.amountLabel}>{hasTermOptions ? 'Term Options' : 'Amount Due'}</Text>
+        <Text style={styles.amountLabel}>
+          {hasTermOptions ? 'Term Options' : hasInstallmentPlan ? 'Full or Installments' : 'Amount Due'}
+        </Text>
         <Text style={styles.amountValue}>
           {hasTermOptions ? `From ${formatCurrency(startingAmount)}` : formatCurrency(record.amountDue)}
         </Text>
@@ -76,7 +81,9 @@ export function PaymentDueCard({
           <Text style={styles.lineItemValue}>
             {hasTermOptions
               ? `${record.termOptions.length} terms available`
-              : getPaymentPurposeLabel(record.purpose)}
+              : hasInstallmentPlan
+                ? `${record.installments.length} scheduled payments`
+                : getPaymentPurposeLabel(record.purpose)}
           </Text>
         </View>
         {record.clientMessage ? (

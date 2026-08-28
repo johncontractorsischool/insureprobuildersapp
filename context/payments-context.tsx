@@ -86,18 +86,34 @@ export function PaymentsProvider({ children }: PropsWithChildren) {
     void refreshPaymentEligibility();
   }, [refreshPaymentEligibility]);
 
-  const payableRecords = useMemo(
-    () =>
-      paymentRecords.filter(
-        (record) =>
-          record.paymentState === 'DUE' &&
-          record.paymentNeeded &&
-          (record.paymentMode === 'TERM_OPTIONS'
-            ? record.termOptions.length >= 2 && record.termOptions.some((option) => option.amount > 0)
-            : record.amountDue > 0)
-      ),
-    [paymentRecords]
-  );
+  const payableRecords = useMemo(() => {
+    const planRecords = new Map<string, PaymentEligibility>();
+    const standaloneRecords: PaymentEligibility[] = [];
+
+    for (const record of paymentRecords) {
+      const payable =
+        record.paymentState === 'DUE' &&
+        record.paymentNeeded &&
+        (record.paymentMode === 'TERM_OPTIONS'
+          ? record.termOptions.length >= 2 && record.termOptions.some((option) => option.amount > 0)
+          : record.amountDue > 0);
+      if (!payable) continue;
+      if (!record.paymentPlanId) {
+        standaloneRecords.push(record);
+        continue;
+      }
+
+      const current = planRecords.get(record.paymentPlanId);
+      // The parent demand is the single card shown for a plan. If an older
+      // plan has no parent, retain the first payable installment so the
+      // client can still open its schedule and pay the next installment.
+      if (!current || (record.installmentNumber === null && current.installmentNumber !== null)) {
+        planRecords.set(record.paymentPlanId, record);
+      }
+    }
+
+    return [...standaloneRecords, ...planRecords.values()];
+  }, [paymentRecords]);
 
   const value = useMemo<PaymentsContextValue>(
     () => ({
