@@ -227,6 +227,33 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
   );
 }
 
+function normalizePaymentEligibility(value: unknown): PaymentEligibility | null {
+  if (!value || typeof value !== 'object') return null;
+
+  const record = value as Record<string, unknown>;
+  const normalized = {
+    ...record,
+    // Payment demands created before installment support do not include plan
+    // metadata. Treat those records as standalone demands while preserving
+    // strict validation for every field the server did provide.
+    paymentPlanId: record.paymentPlanId === undefined ? null : record.paymentPlanId,
+    planPaymentChoice:
+      record.planPaymentChoice === undefined ? null : record.planPaymentChoice,
+    fullPaymentDemandId:
+      record.fullPaymentDemandId === undefined ? null : record.fullPaymentDemandId,
+    installmentNumber:
+      record.installmentNumber === undefined ? null : record.installmentNumber,
+    installmentCount:
+      record.installmentCount === undefined ? null : record.installmentCount,
+    planTotalAmount:
+      record.planTotalAmount === undefined ? null : record.planTotalAmount,
+    installments: record.installments === undefined ? [] : record.installments,
+    dueStatus: record.dueStatus === undefined ? 'DUE' : record.dueStatus,
+  };
+
+  return isPaymentEligibility(normalized) ? normalized : null;
+}
+
 function isPaymentInstallment(value: unknown): value is PaymentInstallment {
   if (!value || typeof value !== 'object') return false;
   const installment = value as Partial<PaymentInstallment>;
@@ -299,7 +326,6 @@ function parseEligibilityList(payload: unknown): PaymentEligibilityList {
   const result = payload as Partial<PaymentEligibilityList>;
   if (
     !Array.isArray(result.data) ||
-    !result.data.every(isPaymentEligibility) ||
     typeof result.page !== 'number' ||
     typeof result.pageSize !== 'number' ||
     typeof result.total !== 'number' ||
@@ -308,7 +334,18 @@ function parseEligibilityList(payload: unknown): PaymentEligibilityList {
     throw new PaymentApiError(500, 'Unexpected payment eligibility response format.');
   }
 
-  return result as PaymentEligibilityList;
+  const data = result.data.map(normalizePaymentEligibility);
+  if (data.some((record) => record === null)) {
+    throw new PaymentApiError(500, 'Unexpected payment eligibility response format.');
+  }
+
+  return {
+    data: data as PaymentEligibility[],
+    page: result.page,
+    pageSize: result.pageSize,
+    total: result.total,
+    totalPages: result.totalPages,
+  };
 }
 
 export async function listPaymentEligibility(
@@ -354,8 +391,8 @@ export async function getPaymentEligibility(
     return throwResponseError(response, 'Payment record unavailable.');
   }
 
-  const payload = await readJson(response);
-  if (!isPaymentEligibility(payload)) {
+  const payload = normalizePaymentEligibility(await readJson(response));
+  if (!payload) {
     throw new PaymentApiError(500, 'Unexpected payment eligibility response format.');
   }
   return payload;

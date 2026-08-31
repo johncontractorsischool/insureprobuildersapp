@@ -19,6 +19,7 @@ const mockUsePolicies = jest.fn();
 const mockUsePayments = jest.fn();
 const mockUseCompanyProfile = jest.fn();
 const mockFetchClientAgent = jest.fn();
+const mockRefreshPaymentEligibility = jest.fn();
 const mockOpenExternalLink = jest.fn();
 const mockOpenInAppBrowser = jest.fn();
 const mockCreateClientContactRequest = jest.fn();
@@ -28,6 +29,8 @@ const mockAlert = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
 jest.mock('expo-router', () => ({
   __esModule: true,
   router: mockRouter,
+  useFocusEffect: (callback: () => void) =>
+    jest.requireActual<typeof import('react')>('react').useEffect(callback, [callback]),
 }));
 jest.mock('@/context/auth-context', () => ({
   useAuth: () => mockUseAuth(),
@@ -125,7 +128,7 @@ describe('DashboardScreen', () => {
       payableRecords: [],
       isLoadingPayments: false,
       paymentsError: null,
-      refreshPaymentEligibility: jest.fn(),
+      refreshPaymentEligibility: mockRefreshPaymentEligibility,
     });
     mockUseCompanyProfile.mockReturnValue({
       isLoadingCompany: false,
@@ -163,6 +166,18 @@ describe('DashboardScreen', () => {
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
     mockAlert.mockClear();
+  });
+
+  it('refreshes payment requests when the dashboard receives focus', async () => {
+    const { unmount } = render(<DashboardScreen />);
+
+    await act(async () => {
+      jest.runAllTimers();
+      await Promise.resolve();
+    });
+
+    expect(mockRefreshPaymentEligibility).toHaveBeenCalledTimes(1);
+    unmount();
   });
 
   it('shows linked agent contact details with the agency mailing address', async () => {

@@ -275,6 +275,49 @@ describe('payment API', () => {
     ).resolves.toMatchObject({ data: [record] });
   });
 
+  it('accepts legacy standalone demands that omit installment metadata', async () => {
+    const {
+      paymentPlanId: _paymentPlanId,
+      planPaymentChoice: _planPaymentChoice,
+      fullPaymentDemandId: _fullPaymentDemandId,
+      installmentNumber: _installmentNumber,
+      installmentCount: _installmentCount,
+      planTotalAmount: _planTotalAmount,
+      installments: _installments,
+      dueStatus: _dueStatus,
+      ...legacyRecord
+    } = buildPaymentEligibility();
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [legacyRecord],
+        page: 1,
+        pageSize: 50,
+        total: 1,
+        totalPages: 1,
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      listPaymentEligibility('jane@example.com', 'account-1', { page: 1, pageSize: 50 })
+    ).resolves.toMatchObject({
+      data: [
+        expect.objectContaining({
+          demandId: legacyRecord.demandId,
+          paymentPlanId: null,
+          planPaymentChoice: null,
+          fullPaymentDemandId: null,
+          installmentNumber: null,
+          installmentCount: null,
+          planTotalAmount: null,
+          installments: [],
+          dueStatus: 'DUE',
+        }),
+      ],
+    });
+  });
+
   it('rejects eligibility that omits the server-calculated fee previews', async () => {
     const {
       cardConvenienceFee: _cardConvenienceFee,

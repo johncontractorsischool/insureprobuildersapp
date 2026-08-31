@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
@@ -355,7 +355,7 @@ export default function DashboardScreen({
 }: DashboardScreenProps) {
   const insets = useSafeAreaInsets();
   const { customer, userEmail } = useAuth();
-  const { payableRecords } = usePayments();
+  const { payableRecords, refreshPaymentEligibility } = usePayments();
   const portalConfig = useMemo(() => getPortalConfig(), []);
   const isReviewDemoSession =
     portalConfig.review.enabled && userEmail === portalConfig.review.email;
@@ -387,6 +387,12 @@ export default function DashboardScreen({
   const accountId = useMemo(
     () => resolvedCustomer?.accountId?.trim() || resolvedCustomer?.databaseId?.trim() || "",
     [resolvedCustomer?.accountId, resolvedCustomer?.databaseId],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshPaymentEligibility();
+    }, [refreshPaymentEligibility]),
   );
 
   useEffect(() => {
