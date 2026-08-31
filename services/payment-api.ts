@@ -245,8 +245,9 @@ function isPaymentInstallment(value: unknown): value is PaymentInstallment {
       installment.status === 'PROCESSING' ||
       installment.status === 'PAID' ||
       installment.status === 'CANCELLED') &&
-    (installment.paymentLinkIssuedAt === null || typeof installment.paymentLinkIssuedAt === 'string') &&
-    (installment.paymentLinkExpiresAt === null || typeof installment.paymentLinkExpiresAt === 'string') &&
+    (installment.paymentLink === undefined ||
+      installment.paymentLink === null ||
+      typeof installment.paymentLink === 'string') &&
     isFeePreview(installment.amount, installment.cardConvenienceFee, installment.cardTotalAmount) &&
     isFeePreview(installment.amount, installment.achConvenienceFee, installment.achTotalAmount)
   );

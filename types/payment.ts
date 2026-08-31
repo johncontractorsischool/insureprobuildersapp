@@ -32,8 +32,7 @@ export type PaymentInstallment = {
   amount: number;
   dueDate: string | null;
   status: 'DRAFT' | 'PUBLISHED' | 'PROCESSING' | 'PAID' | 'CANCELLED';
-  paymentLinkIssuedAt: string | null;
-  paymentLinkExpiresAt: string | null;
+  paymentLink?: string | null;
   cardConvenienceFee: number | null;
   cardTotalAmount: number | null;
   achConvenienceFee: number | null;

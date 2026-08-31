@@ -168,11 +168,39 @@ describe('PaymentScreen', () => {
           email: 'jane@example.com',
           region: 'California',
           country: 'United States Of America',
+          creditCardType: 'Visa',
           creditCardNumber: '4111111111111111',
         }),
       })
     );
     expect(mockRefreshPaymentEligibility).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['3', 'AmericanExpress'],
+    ['4', 'Visa'],
+    ['5', 'Mastercard'],
+    ['6', 'Discover'],
+  ])('detects a %s card as %s in the background', async (firstDigit, expectedCardType) => {
+    const {
+      findByRole,
+      findByText,
+      getByLabelText,
+      getByText,
+      queryByLabelText,
+      queryByText,
+    } = render(<PaymentScreen />);
+
+    expect(queryByLabelText('Card Type')).toBeNull();
+    expect(queryByText('Detected from card number')).toBeNull();
+    fireEvent.changeText(getByLabelText('Card Number'), `${firstDigit}111111111111111`);
+    fireEvent.changeText(getByLabelText('Expiration (MM/YY)'), '1230');
+    fireEvent.changeText(getByLabelText('Security Code'), '123');
+    fireEvent.press(getByText('Review Payment'));
+    expect(await findByText('Credit card ending in 1111')).toBeTruthy();
+    fireEvent.press(await findByRole('button', { name: 'Confirm Payment' }));
+    expect(await findByText('Payment successful')).toBeTruthy();
+    expect(mockSubmitPayment.mock.calls[0][4].card.creditCardType).toBe(expectedCardType);
   });
 
   it('shows the exact agent-authored amount and purpose without editable controls', async () => {
@@ -246,11 +274,12 @@ describe('PaymentScreen', () => {
       completedAt: '2026-08-07T18:00:00.000Z',
     });
 
-    const { findByRole, findByText, getByLabelText, getByText } = render(<PaymentScreen />);
+    const { findByRole, findByText, getAllByText, getByLabelText, getByText, queryByText } = render(<PaymentScreen />);
 
     expect(await findByRole('button', { name: 'Review Payment' })).toBeDisabled();
     fireEvent.press(getByLabelText('3 years, $330.00'));
-    expect(getByText('Card total $339.90 • ACH total $333.00')).toBeTruthy();
+    expect(queryByText('Card total $339.90 • ACH total $333.00')).toBeNull();
+    expect(getAllByText('3% Processing Fee').length).toBeGreaterThan(0);
     fireEvent.changeText(getByLabelText('Card Number'), '4111111111111111');
     fireEvent.changeText(getByLabelText('Expiration (MM/YY)'), '1230');
     fireEvent.changeText(getByLabelText('Security Code'), '123');

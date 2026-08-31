@@ -202,12 +202,13 @@ PBIA_INTERNAL_SERVICE_TOKEN
 
 ### Re-establishment workflow
 
-Add a private, audited administrative operation to re-establish access:
+The AMS-PBIA API exposes a private, audited administrative operation to re-establish access. The CRM account-page integration, including the rule that the action is shown only for a persisted `BLOCKED` row, is specified in [pbia-crm-account-access-reestablishment.md](./pbia-crm-account-access-reestablishment.md).
 
 ```http
 POST /internal/client-account-access-blocks/reestablish
-X-Internal-Service-Token: <server-only token>
 Content-Type: application/json
+Idempotency-Key: <unique-request-key>
+Cookie: pbia_session=<authenticated-super-admin-session>
 
 {
   "email": "normalized-user@example.com",
@@ -215,7 +216,7 @@ Content-Type: application/json
 }
 ```
 
-Only an authorized support/admin workflow may call it. Record who re-established access and why. Do not expose this operation to the mobile app or unauthenticated browsers.
+Only an authenticated `SUPER_ADMIN` may call it. Record who re-established access and why. Do not expose this operation to the mobile app or unauthenticated browsers. `X-Internal-Service-Token` is reserved for the Supabase Edge Function's block-creation request and must not be exposed to the CRM browser.
 
 After re-establishment, the existing email resolver may again match the retained insurance records and rebuild the app cache for the newly authenticated user.
 

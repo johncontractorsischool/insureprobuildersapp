@@ -40,13 +40,6 @@ import { formatCurrency } from '@/utils/format';
 
 const PAYMENT_COUNTRY = 'United States Of America' as const;
 
-const CARD_TYPE_OPTIONS: Array<{ value: CardType; label: string }> = [
-  { value: 'Visa', label: 'Visa' },
-  { value: 'Mastercard', label: 'Mastercard' },
-  { value: 'AmericanExpress', label: 'AmEx' },
-  { value: 'Discover', label: 'Discover' },
-];
-
 type PaymentScreenProps = {
   showInContentBackButton?: boolean;
   isDesktopLayout?: boolean;
@@ -122,6 +115,30 @@ function formatExpirationInput(value: string) {
   return digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
 }
 
+function detectCardType(value: string): CardType | null {
+  const firstDigit = value.replace(/\D/g, '').charAt(0);
+  if (firstDigit === '3') return 'AmericanExpress';
+  if (firstDigit === '4') return 'Visa';
+  if (firstDigit === '5') return 'Mastercard';
+  if (firstDigit === '6') return 'Discover';
+  return null;
+}
+
+function getProcessingFeeLabel(
+  method: PaymentMethod,
+  amount: number | null,
+  fee: number | null
+) {
+  if (fee === null) return amount === null ? 'Select a payment amount' : 'Unavailable';
+  if (method === 'ACH') return `${formatCurrency(fee)} Processing Fee`;
+  if (!amount || amount <= 0) return 'Processing Fee';
+  const percentage = Math.round((fee / amount) * 10000) / 100;
+  const formattedPercentage = Number.isInteger(percentage)
+    ? percentage.toFixed(0)
+    : percentage.toFixed(2);
+  return `${formattedPercentage}% Processing Fee`;
+}
+
 function getPaymentFailureMessage(error: unknown, paymentWasDefinitelyRejected = false) {
   if (!(error instanceof PaymentApiError)) {
     return 'Something went wrong while processing your payment. Please try again later.';
@@ -185,7 +202,10 @@ export default function PaymentScreen({
   const [phone, setPhone] = useState(
     customer?.phone?.trim() ?? customer?.cellPhone?.trim() ?? ''
   );
-  const [cardType, setCardType] = useState<CardType>('Visa');
+  const [nameOnCard, setNameOnCard] = useState(
+    [customer?.firstName?.trim(), customer?.lastName?.trim()].filter(Boolean).join(' ')
+  );
+  const [hasEditedNameOnCard, setHasEditedNameOnCard] = useState(false);
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiration, setCardExpiration] = useState('');
   const [cardSecurityCode, setCardSecurityCode] = useState('');
@@ -228,32 +248,22 @@ export default function PaymentScreen({
       ? (selectedTermOption?.amount ?? null)
       : selectedRecord.amountDue
     : null;
-  const selectedConvenienceFee = selectedRecord
-    ? paymentMethod === 'CARD'
-      ? isInstallmentSelection
-        ? (selectedInstallment?.cardConvenienceFee ?? null)
-        : selectedRecord.paymentMode === 'TERM_OPTIONS'
-        ? (selectedTermOption?.cardConvenienceFee ?? null)
-        : selectedRecord.cardConvenienceFee
-      : isInstallmentSelection
-        ? (selectedInstallment?.achConvenienceFee ?? null)
-        : selectedRecord.paymentMode === 'TERM_OPTIONS'
-        ? (selectedTermOption?.achConvenienceFee ?? null)
-        : selectedRecord.achConvenienceFee
+  const selectedFeeSource = selectedRecord
+    ? isInstallmentSelection
+      ? selectedInstallment
+      : selectedRecord.paymentMode === 'TERM_OPTIONS'
+        ? selectedTermOption
+        : selectedRecord
     : null;
-  const selectedTotalAmount = selectedRecord
-    ? paymentMethod === 'CARD'
-      ? isInstallmentSelection
-        ? (selectedInstallment?.cardTotalAmount ?? null)
-        : selectedRecord.paymentMode === 'TERM_OPTIONS'
-        ? (selectedTermOption?.cardTotalAmount ?? null)
-        : selectedRecord.cardTotalAmount
-      : isInstallmentSelection
-        ? (selectedInstallment?.achTotalAmount ?? null)
-        : selectedRecord.paymentMode === 'TERM_OPTIONS'
-        ? (selectedTermOption?.achTotalAmount ?? null)
-        : selectedRecord.achTotalAmount
-    : null;
+  const selectedCardConvenienceFee = selectedFeeSource?.cardConvenienceFee ?? null;
+  const selectedCardTotalAmount = selectedFeeSource?.cardTotalAmount ?? null;
+  const selectedAchConvenienceFee = selectedFeeSource?.achConvenienceFee ?? null;
+  const selectedAchTotalAmount = selectedFeeSource?.achTotalAmount ?? null;
+  const selectedConvenienceFee =
+    paymentMethod === 'CARD' ? selectedCardConvenienceFee : selectedAchConvenienceFee;
+  const selectedTotalAmount =
+    paymentMethod === 'CARD' ? selectedCardTotalAmount : selectedAchTotalAmount;
+  const detectedCardType = detectCardType(cardNumber);
 
   useFocusEffect(
     useCallback(() => {
@@ -345,7 +355,8 @@ export default function PaymentScreen({
     setRegion('');
     setPostalCode('');
     setPhone('');
-    setCardType('Visa');
+    setNameOnCard('');
+    setHasEditedNameOnCard(false);
     setAchBankAccountType('Checking');
     setAchAccountType('Business');
     clearSensitiveFields();
@@ -372,6 +383,28 @@ export default function PaymentScreen({
     if (nextMethod === paymentMethod) return;
     clearSensitiveFields();
     setPaymentMethod(nextMethod);
+    resetReview();
+  };
+
+  const changeFirstName = (value: string) => {
+    setFirstName(value);
+    if (!hasEditedNameOnCard) {
+      setNameOnCard([value, lastName].filter(Boolean).join(' '));
+    }
+    resetReview();
+  };
+
+  const changeLastName = (value: string) => {
+    setLastName(value);
+    if (!hasEditedNameOnCard) {
+      setNameOnCard([firstName, value].filter(Boolean).join(' '));
+    }
+    resetReview();
+  };
+
+  const changeNameOnCard = (value: string) => {
+    setNameOnCard(value);
+    setHasEditedNameOnCard(true);
     resetReview();
   };
 
@@ -446,6 +479,15 @@ export default function PaymentScreen({
       if (!/^\d{12,19}$/.test(cardNumber)) {
         return { error: 'Enter a valid 12–19 digit card number.' };
       }
+      if (!detectedCardType) {
+        return {
+          error: 'Enter a supported American Express, Visa, Mastercard, or Discover card number.',
+        };
+      }
+      const cardholderName = nameOnCard.trim().split(/\s+/).filter(Boolean);
+      if (cardholderName.length === 0) {
+        return { error: 'Enter the name shown on the card.' };
+      }
       if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(cardExpiration)) {
         return { error: 'Enter the card expiration in MM/YY format.' };
       }
@@ -460,7 +502,9 @@ export default function PaymentScreen({
           emailReceipt: true,
           card: {
             ...payer,
-            creditCardType: cardType,
+            firstName: cardholderName[0],
+            lastName: cardholderName.slice(1).join(' ') || payer.lastName,
+            creditCardType: detectedCardType,
             creditCardNumber: cardNumber,
             creditCardExpiration: cardExpiration,
             creditCardSecurityCode: cardSecurityCode,
@@ -893,25 +937,14 @@ export default function PaymentScreen({
                 />
               ) : null}
 
-              <ChoiceGroup
-                label="Payment Method"
-                options={[
-                  { value: 'CARD', label: 'Card' },
-                  { value: 'ACH', label: 'Bank Account (ACH)' },
-                ]}
-                selected={paymentMethod}
-                disabled={isReviewing || isSubmitting}
-                onSelect={(value) => changePaymentMethod(value as PaymentMethod)}
-              />
-
               <View style={styles.formSection}>
                 <Text style={styles.sectionTitle}>Payer Information</Text>
                 <View style={isDesktopLayout ? styles.twoColumnFields : styles.optionList}>
                   <View style={styles.fieldColumn}>
-                    <AppInput label="First Name" value={firstName} onChangeText={setFirstName} editable={!isReviewing} />
+                    <AppInput label="First Name" value={firstName} onChangeText={changeFirstName} editable={!isReviewing} />
                   </View>
                   <View style={styles.fieldColumn}>
-                    <AppInput label="Last Name" value={lastName} onChangeText={setLastName} editable={!isReviewing} />
+                    <AppInput label="Last Name" value={lastName} onChangeText={changeLastName} editable={!isReviewing} />
                   </View>
                 </View>
                 <AppInput label="Address" value={address1} onChangeText={setAddress1} editable={!isReviewing} />
@@ -947,122 +980,153 @@ export default function PaymentScreen({
                 <AppInput label="Country" value={PAYMENT_COUNTRY} editable={false} />
               </View>
 
-              {paymentMethod === 'CARD' ? (
-                <View style={styles.formSection}>
-                  <Text style={styles.sectionTitle}>Card Information</Text>
-                  <ChoiceGroup
-                    label="Card Type"
-                    options={CARD_TYPE_OPTIONS}
-                    selected={cardType}
-                    disabled={isReviewing || isSubmitting}
-                    onSelect={(value) => {
-                      setCardType(value as CardType);
-                      resetReview();
-                    }}
-                  />
-                  <AppInput
-                    label="Card Number"
-                    value={cardNumber}
-                    onChangeText={(value) => {
-                      setCardNumber(value.replace(/\D/g, '').slice(0, 19));
-                      resetReview();
-                    }}
-                    editable={!isReviewing}
-                    keyboardType="number-pad"
-                    secureTextEntry
-                    autoComplete="off"
-                    maxLength={19}
-                  />
-                  <View style={isDesktopLayout ? styles.twoColumnFields : styles.optionList}>
-                    <View style={styles.fieldColumn}>
-                      <AppInput
-                        label="Expiration (MM/YY)"
-                        value={cardExpiration}
-                        onChangeText={(value) => {
-                          setCardExpiration(formatExpirationInput(value));
-                          resetReview();
-                        }}
-                        editable={!isReviewing}
-                        keyboardType="number-pad"
-                        placeholder="MM/YY"
-                        maxLength={5}
-                      />
+              <View style={styles.paymentMethodSection}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.sectionTitle}>Payment Method</Text>
+                  <Text style={styles.paymentMethodSubtitle}>
+                    Choose how you would like to pay.
+                  </Text>
+                </View>
+                <PaymentMethodSelector
+                  selected={paymentMethod}
+                  amount={selectedPaymentAmount}
+                  cardFee={selectedCardConvenienceFee}
+                  achFee={selectedAchConvenienceFee}
+                  disabled={isReviewing || isSubmitting}
+                  onSelect={changePaymentMethod}
+                />
+
+                {paymentMethod === 'CARD' ? (
+                  <View style={styles.paymentFields}>
+                    <View style={isDesktopLayout ? styles.twoColumnFields : styles.optionList}>
+                      <View style={styles.fieldColumn}>
+                        <AppInput
+                          label="Card Number"
+                          value={cardNumber}
+                          onChangeText={(value) => {
+                            setCardNumber(value.replace(/\D/g, '').slice(0, 19));
+                            resetReview();
+                          }}
+                          editable={!isReviewing}
+                          keyboardType="number-pad"
+                          secureTextEntry
+                          autoComplete="off"
+                          maxLength={19}
+                        />
+                      </View>
+                      <View style={styles.fieldColumn}>
+                        <AppInput
+                          label="Name on Card"
+                          value={nameOnCard}
+                          onChangeText={changeNameOnCard}
+                          editable={!isReviewing}
+                          autoComplete="cc-name"
+                        />
+                      </View>
                     </View>
-                    <View style={styles.fieldColumn}>
-                      <AppInput
-                        label="Security Code"
-                        value={cardSecurityCode}
-                        onChangeText={(value) => {
-                          setCardSecurityCode(value.replace(/\D/g, '').slice(0, 4));
-                          resetReview();
-                        }}
-                        editable={!isReviewing}
-                        keyboardType="number-pad"
-                        secureTextEntry
-                        autoComplete="off"
-                        maxLength={4}
-                      />
+                    <View style={isDesktopLayout ? styles.twoColumnFields : styles.optionList}>
+                      <View style={styles.fieldColumn}>
+                        <AppInput
+                          label="Expiration (MM/YY)"
+                          value={cardExpiration}
+                          onChangeText={(value) => {
+                            setCardExpiration(formatExpirationInput(value));
+                            resetReview();
+                          }}
+                          editable={!isReviewing}
+                          keyboardType="number-pad"
+                          placeholder="MM/YY"
+                          maxLength={5}
+                        />
+                      </View>
+                      <View style={styles.fieldColumn}>
+                        <AppInput
+                          label="Security Code"
+                          value={cardSecurityCode}
+                          onChangeText={(value) => {
+                            setCardSecurityCode(value.replace(/\D/g, '').slice(0, 4));
+                            resetReview();
+                          }}
+                          editable={!isReviewing}
+                          keyboardType="number-pad"
+                          secureTextEntry
+                          autoComplete="off"
+                          maxLength={4}
+                        />
+                      </View>
                     </View>
                   </View>
-                </View>
-              ) : (
-                <View style={styles.formSection}>
-                  <Text style={styles.sectionTitle}>Bank Account Information</Text>
-                  <ChoiceGroup
-                    label="Bank Account Type"
-                    options={[
-                      { value: 'Checking', label: 'Checking' },
-                      { value: 'Savings', label: 'Savings' },
-                    ]}
-                    selected={achBankAccountType}
-                    disabled={isReviewing || isSubmitting}
-                    onSelect={(value) => {
-                      setAchBankAccountType(value as AchBankAccountType);
-                      resetReview();
-                    }}
-                  />
-                  <ChoiceGroup
-                    label="Account Ownership"
-                    options={[
-                      { value: 'Business', label: 'Business' },
-                      { value: 'Personal', label: 'Personal' },
-                    ]}
-                    selected={achAccountType}
-                    disabled={isReviewing || isSubmitting}
-                    onSelect={(value) => {
-                      setAchAccountType(value as AchAccountType);
-                      resetReview();
-                    }}
-                  />
-                  <AppInput label="Bank Name" value={achBankName} onChangeText={setAchBankName} editable={!isReviewing} maxLength={100} />
-                  <AppInput
-                    label="Routing Number"
-                    value={achRoutingNumber}
-                    onChangeText={(value) => {
-                      setAchRoutingNumber(value.replace(/\D/g, '').slice(0, 9));
-                      resetReview();
-                    }}
-                    editable={!isReviewing}
-                    keyboardType="number-pad"
-                    secureTextEntry
-                    autoComplete="off"
-                    maxLength={9}
-                  />
-                  <AppInput
-                    label="Bank Account Number"
-                    value={achBankAccountNumber}
-                    onChangeText={(value) => {
-                      setAchBankAccountNumber(value.replace(/\D/g, '').slice(0, 34));
-                      resetReview();
-                    }}
-                    editable={!isReviewing}
-                    keyboardType="number-pad"
-                    secureTextEntry
-                    autoComplete="off"
-                    maxLength={34}
-                  />
-                </View>
-              )}
+                ) : (
+                  <View style={styles.paymentFields}>
+                    <ChoiceGroup
+                      label="Bank Account Type"
+                      options={[
+                        { value: 'Checking', label: 'Checking' },
+                        { value: 'Savings', label: 'Savings' },
+                      ]}
+                      selected={achBankAccountType}
+                      disabled={isReviewing || isSubmitting}
+                      onSelect={(value) => {
+                        setAchBankAccountType(value as AchBankAccountType);
+                        resetReview();
+                      }}
+                    />
+                    <ChoiceGroup
+                      label="Account Ownership"
+                      options={[
+                        { value: 'Business', label: 'Business' },
+                        { value: 'Personal', label: 'Personal' },
+                      ]}
+                      selected={achAccountType}
+                      disabled={isReviewing || isSubmitting}
+                      onSelect={(value) => {
+                        setAchAccountType(value as AchAccountType);
+                        resetReview();
+                      }}
+                    />
+                    <AppInput
+                      label="Bank Name"
+                      value={achBankName}
+                      onChangeText={setAchBankName}
+                      editable={!isReviewing}
+                      maxLength={100}
+                    />
+                    <AppInput
+                      label="Routing Number"
+                      value={achRoutingNumber}
+                      onChangeText={(value) => {
+                        setAchRoutingNumber(value.replace(/\D/g, '').slice(0, 9));
+                        resetReview();
+                      }}
+                      editable={!isReviewing}
+                      keyboardType="number-pad"
+                      secureTextEntry
+                      autoComplete="off"
+                      maxLength={9}
+                    />
+                    <AppInput
+                      label="Bank Account Number"
+                      value={achBankAccountNumber}
+                      onChangeText={(value) => {
+                        setAchBankAccountNumber(value.replace(/\D/g, '').slice(0, 34));
+                        resetReview();
+                      }}
+                      editable={!isReviewing}
+                      keyboardType="number-pad"
+                      secureTextEntry
+                      autoComplete="off"
+                      maxLength={34}
+                    />
+                  </View>
+                )}
+
+                <PaymentTotalSummary
+                  method={paymentMethod}
+                  amount={selectedPaymentAmount}
+                  convenienceFee={selectedConvenienceFee}
+                  total={selectedTotalAmount}
+                />
+              </View>
 
               <View style={styles.securityNotice}>
                 <Ionicons name="lock-closed-outline" size={18} color={theme.colors.primary} />
@@ -1114,7 +1178,7 @@ export default function PaymentScreen({
                     label="Method"
                     value={
                       paymentMethod === 'CARD'
-                        ? `${cardType} ending in ${cardNumber.slice(-4)}`
+                        ? `Credit card ending in ${cardNumber.slice(-4)}`
                         : `${achBankAccountType} ending in ${achBankAccountNumber.slice(-4)}`
                     }
                   />
@@ -1219,14 +1283,6 @@ function TermOptionSelector({
       <View accessibilityRole="radiogroup" style={styles.optionList}>
         {options.map((option) => {
           const selected = option.id === selectedOptionId;
-          const cardTotal =
-            option.cardTotalAmount === null
-              ? 'Card unavailable'
-              : `Card total ${formatCurrency(option.cardTotalAmount)}`;
-          const achTotal =
-            option.achTotalAmount === null
-              ? 'ACH unavailable'
-              : `ACH total ${formatCurrency(option.achTotalAmount)}`;
           return (
             <Pressable
               key={option.id}
@@ -1242,7 +1298,6 @@ function TermOptionSelector({
               ]}>
               <View style={styles.recordCopy}>
                 <Text style={styles.termTitle}>{option.label}</Text>
-                <Text style={styles.termFeeCopy}>{`${cardTotal} • ${achTotal}`}</Text>
               </View>
               <Text style={styles.recordAmount}>{formatCurrency(option.amount)}</Text>
               <View style={[styles.radioOuter, selected ? styles.radioOuterSelected : null]}>
@@ -1366,6 +1421,96 @@ function PlanPaymentSelector({
           })}
         </View>
       ) : null}
+    </View>
+  );
+}
+
+function PaymentMethodSelector({
+  selected,
+  amount,
+  cardFee,
+  achFee,
+  disabled,
+  onSelect,
+}: {
+  selected: PaymentMethod;
+  amount: number | null;
+  cardFee: number | null;
+  achFee: number | null;
+  disabled: boolean;
+  onSelect: (method: PaymentMethod) => void;
+}) {
+  const options: Array<{
+    value: PaymentMethod;
+    label: string;
+    fee: number | null;
+  }> = [
+    { value: 'ACH', label: 'Bank Account (ACH)', fee: achFee },
+    { value: 'CARD', label: 'Credit Card', fee: cardFee },
+  ];
+
+  return (
+    <View accessibilityRole="radiogroup" style={styles.paymentMethodOptions}>
+      {options.map((option) => {
+        const isSelected = option.value === selected;
+        const unavailable = amount !== null && option.fee === null;
+        const optionDisabled = disabled || unavailable;
+        const feeLabel = getProcessingFeeLabel(option.value, amount, option.fee);
+        return (
+          <Pressable
+            key={option.value}
+            accessibilityRole="radio"
+            accessibilityLabel={`${option.label}, ${feeLabel}`}
+            accessibilityState={{ checked: isSelected, disabled: optionDisabled }}
+            disabled={optionDisabled}
+            onPress={() => onSelect(option.value)}
+            style={({ pressed }) => [
+              styles.paymentMethodOption,
+              isSelected ? styles.paymentMethodOptionSelected : null,
+              unavailable ? styles.optionDisabled : null,
+              pressed ? styles.pressed : null,
+            ]}>
+            <View style={[styles.radioOuter, isSelected ? styles.radioOuterSelected : null]}>
+              {isSelected ? <View style={styles.radioInner} /> : null}
+            </View>
+            <Text style={styles.paymentMethodLabel}>{option.label}</Text>
+            <Text style={styles.paymentMethodFee}>{feeLabel}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function PaymentTotalSummary({
+  method,
+  amount,
+  convenienceFee,
+  total,
+}: {
+  method: PaymentMethod;
+  amount: number | null;
+  convenienceFee: number | null;
+  total: number | null;
+}) {
+  return (
+    <View style={styles.paymentTotalSummary}>
+      <ReviewRow label="Subtotal" value={amount === null ? '—' : formatCurrency(amount)} />
+      <View style={styles.reviewRow}>
+        <Text style={styles.processingFeeLabel}>
+          {getProcessingFeeLabel(method, amount, convenienceFee)}
+        </Text>
+        <Text style={styles.processingFeeValue}>
+          {convenienceFee === null ? '—' : `+${formatCurrency(convenienceFee)}`}
+        </Text>
+      </View>
+      <View style={styles.paymentTotalDivider} />
+      <View style={styles.reviewRow}>
+        <Text style={styles.paymentTotalLabel}>Total</Text>
+        <Text style={styles.paymentTotalValue}>
+          {total === null ? '—' : formatCurrency(total)}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -1544,6 +1689,74 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
     paddingTop: theme.spacing.lg,
+  },
+  paymentMethodSection: {
+    gap: theme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    paddingTop: theme.spacing.lg,
+  },
+  paymentMethodSubtitle: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.primary,
+  },
+  paymentMethodOptions: { gap: theme.spacing.xs },
+  paymentMethodOption: {
+    minHeight: 52,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  paymentMethodOptionSelected: {
+    borderWidth: 2,
+    borderColor: theme.colors.primary,
+    backgroundColor: '#EDF7F2',
+  },
+  paymentMethodLabel: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+  },
+  paymentMethodFee: {
+    ...theme.typography.caption,
+    color: theme.colors.textSubtle,
+    marginLeft: 'auto',
+    textAlign: 'right',
+  },
+  paymentFields: { gap: theme.spacing.md },
+  paymentTotalSummary: {
+    gap: theme.spacing.sm,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: '#FBFCFC',
+    padding: theme.spacing.md,
+  },
+  processingFeeLabel: { ...theme.typography.bodySmall, color: '#C8490A' },
+  processingFeeValue: {
+    ...theme.typography.bodySmall,
+    color: '#C8490A',
+    fontWeight: '700',
+    textAlign: 'right',
+    flexShrink: 1,
+  },
+  paymentTotalDivider: { height: 1, backgroundColor: theme.colors.border },
+  paymentTotalLabel: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: '700',
+  },
+  paymentTotalValue: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textStrong,
+    fontWeight: '700',
+    textAlign: 'right',
+    flexShrink: 1,
   },
   sectionTitle: { ...theme.typography.title, color: theme.colors.textStrong },
   twoColumnFields: { flexDirection: 'row', gap: theme.spacing.md },

@@ -212,6 +212,69 @@ describe('payment API', () => {
     expect(request).not.toHaveProperty('purpose');
   });
 
+  it('accepts published installment plans without payment-link timestamp metadata', async () => {
+    const record = buildPaymentEligibility({
+      demandId: 'installment-1',
+      paymentPlanId: 'plan-1',
+      paymentMode: 'INSTALLMENTS',
+      planPaymentChoice: 'INSTALLMENTS_ONLY',
+      fullPaymentDemandId: null,
+      installmentNumber: 1,
+      installmentCount: 3,
+      planTotalAmount: 200,
+      amountDue: 66.66,
+      premium: 66.66,
+      paidAmount: 0,
+      installments: [
+        {
+          id: 'installment-1',
+          installmentNumber: 1,
+          amount: 66.66,
+          dueDate: '2026-09-01',
+          status: 'PUBLISHED',
+          paymentLink: null,
+          cardConvenienceFee: 2,
+          cardTotalAmount: 68.66,
+          achConvenienceFee: 3,
+          achTotalAmount: 69.66,
+        },
+        {
+          id: 'installment-2',
+          installmentNumber: 2,
+          amount: 66.66,
+          dueDate: '2026-10-01',
+          status: 'PUBLISHED',
+          paymentLink: null,
+          cardConvenienceFee: 2,
+          cardTotalAmount: 68.66,
+          achConvenienceFee: 3,
+          achTotalAmount: 69.66,
+        },
+        {
+          id: 'installment-3',
+          installmentNumber: 3,
+          amount: 66.68,
+          dueDate: '2026-11-01',
+          status: 'PUBLISHED',
+          paymentLink: null,
+          cardConvenienceFee: 2,
+          cardTotalAmount: 68.68,
+          achConvenienceFee: 3,
+          achTotalAmount: 69.68,
+        },
+      ],
+    });
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [record], page: 1, pageSize: 50, total: 1, totalPages: 1 }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      listPaymentEligibility('jane@example.com', 'account-1', { page: 1, pageSize: 50 })
+    ).resolves.toMatchObject({ data: [record] });
+  });
+
   it('rejects eligibility that omits the server-calculated fee previews', async () => {
     const {
       cardConvenienceFee: _cardConvenienceFee,
