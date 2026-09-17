@@ -1100,7 +1100,6 @@ export default function PaymentScreen({
                       }}
                       editable={!isReviewing}
                       keyboardType="number-pad"
-                      secureTextEntry
                       autoComplete="off"
                       maxLength={9}
                     />
@@ -1113,7 +1112,6 @@ export default function PaymentScreen({
                       }}
                       editable={!isReviewing}
                       keyboardType="number-pad"
-                      secureTextEntry
                       autoComplete="off"
                       maxLength={34}
                     />
