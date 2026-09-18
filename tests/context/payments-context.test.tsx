@@ -2,7 +2,7 @@ import React, { PropsWithChildren } from 'react';
 import { renderHook, waitFor } from '@testing-library/react-native';
 
 import { PaymentsProvider, usePayments } from '@/context/payments-context';
-import { buildPaymentEligibility } from '@/tests/factories';
+import { buildFinancedPaymentEligibility, buildPaymentEligibility } from '@/tests/factories';
 import { buildCustomer } from '@/tests/factories';
 
 const mockUseAuth = jest.fn();
@@ -86,4 +86,18 @@ describe('PaymentsProvider', () => {
     expect(mockListPaymentEligibility).not.toHaveBeenCalled();
     expect(result.current.paymentRecords).toEqual([]);
   });
+  it('keeps one visible demand per saved offer, including unavailable pricing for follow-up', async () => {
+    mockUseAuth.mockReturnValue({
+      isAuthenticated: true, userEmail: 'jane@example.com', customer: buildCustomer({ accountId: 'account-1' }),
+    });
+    const financedOnly = { ...buildFinancedPaymentEligibility(), premiumPaymentOffer: 'FINANCED_PREMIUM_ONLY' as const };
+    const unavailable = { ...financedOnly, demandId: 'unavailable', pricingVersion: undefined };
+    mockListPaymentEligibility.mockResolvedValueOnce({
+      data: [financedOnly, unavailable], page: 1, pageSize: 50, total: 2, totalPages: 1,
+    });
+    const { result } = renderHook(() => usePayments(), { wrapper });
+    await waitFor(() => expect(result.current.isLoadingPayments).toBe(false));
+    expect(result.current.payableRecords).toEqual([financedOnly, unavailable]);
+  });
+
 });

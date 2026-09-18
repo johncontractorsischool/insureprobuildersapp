@@ -1,4 +1,4 @@
-import { buildPaymentEligibility } from '@/tests/factories';
+import { buildFinancedPaymentEligibility, buildPaymentEligibility } from '@/tests/factories';
 import {
   buildAccountPaymentSummary,
   formatLineOfBusiness,
@@ -49,4 +49,22 @@ describe('account payment utilities', () => {
     expect(isValidAbaRoutingNumber('021000021')).toBe(true);
     expect(isValidAbaRoutingNumber('021000022')).toBe(false);
   });
+  it('counts a financed premium demand once and excludes future finance-company payments', () => {
+    const summary = buildAccountPaymentSummary([buildFinancedPaymentEligibility()]);
+    expect(summary?.totalOutstanding).toBe(500);
+    expect(summary?.lineItems).toHaveLength(1);
+  });
+
+  it('uses only the down payment for a financed-only demand', () => {
+    const record = { ...buildFinancedPaymentEligibility(), premiumPaymentOffer: 'FINANCED_PREMIUM_ONLY' as const };
+    const summary = buildAccountPaymentSummary([record]);
+    expect(summary?.totalOutstanding).toBe(100);
+    expect(summary?.lineItems).toHaveLength(1);
+  });
+
+  it('excludes unavailable financed-only pricing from payable totals', () => {
+    const record = { ...buildFinancedPaymentEligibility(), premiumPaymentOffer: 'FINANCED_PREMIUM_ONLY' as const, pricingVersion: undefined };
+    expect(buildAccountPaymentSummary([record])).toBeNull();
+  });
+
 });

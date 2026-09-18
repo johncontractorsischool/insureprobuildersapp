@@ -1,5 +1,6 @@
 import { resolveApiBaseUrl } from '@/services/api-base-url';
 import { getSupabaseClient } from '@/services/supabase';
+import { hasValidFullPremiumFees, hasValidPremiumPricing, isPaymentMoney, isPremiumPaymentOffer, isPremiumPaymentOption, isPricingVersion } from '@/utils/premium-payment';
 import type {
   PaymentEligibility,
   PaymentEligibilityList,
@@ -25,11 +26,13 @@ type ErrorPayload = {
 
 export class PaymentApiError extends Error {
   readonly status: number;
+  readonly outcomeUncertain: boolean;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, outcomeUncertain = false) {
     super(message);
     this.name = 'PaymentApiError';
     this.status = status;
+    this.outcomeUncertain = outcomeUncertain;
   }
 }
 
@@ -168,6 +171,10 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
         (typeof record.planTotalAmount === 'number' && Number.isFinite(record.planTotalAmount) && record.planTotalAmount > 0)) &&
       installmentsAreValid);
   return (
+    (record.premiumPaymentOffer == null || isPremiumPaymentOffer(record.premiumPaymentOffer)) &&
+    (record.pricingVersion === undefined || isPricingVersion(record.pricingVersion)) &&
+    (record.premiumPaymentOption == null || isPremiumPaymentOption(record.premiumPaymentOption)) &&
+    hasValidPremiumPricing(record, record.amountDue ?? NaN) &&
     typeof record.demandId === 'string' &&
     (record.source === 'REPLICA' || record.source === 'CRM') &&
     typeof record.accountId === 'string' &&
@@ -230,7 +237,21 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
 function normalizePaymentEligibility(value: unknown): PaymentEligibility | null {
   if (!value || typeof value !== 'object') return null;
 
-  const record = value as Record<string, unknown>;
+  const record = value as Partial<PaymentEligibility>;
+  if (
+    (record.premiumPaymentOffer != null && !isPremiumPaymentOffer(record.premiumPaymentOffer)) ||
+    (record.pricingVersion !== undefined && !isPricingVersion(record.pricingVersion)) ||
+    (record.premiumPaymentOption != null && !isPremiumPaymentOption(record.premiumPaymentOption)) ||
+    !hasValidPremiumPricing(record, record.amountDue ?? NaN) ||
+    (record.pricingVersion !== undefined && record.purpose === 'PREMIUM' &&
+      (!hasValidFullPremiumFees(record, record.amountDue ?? NaN) ||
+        (Array.isArray(record.termOptions) && record.termOptions.some((option) =>
+          option && typeof option === 'object' && !hasValidFullPremiumFees(option, option.amount))))) ||
+    (Array.isArray(record.termOptions) && record.termOptions.some((option) =>
+      option && typeof option === 'object' && !hasValidPremiumPricing(option, option.amount)))
+  ) {
+    throw new PaymentApiError(422, 'Payment pricing is invalid. Please refresh payment details.');
+  }
   const normalized = {
     ...record,
     // Payment demands created before installment support do not include plan
@@ -300,6 +321,7 @@ function isPaymentTermOption(value: unknown): value is PaymentTermOption {
   if (!value || typeof value !== 'object') return false;
   const option = value as Partial<PaymentTermOption>;
   return (
+    hasValidPremiumPricing(option, option.amount ?? NaN) &&
     typeof option.id === 'string' &&
     Boolean(option.id.trim()) &&
     typeof option.termYears === 'number' &&
@@ -402,6 +424,9 @@ function isSuccessfulPayment(value: unknown): value is SuccessfulPayment {
   if (!value || typeof value !== 'object') return false;
   const payment = value as Partial<SuccessfulPayment>;
   return (
+    (payment.premiumPaymentOption == null || isPremiumPaymentOption(payment.premiumPaymentOption)) &&
+    (payment.premiumPaymentOption !== 'FINANCED_PREMIUM' || payment.purpose === 'DOWN_PAYMENT') &&
+    (payment.premiumPaymentOption !== 'FULL_PREMIUM' || payment.purpose === 'PREMIUM') &&
     payment.status === 'SUCCEEDED' &&
     typeof payment.id === 'string' &&
     typeof payment.demandId === 'string' &&
@@ -413,10 +438,10 @@ function isSuccessfulPayment(value: unknown): value is SuccessfulPayment {
         payment.termYears <= 5)) &&
     ((payment.paymentOptionId === null && payment.termYears === null) ||
       (typeof payment.paymentOptionId === 'string' && typeof payment.termYears === 'number')) &&
-    typeof payment.amount === 'number' &&
-    (payment.convenienceFee === null || typeof payment.convenienceFee === 'number') &&
-    (payment.addOnConvenienceFee === null || typeof payment.addOnConvenienceFee === 'number') &&
-    (payment.totalCharged === null || typeof payment.totalCharged === 'number') &&
+    isPaymentMoney(payment.amount) &&
+    (payment.convenienceFee === null || isPaymentMoney(payment.convenienceFee, true)) &&
+    (payment.addOnConvenienceFee === null || isPaymentMoney(payment.addOnConvenienceFee, true)) &&
+    (payment.totalCharged === null || (isPaymentMoney(payment.totalCharged) && payment.totalCharged >= payment.amount)) &&
     payment.currency === 'USD' &&
     typeof payment.purpose === 'string' &&
     (payment.receiptId === null || typeof payment.receiptId === 'string') &&
@@ -439,24 +464,28 @@ export async function submitPayment(
   }
 
   const url = `${getPaymentApiBaseUrl()}/client/payment-eligibility/${encodeURIComponent(normalizedDemandId)}/payments`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: await buildHeaders(clientEmail, {
+  const headers = await buildHeaders(clientEmail, {
       'Content-Type': 'application/json',
       'Idempotency-Key': normalizedKey,
       'X-Client-Account-Id': normalizedAccountId,
-    }),
-    body: JSON.stringify(payment),
   });
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payment) });
+  } catch {
+    throw new PaymentApiError(502, 'We could not confirm your payment. Please contact PBIA before trying again.', true);
+  }
   if (!response.ok) {
     return throwResponseError(response, 'Unable to confirm your payment.');
   }
 
   const payload = await readJson(response);
-  if (!isSuccessfulPayment(payload)) {
+  if (!isSuccessfulPayment(payload) || payload.demandId !== normalizedDemandId ||
+      (payment.premiumPaymentOption && payload.premiumPaymentOption !== payment.premiumPaymentOption)) {
     throw new PaymentApiError(
       502,
-      'We could not confirm your payment. Please contact PBIA before trying again.'
+      'We could not confirm your payment. Please contact PBIA before trying again.',
+      true
     );
   }
   return payload;

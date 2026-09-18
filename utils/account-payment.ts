@@ -1,4 +1,5 @@
 import type { PaymentEligibility, PaymentPurpose } from '@/types/payment';
+import { paymentDemandAmount } from '@/utils/premium-payment';
 
 export type AccountPaymentLineItem = {
   id: string;
@@ -37,6 +38,10 @@ const US_STATE_NAMES: Record<string, string> = {
   VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
   DC: 'District of Columbia',
 };
+
+export const US_STATE_OPTIONS = Object.entries(US_STATE_NAMES)
+  .map(([abbreviation, name]) => ({ label: `${name} (${abbreviation})`, value: name }))
+  .sort((left, right) => left.value.localeCompare(right.value));
 
 const LINE_OF_BUSINESS_LABELS: Record<string, string> = {
   CONTRACTOR_LICENSE_BOND: 'Contractors License Bond',
@@ -77,13 +82,18 @@ export function buildAccountPaymentSummary(
   );
   if (payableRecords.length === 0) return null;
 
-  const lineItems = payableRecords.map((record) => ({
-    id: record.demandId,
-    label: record.lineOfBusiness.trim()
-      ? formatLineOfBusiness(record.lineOfBusiness)
-      : buildPaymentRecordLabel(record),
-    amount: record.amountDue,
-  }));
+  const lineItems = payableRecords.flatMap((record) => {
+    const amount = paymentDemandAmount(record);
+    if (amount === null || amount <= 0) return [];
+    return [{
+      id: record.demandId,
+      label: record.lineOfBusiness.trim()
+        ? formatLineOfBusiness(record.lineOfBusiness)
+        : buildPaymentRecordLabel(record),
+      amount,
+    }];
+  });
+  if (lineItems.length === 0) return null;
 
   return {
     totalOutstanding:
