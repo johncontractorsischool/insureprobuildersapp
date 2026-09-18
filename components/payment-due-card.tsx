@@ -5,6 +5,7 @@ import { theme } from '@/constants/theme';
 import type { PaymentEligibility } from '@/types/payment';
 import { formatLineOfBusiness, getPaymentPurposeLabel } from '@/utils/account-payment';
 import { formatCurrency } from '@/utils/format';
+import { isFinancedOnlyDemand, paymentDemandAmount } from '@/utils/premium-payment';
 
 type PaymentDueCardProps = {
   record: PaymentEligibility;
@@ -31,15 +32,17 @@ export function PaymentDueCard({
   const policyType = formatLineOfBusiness(record.lineOfBusiness);
   const hasTermOptions = record.paymentMode === 'TERM_OPTIONS';
   const hasInstallmentPlan = Boolean(record.paymentPlanId);
-  const startingAmount = hasTermOptions
-    ? Math.min(...record.termOptions.map((option) => option.amount))
-    : record.amountDue;
-  const amountDescription = hasTermOptions
-    ? `${record.termOptions.length} term options starting at ${formatCurrency(startingAmount)}`
-    : hasInstallmentPlan
-      ? `${record.installments.length} installment options or pay in full`
-      : `Amount due ${formatCurrency(record.amountDue)}`;
-  const actionLabel = hasTermOptions ? 'Choose Term & Pay' : hasInstallmentPlan ? 'Choose Payment' : 'Pay Now';
+  const startingAmount = paymentDemandAmount(record);
+  const financedOnly = isFinancedOnlyDemand(record);
+  const amountDescription = startingAmount === null
+    ? 'Pricing unavailable'
+    : hasTermOptions
+      ? `Term options starting at ${formatCurrency(startingAmount)}`
+      : hasInstallmentPlan
+        ? `${record.installments.length} installment options or pay in full`
+        : `${financedOnly ? 'Down payment due' : 'Amount due'} ${formatCurrency(startingAmount)}`;
+  const actionLabel = startingAmount === null ? 'Review Details'
+    : hasTermOptions ? 'Choose Term & Pay' : hasInstallmentPlan ? 'Choose Payment' : 'Pay Now';
 
   return (
     <View
@@ -68,10 +71,10 @@ export function PaymentDueCard({
 
       <View style={[styles.amountBlock, isDesktopLayout ? styles.desktopAmountBlock : null]}>
         <Text style={styles.amountLabel}>
-          {hasTermOptions ? 'Term Options' : hasInstallmentPlan ? 'Full or Installments' : 'Amount Due'}
+          {financedOnly ? 'Down Payment Due' : hasTermOptions ? 'Term Options' : hasInstallmentPlan ? 'Full or Installments' : 'Amount Due'}
         </Text>
         <Text style={styles.amountValue}>
-          {hasTermOptions ? `From ${formatCurrency(startingAmount)}` : formatCurrency(record.amountDue)}
+          {startingAmount === null ? 'Pricing unavailable' : hasTermOptions ? `From ${formatCurrency(startingAmount)}` : formatCurrency(startingAmount)}
         </Text>
       </View>
 
@@ -83,7 +86,7 @@ export function PaymentDueCard({
               ? `${record.termOptions.length} terms available`
               : hasInstallmentPlan
                 ? `${record.installments.length} scheduled payments`
-                : getPaymentPurposeLabel(record.purpose)}
+                : getPaymentPurposeLabel(financedOnly ? 'DOWN_PAYMENT' : record.purpose)}
           </Text>
         </View>
         {record.clientMessage ? (

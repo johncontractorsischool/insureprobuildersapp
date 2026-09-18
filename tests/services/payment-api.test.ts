@@ -4,7 +4,7 @@ import {
   listPaymentEligibility,
   submitPayment,
 } from '@/services/payment-api';
-import { buildPaymentEligibility, buildPaymentTermOption } from '@/tests/factories';
+import { buildFinancedPaymentEligibility, buildPaymentEligibility, buildPaymentTermOption } from '@/tests/factories';
 
 const ORIGINAL_PAYMENT_BASE_URL = process.env.EXPO_PUBLIC_PBIA_API_BASE_URL;
 const mockGetSession = jest.fn();
@@ -421,4 +421,112 @@ describe('payment API', () => {
       })
     );
   });
+  it('preserves premium financing and its exact version', async () => {
+    const record = buildFinancedPaymentEligibility();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => record });
+    await expect(getPaymentEligibility('jane@example.com', 'account-1', 'demand-1')).resolves.toEqual(record);
+  });
+
+  it.each([
+    { pricingVersion: '' }, { pricingVersion: null }, { pricingVersion: 'not-a-version' },
+    { premiumPaymentOption: 'INSTALLMENTS' },
+    { financing: { fullPremium: 500, downPayment: 0, paymentCount: 10, paymentAmount: 45 } },
+    { financing: { fullPremium: 500, downPayment: 500, paymentCount: 10, paymentAmount: 45 } },
+    { financing: { fullPremium: 600, downPayment: 100, paymentCount: 10, paymentAmount: 45 } },
+    { financing: { fullPremium: 500, downPayment: 100, paymentCount: 121, paymentAmount: 45 } },
+    { financing: { fullPremium: 500, downPayment: 100, paymentCount: 1.5, paymentAmount: 45 } },
+    { financing: { fullPremium: 500, downPayment: 100, paymentCount: 10, paymentAmount: -1 } },
+    { financing: { fullPremium: 500, downPayment: 100, paymentCount: 10, paymentAmount: 45.001 } },
+    { financedCardTotalAmount: 99 }, { financedAchTotalAmount: 104 },
+    { financedCardConvenienceFee: -1 }, { financedCardConvenienceFee: Infinity },
+  ])('rejects malformed premium pricing %j', async (overrides) => {
+    const record = { ...buildFinancedPaymentEligibility(), ...overrides };
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => record });
+    await expect(getPaymentEligibility('jane@example.com', 'account-1', 'demand-1')).rejects.toThrow(/pricing.*refresh/i);
+  });
+
+  describe('versioned premium submission', () => {
+    const request = {
+      premiumPaymentOption: 'FINANCED_PREMIUM' as const,
+      pricingVersion: '2026-09-18T18:00:00.000Z',
+      paymentMethod: 'CARD' as const, emailReceipt: true as const,
+      card: {
+        firstName: 'Jane', lastName: 'Builder', address1: '123 Main Street',
+        country: 'United States Of America' as const, city: 'Los Angeles', region: 'California',
+        postalCode: '90001', email: 'jane@example.com', creditCardType: 'Visa' as const,
+        creditCardNumber: '4111111111111111', creditCardExpiration: '12/30', creditCardSecurityCode: '123',
+      },
+    };
+    const receipt = {
+      id: 'payment-1', demandId: 'demand-1', paymentOptionId: null, termYears: null,
+      premiumPaymentOption: 'FINANCED_PREMIUM', status: 'SUCCEEDED', amount: 100,
+      convenienceFee: 3.5, addOnConvenienceFee: 0, totalCharged: 103.5, currency: 'USD',
+      purpose: 'DOWN_PAYMENT', receiptId: 'receipt-1', completedAt: '2026-09-18T18:01:00.000Z',
+    };
+
+    it('sends the selected choice and exact version through the existing authenticated endpoint', async () => {
+      const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => receipt });
+      global.fetch = fetchMock;
+      await expect(submitPayment('jane@example.com', 'account-1', 'demand-1', 'premium-key', request)).resolves.toEqual(receipt);
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/demand-1/payments'), expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer supabase-access-token', 'Idempotency-Key': 'premium-key', 'X-Client-Account-Id': 'account-1' }),
+        body: JSON.stringify(request),
+      }));
+    });
+
+    it('retains a null receipt total instead of substituting a preview', async () => {
+      global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ ...receipt, totalCharged: null }) });
+      await expect(submitPayment('jane@example.com', 'account-1', 'demand-1', 'premium-key', request)).resolves.toMatchObject({ totalCharged: null });
+    });
+
+    it.each([
+      { premiumPaymentOption: 'OTHER' }, { premiumPaymentOption: null },
+      { purpose: 'PREMIUM' }, { demandId: 'another-demand' },
+      { amount: Infinity }, { totalCharged: NaN },
+    ])('treats malformed success as uncertain: %j', async (overrides) => {
+      global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ ...receipt, ...overrides }) });
+      await expect(submitPayment('jane@example.com', 'account-1', 'demand-1', 'premium-key', request)).rejects.toMatchObject({ status: 502, outcomeUncertain: true });
+    });
+
+    it('marks transport failure uncertain without retrying or exposing instrument details', async () => {
+      global.fetch = jest.fn().mockRejectedValue(new TypeError('Network failed'));
+      await expect(submitPayment('jane@example.com', 'account-1', 'demand-1', 'premium-key', request)).rejects.toMatchObject({ status: 502, outcomeUncertain: true });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('rejects invalid financing on a coverage term rather than borrowing root pricing', async () => {
+    const record = {
+      ...buildFinancedPaymentEligibility(), paymentMode: 'TERM_OPTIONS',
+      termOptions: [buildPaymentTermOption(), buildPaymentTermOption({
+        id: 'term-2', termYears: 2,
+        financing: { fullPremium: 500, downPayment: 100, paymentCount: 10, paymentAmount: 45 },
+      })],
+    };
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => record });
+    await expect(getPaymentEligibility('jane@example.com', 'account-1', 'demand-1')).rejects.toThrow(/pricing.*refresh/i);
+  });
+
+  it('rejects a full-payment preview that does not match its premium plus fee', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ ...buildFinancedPaymentEligibility(), cardTotalAmount: 999 }) });
+    await expect(getPaymentEligibility('jane@example.com', 'account-1', 'demand-1')).rejects.toThrow(/pricing.*refresh/i);
+  });
+
+  it('accepts unavailable financed previews without treating them as zero', async () => {
+    const record = { ...buildFinancedPaymentEligibility(), financedCardConvenienceFee: undefined, financedCardTotalAmount: undefined };
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => record });
+    await expect(getPaymentEligibility('jane@example.com', 'account-1', 'demand-1')).resolves.toMatchObject({ financing: record.financing });
+  });
+
+  it.each(['FULL_PREMIUM_ONLY', 'FINANCED_PREMIUM_ONLY', 'BOTH', null, undefined])('retains the saved offer %s', async (offer) => {
+    const record = { ...buildFinancedPaymentEligibility(), premiumPaymentOffer: offer };
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => record });
+    await expect(getPaymentEligibility('jane@example.com', 'account-1', 'demand-1')).resolves.toEqual(record);
+  });
+
+  it.each(['UNKNOWN', '', false, 1, {}])('rejects an unknown premium offer %j', async (offer) => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ ...buildFinancedPaymentEligibility(), premiumPaymentOffer: offer }) });
+    await expect(getPaymentEligibility('jane@example.com', 'account-1', 'demand-1')).rejects.toThrow(/pricing.*refresh/i);
+  });
+
 });

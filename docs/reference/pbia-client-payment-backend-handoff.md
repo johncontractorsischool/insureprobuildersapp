@@ -1,5 +1,74 @@
 # PBIA client payment visibility backend handoff
 
+## September 18, 2026: full and financed premium checkout
+
+The shared native/web checkout now supports `FULL_PREMIUM` and `FINANCED_PREMIUM`
+for agent-published Premium demands in `FIXED` or `TERM_OPTIONS` mode. The existing
+card/ACH form, Supabase authentication, account headers, endpoints, and environment
+configuration are reused. Premium Audit installments and non-premium demands
+retain their existing request path.
+
+- Eligibility may include `premiumPaymentOffer`, `pricingVersion`, `financing` (`fullPremium`,
+  `downPayment`, `paymentCount`, `paymentAmount`), and separate
+  `financedCardConvenienceFee`, `financedCardTotalAmount`,
+  `financedAchConvenienceFee`, and `financedAchTotalAmount` fields. Coverage terms
+  carry their own financing and fee previews. Malformed pricing is rejected.
+- Honor the saved offer across every policy line: `FULL_PREMIUM_ONLY` hides
+  financing even when terms are saved; `BOTH` offers full payment plus financing
+  when valid; `FINANCED_PREMIUM_ONLY` offers only financing. Opening, reloading,
+  and changing coverage term select Full when allowed, otherwise Financed.
+  Show the Premium Payment choice section only when both options are available.
+  A single allowed option is selected automatically; financed-only monthly terms
+  remain visible in the payment summary and review.
+  Financed-only without valid terms or a pricing version shows unavailable
+  pricing and blocks payment. Unknown offers and malformed pricing are rejected.
+  Historical missing/null offers retain BOTH semantics; they are never rewritten
+  to the new-record Full-only default. Monthly amounts remain exactly as saved.
+- The customer chooses premium structure independently from coverage duration
+  and card/ACH. Financed checkout collects only the down payment plus its fee.
+  The finance company handles the agreement and later monthly payments; the app
+  creates no recurring charge or installment schedule.
+- Versioned requests send `premiumPaymentOption` and the exact `pricingVersion`,
+  plus `paymentOptionId` for a selected coverage term. They omit client prices,
+  purpose, and financing terms. Legacy responses without a version continue to
+  use the original full-payment payload, unless explicitly financed-only (blocked).
+  The offer itself is never submitted. Billing state abbreviations are normalized
+  to full US state names; missing/unknown states require correction.
+  The State field uses a standard dropdown on web and a selection list on native,
+  containing the 50 states plus District of Columbia. Option values and submitted
+  `card.region`/`ach.region` are full names. The field is locked during review,
+  eligibility checks, and submission.
+- Review and confirmation recheck the offer, version, selected pricing, monthly terms,
+  and fee previews. Changed pricing requires another review. Submission
+  fingerprints include the choice, version, and term. A synchronous submission
+  lock prevents duplicate taps; changing choices cannot clear an uncertain
+  payment block. Selection errors/conflicts reload eligibility. Network failures
+  and malformed success responses remain uncertain rather than becoming retries.
+- Financed receipts say **Down payment received**, show actual returned amounts and
+  charges, and refresh eligibility. Null receipt totals are never replaced with
+  estimated fees. Account summaries still count each demand once and exclude
+  future finance-company collections. Financed-only dashboard and checkout demand
+  cards use the down payment (the lowest available term down payment before term
+  selection). Account totals exclude unavailable prices rather than substituting
+  full premium. Unavailable requests remain visible for refresh/agent follow-up.
+
+The AMS-PBIA build brief is
+`docs/api/insureprobuildersapp-premium-payment-build-handoff.md`, accompanied by
+`docs/api/mobile-premium-payment-options-handoff.md`. Its latest development
+verification reports pricing migration `20260918160131_add_premium_payment_options`
+was applied, while offer migration `20260918190250_add_premium_payment_offer` was
+unapplied. The matching API release is not confirmed deployed.
+Fixture tests do not establish deployment or schema readiness. Verify the target
+API contract after the backend migration/deployment is separately coordinated;
+then validate iOS, Android, and web against that environment. No real payment is
+part of local automated verification.
+
+Run `npm test -- --runInBand`, `npx tsc --noEmit`, and `npm run lint`. Focused
+coverage lives in the payment API, payment screen, payments context, and account
+payment utility suites.
+
+## Original payment visibility handoff
+
 Date: August 6, 2026
 
 ## Objective

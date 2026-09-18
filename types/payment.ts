@@ -6,6 +6,25 @@ export type PaymentMode = 'FIXED' | 'TERM_OPTIONS' | 'INSTALLMENTS';
 
 export type PaymentPlanChoice = 'AVAILABLE' | 'INSTALLMENTS_ONLY';
 
+export type PremiumPaymentOption = 'FULL_PREMIUM' | 'FINANCED_PREMIUM';
+
+export type PremiumPaymentOffer = 'FULL_PREMIUM_ONLY' | 'FINANCED_PREMIUM_ONLY' | 'BOTH';
+
+export type PremiumPaymentTerms = {
+  fullPremium: number;
+  downPayment: number;
+  paymentCount: number;
+  paymentAmount: number;
+};
+
+export type PremiumPricingFields = {
+  financing?: PremiumPaymentTerms | null;
+  financedCardConvenienceFee?: number | null;
+  financedCardTotalAmount?: number | null;
+  financedAchConvenienceFee?: number | null;
+  financedAchTotalAmount?: number | null;
+};
+
 export type PaymentPurpose =
   | 'PREMIUM'
   | 'PREMIUM_AUDIT'
@@ -14,7 +33,7 @@ export type PaymentPurpose =
   | 'POLICY_FEE'
   | 'OTHER';
 
-export type PaymentTermOption = {
+export type PaymentTermOption = PremiumPricingFields & {
   id: string;
   termYears: number;
   amount: number;
@@ -39,7 +58,10 @@ export type PaymentInstallment = {
   achTotalAmount: number | null;
 };
 
-export type PaymentEligibility = {
+export type PaymentEligibility = PremiumPricingFields & {
+  premiumPaymentOffer?: PremiumPaymentOffer | null;
+  pricingVersion?: string;
+  premiumPaymentOption?: PremiumPaymentOption | null;
   demandId: string;
   source: PaymentDemandSource;
   accountId: string;
@@ -129,18 +151,30 @@ type SharedPaymentRequest = {
 };
 
 type FixedPaymentSelection = {
+  premiumPaymentOption?: never;
+  pricingVersion?: never;
   amount: number;
   purpose: PaymentPurpose;
   paymentOptionId?: never;
 };
 
 type TermPaymentSelection = {
+  premiumPaymentOption?: never;
+  pricingVersion?: never;
   paymentOptionId: string;
   amount?: never;
   purpose?: never;
 };
 
-type PaymentSelection = FixedPaymentSelection | TermPaymentSelection;
+type PremiumPaymentSelection = {
+  premiumPaymentOption: PremiumPaymentOption;
+  pricingVersion: string;
+  paymentOptionId?: string;
+  amount?: never;
+  purpose?: never;
+};
+
+export type PaymentSelection = FixedPaymentSelection | TermPaymentSelection | PremiumPaymentSelection;
 
 export type CardPaymentRequest = SharedPaymentRequest &
   PaymentSelection & {
@@ -159,6 +193,7 @@ export type AchPaymentRequest = SharedPaymentRequest &
 export type SubmitPaymentRequest = CardPaymentRequest | AchPaymentRequest;
 
 export type SuccessfulPayment = {
+  premiumPaymentOption?: PremiumPaymentOption | null;
   id: string;
   demandId: string;
   paymentOptionId: string | null;

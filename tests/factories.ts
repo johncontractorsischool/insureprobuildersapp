@@ -136,6 +136,20 @@ export function buildPaymentEligibility(
   };
 }
 
+export function buildFinancedPaymentEligibility() {
+  return {
+    ...buildPaymentEligibility({
+      purpose: 'PREMIUM', premium: 500, amountDue: 500,
+      cardConvenienceFee: 17.5, cardTotalAmount: 517.5,
+      achConvenienceFee: 3, achTotalAmount: 503,
+    }),
+    pricingVersion: '2026-09-18T18:00:00.000Z',
+    financing: { fullPremium: 500, downPayment: 100, paymentCount: 10, paymentAmount: 45 },
+    financedCardConvenienceFee: 3.5, financedCardTotalAmount: 103.5,
+    financedAchConvenienceFee: 3, financedAchTotalAmount: 103,
+  };
+}
+
 export function buildPaymentTermOption(
   overrides: Partial<PaymentTermOption> = {}
 ): PaymentTermOption {

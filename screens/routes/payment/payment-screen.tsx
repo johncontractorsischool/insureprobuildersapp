@@ -7,6 +7,8 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '@/components/app-button';
 import { AppInput } from '@/components/app-input';
+import { StateSelect } from '@/components/state-select';
+import { PremiumPaymentSelector, financingDescription } from '@/components/premium-payment-selector';
 import { EmptyState } from '@/components/empty-state';
 import { LoadingState } from '@/components/loading-state';
 import { ScreenContainer } from '@/components/screen-container';
@@ -25,6 +27,8 @@ import type {
   PaymentEligibility,
   PaymentInstallment,
   PaymentMethod,
+  PaymentSelection,
+  PremiumPaymentOption,
   PaymentTermOption,
   SubmitPaymentRequest,
   SuccessfulPayment,
@@ -37,6 +41,7 @@ import {
   normalizeUsStateName,
 } from '@/utils/account-payment';
 import { formatCurrency } from '@/utils/format';
+import { availablePremiumPaymentOptions, isFinancedOnlyDemand, isPremiumDemand, isPremiumPaymentTerms, paymentDemandAmount, premiumPricingSnapshot, supportsPremiumChoice } from '@/utils/premium-payment';
 
 const PAYMENT_COUNTRY = 'United States Of America' as const;
 
@@ -70,14 +75,7 @@ function getRecordStatusDescription(record: PaymentEligibility) {
       ? 'Pay in full or choose an installment'
       : 'Installment schedule available';
   }
-  return `${getPaymentPurposeLabel(record.purpose)} due`;
-}
-
-function getTermOptionAmount(record: PaymentEligibility) {
-  if (record.paymentMode !== 'TERM_OPTIONS' || record.termOptions.length === 0) {
-    return record.amountDue;
-  }
-  return Math.min(...record.termOptions.map((option) => option.amount));
+  return `${getPaymentPurposeLabel(isFinancedOnlyDemand(record) ? 'DOWN_PAYMENT' : record.purpose)} due`;
 }
 
 function sameMoney(left: number | null, right: number | null) {
@@ -87,6 +85,7 @@ function sameMoney(left: number | null, right: number | null) {
 
 function termOptionMatches(left: PaymentTermOption, right: PaymentTermOption) {
   return (
+    premiumPricingSnapshot(left) === premiumPricingSnapshot(right) &&
     left.id === right.id &&
     left.termYears === right.termYears &&
     left.currency === right.currency &&
@@ -187,6 +186,7 @@ export default function PaymentScreen({
   } = usePayments();
   const [selectedRecordKey, setSelectedRecordKey] = useState('');
   const [selectedPaymentOptionId, setSelectedPaymentOptionId] = useState('');
+  const [premiumPaymentOption, setPremiumPaymentOption] = useState<PremiumPaymentOption | null>(null);
   const [selectedPlanChoice, setSelectedPlanChoice] = useState<'FULL' | 'INSTALLMENTS'>('FULL');
   const [selectedInstallmentId, setSelectedInstallmentId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CARD');
@@ -223,6 +223,9 @@ export default function PaymentScreen({
   const [blockedRecordKey, setBlockedRecordKey] = useState<string | null>(null);
   const [isPaymentUnavailable, setIsPaymentUnavailable] = useState(false);
   const paymentIntentRef = useRef<IntentIdentity | null>(null);
+  const submissionLockRef = useRef(false);
+  const reviewLockRef = useRef(false);
+  const reviewedSelectionRef = useRef<string | null>(null);
   const accountId = customer?.accountId?.trim() || customer?.databaseId?.trim() || '';
 
   const selectedRecord = useMemo(
@@ -241,7 +244,7 @@ export default function PaymentScreen({
   const selectedPaymentRecord = isInstallmentSelection && selectedInstallment
     ? paymentRecords.find((record) => record.demandId === selectedInstallment.id) ?? null
     : selectedRecord;
-  const selectedPaymentAmount = selectedRecord
+  const selectedFullAmount = selectedRecord
     ? isInstallmentSelection
       ? (selectedInstallment?.amount ?? null)
       : selectedRecord.paymentMode === 'TERM_OPTIONS'
@@ -255,15 +258,58 @@ export default function PaymentScreen({
         ? selectedTermOption
         : selectedRecord
     : null;
-  const selectedCardConvenienceFee = selectedFeeSource?.cardConvenienceFee ?? null;
-  const selectedCardTotalAmount = selectedFeeSource?.cardTotalAmount ?? null;
-  const selectedAchConvenienceFee = selectedFeeSource?.achConvenienceFee ?? null;
-  const selectedAchTotalAmount = selectedFeeSource?.achTotalAmount ?? null;
-  const selectedConvenienceFee =
+  const premiumSource = selectedRecord?.paymentMode === 'TERM_OPTIONS' ? selectedTermOption : selectedRecord;
+  const hasPremiumChoice = Boolean(selectedRecord && supportsPremiumChoice(selectedRecord));
+  const availablePremiumOptions = selectedRecord
+    ? availablePremiumPaymentOptions(selectedRecord, selectedPaymentOptionId) : [];
+  const isPremium = Boolean(selectedRecord && isPremiumDemand(selectedRecord));
+  const hasInvalidPremiumSelection = isPremium &&
+    (!premiumPaymentOption || !availablePremiumOptions.includes(premiumPaymentOption));
+  const isPremiumPricingUnavailable = isPremium && availablePremiumOptions.length === 0 &&
+    (selectedRecord?.paymentMode !== 'TERM_OPTIONS' || Boolean(selectedTermOption));
+  const financing = hasPremiumChoice && premiumSource && selectedFullAmount !== null &&
+    isPremiumPaymentTerms(premiumSource.financing, selectedFullAmount)
+    ? premiumSource.financing : null;
+  const isFinanced = isPremium && premiumPaymentOption === 'FINANCED_PREMIUM';
+  const selectedPaymentAmount = hasInvalidPremiumSelection ? null : isFinanced ? financing?.downPayment ?? null : selectedFullAmount;
+  const selectedPurpose = isFinanced || (selectedRecord && isFinancedOnlyDemand(selectedRecord)) ? 'DOWN_PAYMENT' : selectedRecord?.purpose ?? 'PREMIUM';
+  const selectedCardConvenienceFee = isFinanced
+    ? premiumSource?.financedCardConvenienceFee ?? null : selectedFeeSource?.cardConvenienceFee ?? null;
+  const selectedCardTotalAmount = isFinanced
+    ? premiumSource?.financedCardTotalAmount ?? null : selectedFeeSource?.cardTotalAmount ?? null;
+  const selectedAchConvenienceFee = isFinanced
+    ? premiumSource?.financedAchConvenienceFee ?? null : selectedFeeSource?.achConvenienceFee ?? null;
+  const selectedAchTotalAmount = isFinanced
+    ? premiumSource?.financedAchTotalAmount ?? null : selectedFeeSource?.achTotalAmount ?? null;
+  const selectedConvenienceFee = hasInvalidPremiumSelection ? null :
     paymentMethod === 'CARD' ? selectedCardConvenienceFee : selectedAchConvenienceFee;
-  const selectedTotalAmount =
+  const selectedTotalAmount = hasInvalidPremiumSelection ? null :
     paymentMethod === 'CARD' ? selectedCardTotalAmount : selectedAchTotalAmount;
   const detectedCardType = detectCardType(cardNumber);
+  const checkoutIdentity = `${accountId}|${userEmail}|${isAuthenticated}|${selectedRecordKey}`;
+  const activeCheckoutRef = useRef(checkoutIdentity);
+  activeCheckoutRef.current = checkoutIdentity;
+  const selectionSnapshot = JSON.stringify([
+    checkoutIdentity, selectedRecord?.pricingVersion, selectedRecord?.paymentMode, selectedRecord?.premiumPaymentOffer,
+    selectedPaymentOptionId, selectedPlanChoice, selectedInstallmentId,
+    premiumPaymentOption, paymentMethod, selectedPaymentAmount, selectedPurpose,
+    selectedConvenienceFee, selectedTotalAmount,
+    premiumSource ? premiumPricingSnapshot(premiumSource) : null,
+  ]);
+  const activeSelectionRef = useRef(selectionSnapshot);
+  activeSelectionRef.current = selectionSnapshot;
+
+  useEffect(() => {
+    setPremiumPaymentOption(selectedRecord
+      ? availablePremiumPaymentOptions(selectedRecord, selectedTermOption?.id)[0] ?? null : null);
+    setIsReviewing(false);
+    reviewedSelectionRef.current = null;
+  }, [selectedRecord, selectedTermOption]);
+
+  useEffect(() => {
+    setSuccessfulPayment(null);
+  }, [accountId, userEmail]);
+
 
   useFocusEffect(
     useCallback(() => {
@@ -326,11 +372,13 @@ export default function PaymentScreen({
     setAchRoutingNumber('');
     setAchBankAccountNumber('');
     paymentIntentRef.current = null;
-  }, [selectedRecordKey]); // Deliberately reset only when the selected policy or quote changes.
+  }, [selectedRecordKey, accountId]); // Clear credentials when the account or demand changes.
 
   useEffect(
     () => () => {
       paymentIntentRef.current = null;
+      activeCheckoutRef.current = '';
+      activeSelectionRef.current = '';
     },
     []
   );
@@ -364,6 +412,7 @@ export default function PaymentScreen({
   }, [clearSensitiveFields]);
 
   const resetReview = useCallback(() => {
+    reviewedSelectionRef.current = null;
     setIsReviewing(false);
     setSuccessfulPayment(null);
     setFormError('');
@@ -411,7 +460,14 @@ export default function PaymentScreen({
   const changePaymentTerm = (paymentOptionId: string) => {
     if (paymentOptionId === selectedPaymentOptionId) return;
     setSelectedPaymentOptionId(paymentOptionId);
+    setPremiumPaymentOption(null);
     paymentIntentRef.current = null;
+    resetReview();
+  };
+
+  const changePremiumChoice = (choice: PremiumPaymentOption) => {
+    if (choice === premiumPaymentOption) return;
+    setPremiumPaymentOption(choice);
     resetReview();
   };
 
@@ -431,6 +487,10 @@ export default function PaymentScreen({
 
   const buildPaymentRequest = (): { request: SubmitPaymentRequest } | { error: string } => {
     if (!selectedRecord) return { error: 'Select a payment request.' };
+    if (hasInvalidPremiumSelection) {
+      return { error: 'Premium pricing is unavailable. Refresh payment details or contact your agent.' };
+    }
+    if (isFinanced && !financing) return { error: 'Financing is unavailable. Please refresh payment details.' };
     if (selectedRecord.paymentMode === 'TERM_OPTIONS' && !selectedTermOption) {
       return { error: 'Select a payment term.' };
     }
@@ -446,8 +506,9 @@ export default function PaymentScreen({
     if (!address1.trim() || !city.trim() || !postalCode.trim()) {
       return { error: 'Enter the payer’s street address, city, and ZIP code.' };
     }
-    if (!isFullUsStateName(region)) {
-      return { error: 'Enter the full state name, such as California, instead of CA.' };
+    const normalizedRegion = normalizeUsStateName(region);
+    if (!isFullUsStateName(normalizedRegion)) {
+      return { error: 'Select a valid US state.' };
     }
 
     const payer = {
@@ -457,13 +518,19 @@ export default function PaymentScreen({
       ...(address2.trim() ? { address2: address2.trim() } : {}),
       country: PAYMENT_COUNTRY,
       city: city.trim(),
-      region: normalizeUsStateName(region),
+      region: normalizedRegion,
       postalCode: postalCode.trim(),
       email: signedInEmail,
       ...(phone.trim() ? { phone: phone.trim() } : {}),
     };
-    const paymentSelection =
-      selectedRecord.paymentMode === 'TERM_OPTIONS'
+    const paymentSelection: PaymentSelection =
+      hasPremiumChoice && selectedRecord.pricingVersion && premiumPaymentOption
+        ? {
+            premiumPaymentOption,
+            pricingVersion: selectedRecord.pricingVersion,
+            ...(selectedTermOption ? { paymentOptionId: selectedTermOption.id } : {}),
+          }
+        : selectedRecord.paymentMode === 'TERM_OPTIONS'
         ? { paymentOptionId: selectedTermOption!.id }
         : {
             amount: selectedPaymentAmount ?? selectedRecord.amountDue,
@@ -556,7 +623,10 @@ export default function PaymentScreen({
       throw new PaymentApiError(404, 'This payment request is no longer available.');
     }
     let requestChanged =
-      record.paymentMode !== current.paymentMode || record.purpose !== current.purpose;
+      record.accountId !== current.accountId || record.demandId !== current.demandId ||
+      record.paymentMode !== current.paymentMode || record.purpose !== current.purpose ||
+      record.pricingVersion !== current.pricingVersion ||
+      (record.premiumPaymentOffer ?? 'BOTH') !== (current.premiumPaymentOffer ?? 'BOTH');
     if (!requestChanged && record.paymentMode === 'TERM_OPTIONS') {
       const previousOption = record.termOptions.find((option) => option.id === paymentOptionId);
       const currentOption = current.termOptions.find((option) => option.id === paymentOptionId);
@@ -567,6 +637,7 @@ export default function PaymentScreen({
         !termOptionMatches(previousOption, currentOption);
     } else if (!requestChanged) {
       requestChanged =
+        premiumPricingSnapshot(record) !== premiumPricingSnapshot(current) ||
         !sameMoney(record.amountDue, current.amountDue) ||
         !sameMoney(record.cardConvenienceFee, current.cardConvenienceFee) ||
         !sameMoney(record.cardTotalAmount, current.cardTotalAmount) ||
@@ -584,18 +655,23 @@ export default function PaymentScreen({
   };
 
   const handleReviewPayment = async () => {
+    if (reviewLockRef.current || submissionLockRef.current) return;
     const result = buildPaymentRequest();
     if ('error' in result || !selectedRecord) {
       setFormError('error' in result ? result.error : 'Select a payment request.');
       return;
     }
 
+    reviewLockRef.current = true;
     setIsCheckingEligibility(true);
     setFormError('');
     try {
       await ensureRecordIsPayable(selectedPaymentRecord ?? selectedRecord, selectedPaymentOptionId);
+      if (activeSelectionRef.current !== selectionSnapshot) return;
+      reviewedSelectionRef.current = selectionSnapshot;
       setIsReviewing(true);
     } catch (error) {
+      if (activeCheckoutRef.current !== checkoutIdentity) return;
       if (error instanceof PaymentApiError && error.status === 404) {
         await refreshPaymentEligibility();
       }
@@ -605,11 +681,18 @@ export default function PaymentScreen({
       clearAllPaymentFields();
       setFormError(getPaymentFailureMessage(error));
     } finally {
+      reviewLockRef.current = false;
       setIsCheckingEligibility(false);
     }
   };
 
   const handleSubmitPayment = async () => {
+    if (submissionLockRef.current || reviewLockRef.current) return;
+    if (!isReviewing || reviewedSelectionRef.current !== selectionSnapshot) {
+      setIsReviewing(false);
+      setFormError('Payment details changed. Please review the payment again.');
+      return;
+    }
     const result = buildPaymentRequest();
     if ('error' in result || !selectedRecord || !userEmail || !accountId) {
       setFormError(
@@ -629,10 +712,13 @@ export default function PaymentScreen({
       return;
     }
 
+    submissionLockRef.current = true;
+    let paymentAttempted = false;
     setIsSubmitting(true);
     setFormError('');
     try {
       await ensureRecordIsPayable(selectedPaymentRecord ?? selectedRecord, selectedPaymentOptionId);
+      if (activeSelectionRef.current !== selectionSnapshot) return;
       const requestFingerprint = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
         JSON.stringify(result.request)
@@ -641,6 +727,8 @@ export default function PaymentScreen({
       if (!paymentIntentRef.current || paymentIntentRef.current.fingerprint !== fingerprint) {
         paymentIntentRef.current = { fingerprint, key: Crypto.randomUUID() };
       }
+      if (activeSelectionRef.current !== selectionSnapshot) return;
+      paymentAttempted = true;
       const payment = await submitPayment(
         userEmail,
         accountId,
@@ -648,16 +736,18 @@ export default function PaymentScreen({
         paymentIntentRef.current.key,
         result.request
       );
+      if (activeCheckoutRef.current !== checkoutIdentity) return;
       clearAllPaymentFields();
       paymentIntentRef.current = null;
       setSuccessfulPayment(payment);
       await refreshPaymentEligibility();
     } catch (error) {
+      if (activeCheckoutRef.current !== checkoutIdentity) return;
       if (error instanceof PaymentApiError && error.status === 404) {
         await refreshPaymentEligibility();
       }
       let paymentWasDefinitelyRejected = false;
-      if (error instanceof PaymentApiError && error.status === 502) {
+      if (paymentAttempted && error instanceof PaymentApiError && error.status === 502 && !error.outcomeUncertain) {
         try {
           await getPaymentEligibility(userEmail, accountId, recordKey);
           paymentWasDefinitelyRejected = true;
@@ -666,10 +756,8 @@ export default function PaymentScreen({
           // A demand that is still hidden remains blocked until PBIA reconciles it.
         }
       }
-      const isUnconfirmed =
-        error instanceof PaymentApiError &&
-        error.status === 502 &&
-        !paymentWasDefinitelyRejected;
+      const isUnconfirmed = paymentAttempted && !paymentWasDefinitelyRejected &&
+        (!(error instanceof PaymentApiError) || error.status === 502);
       const isInvalidOrConflicting =
         error instanceof PaymentApiError && (error.status === 400 || error.status === 409);
       if (isUnconfirmed) setBlockedRecordKey(recordKey);
@@ -679,11 +767,16 @@ export default function PaymentScreen({
       if (error instanceof PaymentApiError && error.status === 503) {
         setIsPaymentUnavailable(true);
       }
+      if (isInvalidOrConflicting) await refreshPaymentEligibility();
+      if (activeCheckoutRef.current !== checkoutIdentity) return;
       if (isUnconfirmed || isInvalidOrConflicting) paymentIntentRef.current = null;
       clearSensitiveFields();
       setIsReviewing(false);
-      setFormError(getPaymentFailureMessage(error, paymentWasDefinitelyRejected));
+      setFormError(isUnconfirmed
+        ? 'We could not confirm your payment. Please contact PBIA before trying again.'
+        : getPaymentFailureMessage(error, paymentWasDefinitelyRejected));
     } finally {
+      submissionLockRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -719,11 +812,14 @@ export default function PaymentScreen({
           <View style={styles.successIcon}>
             <Ionicons name="checkmark-circle" size={42} color={theme.colors.success} />
           </View>
-          <Text style={styles.cardTitle}>Payment successful</Text>
+          <Text style={styles.cardTitle}>{successfulPayment.premiumPaymentOption === 'FINANCED_PREMIUM' ? 'Down payment received' : 'Payment successful'}</Text>
+          {successfulPayment.premiumPaymentOption === 'FINANCED_PREMIUM' ? (
+            <Text style={styles.cardSubtitle}>The finance company handles the remaining monthly payments.</Text>
+          ) : null}
           <Text style={styles.successAmount}>
             {formatCurrency(successfulPayment.totalCharged ?? successfulPayment.amount)}
           </Text>
-          <ReviewRow label="Payment amount" value={formatCurrency(successfulPayment.amount)} />
+          <ReviewRow label={successfulPayment.premiumPaymentOption === 'FINANCED_PREMIUM' ? "Down payment" : "Payment amount"} value={formatCurrency(successfulPayment.amount)} />
           {successfulPayment.termYears !== null ? (
             <ReviewRow
               label="Selected term"
@@ -788,13 +884,13 @@ export default function PaymentScreen({
       <View style={styles.balanceIcon}>
         <Ionicons name="wallet-outline" size={22} color={theme.colors.primary} />
       </View>
-      <Text style={styles.balanceLabel}>Amount Due</Text>
+      <Text style={styles.balanceLabel}>{isFinanced ? 'Down Payment Due Today' : 'Amount Due'}</Text>
       <Text
         numberOfLines={2}
         style={[styles.balanceValue, !isDesktopLayout ? styles.mobileBalanceValue : null]}>
-        {selectedRecord.paymentMode === 'TERM_OPTIONS' && selectedPaymentAmount === null
+        {selectedRecord.paymentMode === 'TERM_OPTIONS' && !selectedTermOption
           ? 'Select a term'
-          : formatCurrency(selectedPaymentAmount ?? selectedRecord.amountDue)}
+          : selectedPaymentAmount === null ? 'Pricing unavailable' : formatCurrency(selectedPaymentAmount)}
       </Text>
       <Text style={styles.balanceRecord}>{buildPaymentRecordLabel(selectedRecord)}</Text>
       <View style={styles.balanceDivider} />
@@ -809,8 +905,13 @@ export default function PaymentScreen({
       ) : null}
       <ReviewRow
         label="Purpose"
-        value={getPaymentPurposeLabel(selectedRecord.purpose)}
+        value={getPaymentPurposeLabel(selectedPurpose)}
       />
+      {availablePremiumOptions.length === 1 && isFinanced && financing ? (
+        <Text style={styles.cardSubtitle}>
+          {financingDescription(financing)} The finance company handles the remaining payments.
+        </Text>
+      ) : null}
       {selectedConvenienceFee !== null ? (
         <ReviewRow
           label={paymentMethod === 'CARD' ? 'Card convenience fee' : 'ACH convenience fee'}
@@ -869,7 +970,7 @@ export default function PaymentScreen({
                     key={getRecordKey(record)}
                     record={record}
                     selected={getRecordKey(record) === selectedRecordKey}
-                    disabled={!recordIsPayable || isReviewing || isSubmitting}
+                    disabled={!recordIsPayable || isReviewing || isSubmitting || isCheckingEligibility}
                     onPress={() => setSelectedRecordKey(getRecordKey(record))}
                   />
                 );
@@ -890,20 +991,20 @@ export default function PaymentScreen({
 
               <View style={styles.demandDetails}>
                 {selectedRecord.paymentMode === 'FIXED' && !isInstallmentSelection ? (
-                  <ReviewRow label="Amount" value={formatCurrency(selectedRecord.amountDue)} />
+                  <ReviewRow label={isFinanced ? "Down payment today" : "Amount"} value={selectedPaymentAmount === null ? 'Pricing unavailable' : formatCurrency(selectedPaymentAmount)} />
                 ) : (
                   <ReviewRow
                     label="Payment amount"
                     value={
                       selectedPaymentAmount === null
-                        ? 'Select a term below'
+                        ? (isPremiumPricingUnavailable ? 'Pricing unavailable' : 'Select a term below')
                         : formatCurrency(selectedPaymentAmount)
                     }
                   />
                 )}
                 <ReviewRow
                   label="Purpose"
-                  value={getPaymentPurposeLabel(selectedRecord.purpose)}
+                  value={getPaymentPurposeLabel(selectedPurpose)}
                 />
                 <ReviewRow
                   label="Due date"
@@ -921,8 +1022,28 @@ export default function PaymentScreen({
                 <TermOptionSelector
                   options={selectedRecord.termOptions}
                   selectedOptionId={selectedPaymentOptionId}
-                  disabled={isReviewing || isSubmitting}
+                  disabled={isReviewing || isSubmitting || isCheckingEligibility}
                   onSelect={changePaymentTerm}
+                />
+              ) : null}
+
+              {isPremiumPricingUnavailable ? (
+                <View style={styles.pricingUnavailable}>
+                  <Text style={styles.cardSubtitle}>
+                    Premium pricing is unavailable. Refresh payment details or contact your agent.
+                  </Text>
+                  <AppButton label="Refresh Payment Details" onPress={() => void refreshPaymentEligibility()} />
+                </View>
+              ) : null}
+
+              {hasPremiumChoice && selectedFullAmount !== null && availablePremiumOptions.length > 1 ? (
+                <PremiumPaymentSelector
+                  fullAmount={selectedFullAmount}
+                  financing={financing}
+                  availableOptions={availablePremiumOptions}
+                  selected={premiumPaymentOption}
+                  disabled={isReviewing || isSubmitting || isCheckingEligibility}
+                  onSelect={changePremiumChoice}
                 />
               ) : null}
 
@@ -931,7 +1052,7 @@ export default function PaymentScreen({
                   record={selectedRecord}
                   selectedChoice={selectedPlanChoice}
                   selectedInstallmentId={selectedInstallmentId}
-                  disabled={isReviewing || isSubmitting}
+                  disabled={isReviewing || isSubmitting || isCheckingEligibility}
                   onChoice={changePlanChoice}
                   onInstallment={changeInstallment}
                 />
@@ -941,34 +1062,35 @@ export default function PaymentScreen({
                 <Text style={styles.sectionTitle}>Payer Information</Text>
                 <View style={isDesktopLayout ? styles.twoColumnFields : styles.optionList}>
                   <View style={styles.fieldColumn}>
-                    <AppInput label="First Name" value={firstName} onChangeText={changeFirstName} editable={!isReviewing} />
+                    <AppInput label="First Name" value={firstName} onChangeText={changeFirstName} editable={!isReviewing && !isCheckingEligibility && !isSubmitting} />
                   </View>
                   <View style={styles.fieldColumn}>
-                    <AppInput label="Last Name" value={lastName} onChangeText={changeLastName} editable={!isReviewing} />
+                    <AppInput label="Last Name" value={lastName} onChangeText={changeLastName} editable={!isReviewing && !isCheckingEligibility && !isSubmitting} />
                   </View>
                 </View>
-                <AppInput label="Address" value={address1} onChangeText={setAddress1} editable={!isReviewing} />
-                <AppInput label="Address 2 (Optional)" value={address2} onChangeText={setAddress2} editable={!isReviewing} />
+                <AppInput label="Address" value={address1} onChangeText={setAddress1} editable={!isReviewing && !isCheckingEligibility && !isSubmitting} />
+                <AppInput label="Address 2 (Optional)" value={address2} onChangeText={setAddress2} editable={!isReviewing && !isCheckingEligibility && !isSubmitting} />
                 <View style={isDesktopLayout ? styles.twoColumnFields : styles.optionList}>
                   <View style={styles.fieldColumn}>
-                    <AppInput label="City" value={city} onChangeText={setCity} editable={!isReviewing} />
+                    <AppInput label="City" value={city} onChangeText={setCity} editable={!isReviewing && !isCheckingEligibility && !isSubmitting} />
                   </View>
                   <View style={styles.fieldColumn}>
-                    <AppInput
-                      label="State"
+                    <StateSelect
                       value={region}
-                      onChangeText={setRegion}
-                      editable={!isReviewing}
-                      helperText="Use the full state name"
+                      onChange={(stateName) => {
+                        setRegion(stateName);
+                        resetReview();
+                      }}
+                      disabled={isReviewing || isCheckingEligibility || isSubmitting}
                     />
                   </View>
                 </View>
                 <View style={isDesktopLayout ? styles.twoColumnFields : styles.optionList}>
                   <View style={styles.fieldColumn}>
-                    <AppInput label="ZIP Code" value={postalCode} onChangeText={setPostalCode} editable={!isReviewing} keyboardType="numbers-and-punctuation" />
+                    <AppInput label="ZIP Code" value={postalCode} onChangeText={setPostalCode} editable={!isReviewing && !isCheckingEligibility && !isSubmitting} keyboardType="numbers-and-punctuation" />
                   </View>
                   <View style={styles.fieldColumn}>
-                    <AppInput label="Phone (Optional)" value={phone} onChangeText={setPhone} editable={!isReviewing} keyboardType="phone-pad" />
+                    <AppInput label="Phone (Optional)" value={phone} onChangeText={setPhone} editable={!isReviewing && !isCheckingEligibility && !isSubmitting} keyboardType="phone-pad" />
                   </View>
                 </View>
                 <AppInput
@@ -992,7 +1114,7 @@ export default function PaymentScreen({
                   amount={selectedPaymentAmount}
                   cardFee={selectedCardConvenienceFee}
                   achFee={selectedAchConvenienceFee}
-                  disabled={isReviewing || isSubmitting}
+                  disabled={isReviewing || isSubmitting || isCheckingEligibility}
                   onSelect={changePaymentMethod}
                 />
 
@@ -1007,7 +1129,7 @@ export default function PaymentScreen({
                             setCardNumber(value.replace(/\D/g, '').slice(0, 19));
                             resetReview();
                           }}
-                          editable={!isReviewing}
+                          editable={!isReviewing && !isCheckingEligibility && !isSubmitting}
                           keyboardType="number-pad"
                           secureTextEntry
                           autoComplete="off"
@@ -1019,7 +1141,7 @@ export default function PaymentScreen({
                           label="Name on Card"
                           value={nameOnCard}
                           onChangeText={changeNameOnCard}
-                          editable={!isReviewing}
+                          editable={!isReviewing && !isCheckingEligibility && !isSubmitting}
                           autoComplete="cc-name"
                         />
                       </View>
@@ -1033,7 +1155,7 @@ export default function PaymentScreen({
                             setCardExpiration(formatExpirationInput(value));
                             resetReview();
                           }}
-                          editable={!isReviewing}
+                          editable={!isReviewing && !isCheckingEligibility && !isSubmitting}
                           keyboardType="number-pad"
                           placeholder="MM/YY"
                           maxLength={5}
@@ -1047,7 +1169,7 @@ export default function PaymentScreen({
                             setCardSecurityCode(value.replace(/\D/g, '').slice(0, 4));
                             resetReview();
                           }}
-                          editable={!isReviewing}
+                          editable={!isReviewing && !isCheckingEligibility && !isSubmitting}
                           keyboardType="number-pad"
                           secureTextEntry
                           autoComplete="off"
@@ -1065,7 +1187,7 @@ export default function PaymentScreen({
                         { value: 'Savings', label: 'Savings' },
                       ]}
                       selected={achBankAccountType}
-                      disabled={isReviewing || isSubmitting}
+                      disabled={isReviewing || isSubmitting || isCheckingEligibility}
                       onSelect={(value) => {
                         setAchBankAccountType(value as AchBankAccountType);
                         resetReview();
@@ -1078,7 +1200,7 @@ export default function PaymentScreen({
                         { value: 'Personal', label: 'Personal' },
                       ]}
                       selected={achAccountType}
-                      disabled={isReviewing || isSubmitting}
+                      disabled={isReviewing || isSubmitting || isCheckingEligibility}
                       onSelect={(value) => {
                         setAchAccountType(value as AchAccountType);
                         resetReview();
@@ -1088,7 +1210,7 @@ export default function PaymentScreen({
                       label="Bank Name"
                       value={achBankName}
                       onChangeText={setAchBankName}
-                      editable={!isReviewing}
+                      editable={!isReviewing && !isCheckingEligibility && !isSubmitting}
                       maxLength={100}
                     />
                     <AppInput
@@ -1098,7 +1220,7 @@ export default function PaymentScreen({
                         setAchRoutingNumber(value.replace(/\D/g, '').slice(0, 9));
                         resetReview();
                       }}
-                      editable={!isReviewing}
+                      editable={!isReviewing && !isCheckingEligibility && !isSubmitting}
                       keyboardType="number-pad"
                       autoComplete="off"
                       maxLength={9}
@@ -1110,7 +1232,7 @@ export default function PaymentScreen({
                         setAchBankAccountNumber(value.replace(/\D/g, '').slice(0, 34));
                         resetReview();
                       }}
-                      editable={!isReviewing}
+                      editable={!isReviewing && !isCheckingEligibility && !isSubmitting}
                       keyboardType="number-pad"
                       autoComplete="off"
                       maxLength={34}
@@ -1139,9 +1261,15 @@ export default function PaymentScreen({
                 <View style={styles.reviewCard}>
                   <Text style={styles.sectionTitle}>Confirm Payment</Text>
                   <ReviewRow label="Record" value={buildPaymentRecordLabel(selectedRecord)} />
+                  {hasPremiumChoice ? (
+                    <ReviewRow label="Premium payment" value={isFinanced ? 'Financed Premium' : 'Full Premium'} />
+                  ) : null}
+                  {isFinanced && financing ? (
+                    <Text style={styles.confirmationText}>{financingDescription(financing)} The finance company handles the remaining payments.</Text>
+                  ) : null}
                   <ReviewRow
                     label="Payment amount"
-                    value={formatCurrency(selectedPaymentAmount ?? selectedRecord.amountDue)}
+                    value={selectedPaymentAmount === null ? 'Pricing unavailable' : formatCurrency(selectedPaymentAmount)}
                   />
                   {selectedTermOption ? (
                     <ReviewRow label="Selected term" value={selectedTermOption.label} />
@@ -1170,7 +1298,7 @@ export default function PaymentScreen({
                   ) : null}
                   <ReviewRow
                     label="Purpose"
-                    value={getPaymentPurposeLabel(selectedRecord.purpose)}
+                    value={getPaymentPurposeLabel(selectedPurpose)}
                   />
                   <ReviewRow
                     label="Method"
@@ -1198,6 +1326,8 @@ export default function PaymentScreen({
                   loading={isCheckingEligibility}
                   disabled={
                     isPaymentUnavailable ||
+                    hasInvalidPremiumSelection ||
+                    (isFinanced && !financing) ||
                     blockedRecordKey === (selectedPaymentRecord?.demandId ?? selectedRecordKey) ||
                     (isInstallmentSelection && !selectedInstallment) ||
                     (selectedRecord.paymentMode === 'TERM_OPTIONS' && !selectedTermOption)
@@ -1232,6 +1362,7 @@ function RecordOption({
   disabled: boolean;
   onPress: () => void;
 }) {
+  const amount = paymentDemandAmount(record);
   return (
     <Pressable
       accessibilityRole="radio"
@@ -1248,9 +1379,11 @@ function RecordOption({
         <Text style={styles.recordMeta}>{getRecordStatusDescription(record)}</Text>
       </View>
       <Text style={styles.recordAmount}>
-        {record.paymentMode === 'TERM_OPTIONS'
-          ? `From ${formatCurrency(getTermOptionAmount(record))}`
-          : formatCurrency(record.amountDue)}
+        {amount === null
+          ? 'Pricing unavailable'
+          : record.paymentMode === 'TERM_OPTIONS'
+            ? `From ${formatCurrency(amount)}`
+            : formatCurrency(amount)}
       </Text>
       <View style={[styles.radioOuter, selected ? styles.radioOuterSelected : null]}>
         {selected ? <View style={styles.radioInner} /> : null}
@@ -1771,6 +1904,14 @@ const styles = StyleSheet.create({
   },
   securityNoticeText: { ...theme.typography.bodySmall, color: theme.colors.textMuted, flex: 1 },
   errorText: { ...theme.typography.bodySmall, color: theme.colors.danger },
+  pricingUnavailable: {
+    padding: theme.spacing.md,
+    gap: theme.spacing.sm,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceTint,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
   statusNotice: {
     borderRadius: theme.radius.md,
     borderWidth: 1,
