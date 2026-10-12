@@ -4,7 +4,7 @@ import {
   listPaymentEligibility,
   submitPayment,
 } from '@/services/payment-api';
-import { buildFinancedPaymentEligibility, buildPaymentEligibility, buildPaymentTermOption } from '@/tests/factories';
+import { buildFinancedPaymentEligibility, buildSpecialRatePaymentEligibility, buildPaymentEligibility, buildPaymentTermOption } from '@/tests/factories';
 
 const ORIGINAL_PAYMENT_BASE_URL = process.env.EXPO_PUBLIC_PBIA_API_BASE_URL;
 const mockGetSession = jest.fn();
@@ -31,6 +31,25 @@ describe('payment API', () => {
 
   afterAll(() => {
     process.env.EXPO_PUBLIC_PBIA_API_BASE_URL = ORIGINAL_PAYMENT_BASE_URL;
+  });
+
+  it.each([true, false, undefined])('preserves absorbed-fee flag %s through list and detail normalization', async (flag) => {
+    const record = buildSpecialRatePaymentEligibility({ processingFeeAbsorbed: flag });
+    if (flag === undefined) delete record.processingFeeAbsorbed;
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [record], page: 1, pageSize: 50, total: 1, totalPages: 1 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => record });
+    expect((await listPaymentEligibility('jane@example.com', 'account-1')).data).toEqual([record]);
+    expect(await getPaymentEligibility('jane@example.com', 'account-1', record.demandId)).toEqual(record);
+  });
+
+  it.each(['true', 'false', 1, 0, null, {}, []])('rejects malformed absorbed-fee flag %j', async (flag) => {
+    const record = { ...buildSpecialRatePaymentEligibility(), processingFeeAbsorbed: flag };
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [record], page: 1, pageSize: 50, total: 1, totalPages: 1 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => record });
+    await expect(listPaymentEligibility('jane@example.com', 'account-1')).rejects.toBeInstanceOf(PaymentApiError);
+    await expect(getPaymentEligibility('jane@example.com', 'account-1', record.demandId)).rejects.toBeInstanceOf(PaymentApiError);
   });
 
   it('lists email-scoped payment eligibility', async () => {

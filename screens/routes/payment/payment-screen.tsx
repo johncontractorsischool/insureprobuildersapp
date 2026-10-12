@@ -219,7 +219,7 @@ export default function PaymentScreen({
   const [isCheckingEligibility, setIsCheckingEligibility] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
-  const [successfulPayment, setSuccessfulPayment] = useState<SuccessfulPayment | null>(null);
+  const [successfulPayment, setSuccessfulPayment] = useState<(SuccessfulPayment & { processingFeeAbsorbed: boolean }) | null>(null);
   const [blockedRecordKey, setBlockedRecordKey] = useState<string | null>(null);
   const [isPaymentUnavailable, setIsPaymentUnavailable] = useState(false);
   const paymentIntentRef = useRef<IntentIdentity | null>(null);
@@ -244,6 +244,7 @@ export default function PaymentScreen({
   const selectedPaymentRecord = isInstallmentSelection && selectedInstallment
     ? paymentRecords.find((record) => record.demandId === selectedInstallment.id) ?? null
     : selectedRecord;
+  const processingFeeAbsorbed = selectedPaymentRecord?.processingFeeAbsorbed === true;
   const selectedFullAmount = selectedRecord
     ? isInstallmentSelection
       ? (selectedInstallment?.amount ?? null)
@@ -272,7 +273,7 @@ export default function PaymentScreen({
     ? premiumSource.financing : null;
   const isFinanced = isPremium && premiumPaymentOption === 'FINANCED_PREMIUM';
   const selectedPaymentAmount = hasInvalidPremiumSelection ? null : isFinanced ? financing?.downPayment ?? null : selectedFullAmount;
-  const selectedPurpose = isFinanced || (selectedRecord && isFinancedOnlyDemand(selectedRecord)) ? 'DOWN_PAYMENT' : selectedRecord?.purpose ?? 'PREMIUM';
+  const selectedPurpose = isFinanced || (selectedRecord && isFinancedOnlyDemand(selectedRecord)) ? 'DOWN_PAYMENT' : selectedPaymentRecord?.purpose ?? selectedRecord?.purpose ?? 'PREMIUM';
   const selectedCardConvenienceFee = isFinanced
     ? premiumSource?.financedCardConvenienceFee ?? null : selectedFeeSource?.cardConvenienceFee ?? null;
   const selectedCardTotalAmount = isFinanced
@@ -293,7 +294,7 @@ export default function PaymentScreen({
     checkoutIdentity, selectedRecord?.pricingVersion, selectedRecord?.paymentMode, selectedRecord?.premiumPaymentOffer,
     selectedPaymentOptionId, selectedPlanChoice, selectedInstallmentId,
     premiumPaymentOption, paymentMethod, selectedPaymentAmount, selectedPurpose,
-    selectedConvenienceFee, selectedTotalAmount,
+    selectedConvenienceFee, selectedTotalAmount, selectedPaymentRecord?.demandId, processingFeeAbsorbed,
     premiumSource ? premiumPricingSnapshot(premiumSource) : null,
   ]);
   const activeSelectionRef = useRef(selectionSnapshot);
@@ -304,7 +305,7 @@ export default function PaymentScreen({
       ? availablePremiumPaymentOptions(selectedRecord, selectedTermOption?.id)[0] ?? null : null);
     setIsReviewing(false);
     reviewedSelectionRef.current = null;
-  }, [selectedRecord, selectedTermOption]);
+  }, [selectedRecord, selectedTermOption, processingFeeAbsorbed]);
 
   useEffect(() => {
     setSuccessfulPayment(null);
@@ -497,6 +498,9 @@ export default function PaymentScreen({
     if (isInstallmentSelection && !selectedInstallment) {
       return { error: 'Select an available installment.' };
     }
+    if (!selectedPaymentRecord) {
+      return { error: 'Payment details are unavailable. Please refresh payment details.' };
+    }
 
     const signedInEmail = userEmail?.trim().toLowerCase();
     if (!signedInEmail) return { error: 'Your signed-in email is unavailable. Please sign in again.' };
@@ -534,7 +538,7 @@ export default function PaymentScreen({
         ? { paymentOptionId: selectedTermOption!.id }
         : {
             amount: selectedPaymentAmount ?? selectedRecord.amountDue,
-            purpose: selectedRecord.purpose,
+            purpose: selectedPurpose,
           };
 
     if (paymentMethod === 'CARD') {
@@ -619,6 +623,8 @@ export default function PaymentScreen({
     if (!userEmail) throw new PaymentApiError(400, 'A valid signed-in client email is required.');
     if (!accountId) throw new PaymentApiError(400, 'A client account is required.');
     const current = await getPaymentEligibility(userEmail, accountId, record.demandId);
+    // Ignore a response for a checkout that changed while the request was in flight.
+    if (activeSelectionRef.current !== selectionSnapshot) return current;
     if (!isRecordPayable(current)) {
       throw new PaymentApiError(404, 'This payment request is no longer available.');
     }
@@ -626,6 +632,7 @@ export default function PaymentScreen({
       record.accountId !== current.accountId || record.demandId !== current.demandId ||
       record.paymentMode !== current.paymentMode || record.purpose !== current.purpose ||
       record.pricingVersion !== current.pricingVersion ||
+      (record.processingFeeAbsorbed === true) !== (current.processingFeeAbsorbed === true) ||
       (record.premiumPaymentOffer ?? 'BOTH') !== (current.premiumPaymentOffer ?? 'BOTH');
     if (!requestChanged && record.paymentMode === 'TERM_OPTIONS') {
       const previousOption = record.termOptions.find((option) => option.id === paymentOptionId);
@@ -644,6 +651,14 @@ export default function PaymentScreen({
         !sameMoney(record.achConvenienceFee, current.achConvenienceFee) ||
         !sameMoney(record.achTotalAmount, current.achTotalAmount);
     }
+    if (!requestChanged && isInstallmentSelection) {
+      // Embedded installments have prices but no eligibility flag. Check the exact child demand.
+      requestChanged = !sameMoney(selectedPaymentAmount, current.amountDue) ||
+        !sameMoney(selectedCardConvenienceFee, current.cardConvenienceFee) ||
+        !sameMoney(selectedCardTotalAmount, current.cardTotalAmount) ||
+        !sameMoney(selectedAchConvenienceFee, current.achConvenienceFee) ||
+        !sameMoney(selectedAchTotalAmount, current.achTotalAmount);
+    }
     if (requestChanged) {
       await refreshPaymentEligibility();
       throw new PaymentApiError(
@@ -651,13 +666,18 @@ export default function PaymentScreen({
         'The payment request changed. Please review the updated amount, purpose, and term options.'
       );
     }
+    if (processingFeeAbsorbed &&
+      (selectedConvenienceFee !== 0 || !sameMoney(selectedTotalAmount, selectedPaymentAmount))) {
+      await refreshPaymentEligibility();
+      throw new PaymentApiError(422, 'Payment pricing is invalid. Please refresh payment details.');
+    }
     return current;
   };
 
   const handleReviewPayment = async () => {
     if (reviewLockRef.current || submissionLockRef.current) return;
     const result = buildPaymentRequest();
-    if ('error' in result || !selectedRecord) {
+    if ('error' in result || !selectedRecord || !selectedPaymentRecord) {
       setFormError('error' in result ? result.error : 'Select a payment request.');
       return;
     }
@@ -666,7 +686,7 @@ export default function PaymentScreen({
     setIsCheckingEligibility(true);
     setFormError('');
     try {
-      await ensureRecordIsPayable(selectedPaymentRecord ?? selectedRecord, selectedPaymentOptionId);
+      await ensureRecordIsPayable(selectedPaymentRecord, selectedPaymentOptionId);
       if (activeSelectionRef.current !== selectionSnapshot) return;
       reviewedSelectionRef.current = selectionSnapshot;
       setIsReviewing(true);
@@ -694,7 +714,7 @@ export default function PaymentScreen({
       return;
     }
     const result = buildPaymentRequest();
-    if ('error' in result || !selectedRecord || !userEmail || !accountId) {
+    if ('error' in result || !selectedRecord || !selectedPaymentRecord || !userEmail || !accountId) {
       setFormError(
         'error' in result ? result.error : 'Your signed-in payment information is unavailable.'
       );
@@ -717,7 +737,7 @@ export default function PaymentScreen({
     setIsSubmitting(true);
     setFormError('');
     try {
-      await ensureRecordIsPayable(selectedPaymentRecord ?? selectedRecord, selectedPaymentOptionId);
+      const submittedEligibility = await ensureRecordIsPayable(selectedPaymentRecord, selectedPaymentOptionId);
       if (activeSelectionRef.current !== selectionSnapshot) return;
       const requestFingerprint = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
@@ -739,7 +759,7 @@ export default function PaymentScreen({
       if (activeCheckoutRef.current !== checkoutIdentity) return;
       clearAllPaymentFields();
       paymentIntentRef.current = null;
-      setSuccessfulPayment(payment);
+      setSuccessfulPayment({ ...payment, processingFeeAbsorbed: submittedEligibility.processingFeeAbsorbed === true });
       await refreshPaymentEligibility();
     } catch (error) {
       if (activeCheckoutRef.current !== checkoutIdentity) return;
@@ -826,7 +846,8 @@ export default function PaymentScreen({
               value={`${successfulPayment.termYears} ${successfulPayment.termYears === 1 ? 'year' : 'years'}`}
             />
           ) : null}
-          {successfulPayment.convenienceFee !== null ? (
+          {successfulPayment.convenienceFee !== null &&
+          !(successfulPayment.processingFeeAbsorbed && successfulPayment.convenienceFee === 0) ? (
             <ReviewRow
               label="Convenience fee"
               value={formatCurrency(successfulPayment.convenienceFee)}
@@ -912,7 +933,7 @@ export default function PaymentScreen({
           {financingDescription(financing)} The finance company handles the remaining payments.
         </Text>
       ) : null}
-      {selectedConvenienceFee !== null ? (
+      {selectedConvenienceFee !== null && !(processingFeeAbsorbed && selectedConvenienceFee === 0) ? (
         <ReviewRow
           label={paymentMethod === 'CARD' ? 'Card convenience fee' : 'ACH convenience fee'}
           value={formatCurrency(selectedConvenienceFee)}
@@ -1020,6 +1041,7 @@ export default function PaymentScreen({
 
               {selectedRecord.paymentMode === 'TERM_OPTIONS' ? (
                 <TermOptionSelector
+                  processingFeeAbsorbed={processingFeeAbsorbed}
                   options={selectedRecord.termOptions}
                   selectedOptionId={selectedPaymentOptionId}
                   disabled={isReviewing || isSubmitting || isCheckingEligibility}
@@ -1038,6 +1060,7 @@ export default function PaymentScreen({
 
               {hasPremiumChoice && selectedFullAmount !== null && availablePremiumOptions.length > 1 ? (
                 <PremiumPaymentSelector
+                  processingFeeAbsorbed={processingFeeAbsorbed}
                   fullAmount={selectedFullAmount}
                   financing={financing}
                   availableOptions={availablePremiumOptions}
@@ -1110,6 +1133,7 @@ export default function PaymentScreen({
                   </Text>
                 </View>
                 <PaymentMethodSelector
+                  processingFeeAbsorbed={processingFeeAbsorbed}
                   selected={paymentMethod}
                   amount={selectedPaymentAmount}
                   cardFee={selectedCardConvenienceFee}
@@ -1241,6 +1265,7 @@ export default function PaymentScreen({
                 )}
 
                 <PaymentTotalSummary
+                  processingFeeAbsorbed={processingFeeAbsorbed}
                   method={paymentMethod}
                   amount={selectedPaymentAmount}
                   convenienceFee={selectedConvenienceFee}
@@ -1280,7 +1305,7 @@ export default function PaymentScreen({
                       value={`Installment ${selectedInstallment.installmentNumber}`}
                     />
                   ) : null}
-                  {selectedConvenienceFee !== null ? (
+                  {selectedConvenienceFee !== null && !(processingFeeAbsorbed && selectedConvenienceFee === 0) ? (
                     <ReviewRow
                       label={
                         paymentMethod === 'CARD'
@@ -1311,7 +1336,7 @@ export default function PaymentScreen({
                   <Text style={styles.confirmationText}>
                     By confirming, you authorize PBIA to submit this payment through Input1
                     {selectedTotalAmount !== null
-                      ? ` for a total charge of ${formatCurrency(selectedTotalAmount)}, including the displayed convenience fee.`
+                      ? ` for a total charge of ${formatCurrency(selectedTotalAmount)}${processingFeeAbsorbed ? '.' : ', including the displayed convenience fee.'}`
                       : '.'}{' '}
                     An email receipt is required.
                   </Text>
@@ -1393,11 +1418,13 @@ function RecordOption({
 }
 
 function TermOptionSelector({
+  processingFeeAbsorbed,
   options,
   selectedOptionId,
   disabled,
   onSelect,
 }: {
+  processingFeeAbsorbed: boolean;
   options: PaymentTermOption[];
   selectedOptionId: string;
   disabled: boolean;
@@ -1408,7 +1435,9 @@ function TermOptionSelector({
       <View style={styles.cardHeader}>
         <Text style={styles.sectionTitle}>Choose your coverage term</Text>
         <Text style={styles.cardSubtitle}>
-          Select one option. Your final total depends on the payment method.
+          {processingFeeAbsorbed
+            ? 'Select one option. Your total is the quoted price for the selected term.'
+            : 'Select one option. Your final total depends on the payment method.'}
         </Text>
       </View>
       <View accessibilityRole="radiogroup" style={styles.optionList}>
@@ -1561,6 +1590,7 @@ function PaymentMethodSelector({
   amount,
   cardFee,
   achFee,
+  processingFeeAbsorbed,
   disabled,
   onSelect,
 }: {
@@ -1568,6 +1598,7 @@ function PaymentMethodSelector({
   amount: number | null;
   cardFee: number | null;
   achFee: number | null;
+  processingFeeAbsorbed: boolean;
   disabled: boolean;
   onSelect: (method: PaymentMethod) => void;
 }) {
@@ -1586,12 +1617,13 @@ function PaymentMethodSelector({
         const isSelected = option.value === selected;
         const unavailable = amount !== null && option.fee === null;
         const optionDisabled = disabled || unavailable;
-        const feeLabel = getProcessingFeeLabel(option.value, amount, option.fee);
+        const feeLabel = processingFeeAbsorbed && option.fee === 0
+          ? null : getProcessingFeeLabel(option.value, amount, option.fee);
         return (
           <Pressable
             key={option.value}
             accessibilityRole="radio"
-            accessibilityLabel={`${option.label}, ${feeLabel}`}
+            accessibilityLabel={feeLabel ? `${option.label}, ${feeLabel}` : option.label}
             accessibilityState={{ checked: isSelected, disabled: optionDisabled }}
             disabled={optionDisabled}
             onPress={() => onSelect(option.value)}
@@ -1605,7 +1637,7 @@ function PaymentMethodSelector({
               {isSelected ? <View style={styles.radioInner} /> : null}
             </View>
             <Text style={styles.paymentMethodLabel}>{option.label}</Text>
-            <Text style={styles.paymentMethodFee}>{feeLabel}</Text>
+            {feeLabel ? <Text style={styles.paymentMethodFee}>{feeLabel}</Text> : null}
           </Pressable>
         );
       })}
@@ -1617,24 +1649,28 @@ function PaymentTotalSummary({
   method,
   amount,
   convenienceFee,
+  processingFeeAbsorbed,
   total,
 }: {
   method: PaymentMethod;
   amount: number | null;
   convenienceFee: number | null;
+  processingFeeAbsorbed: boolean;
   total: number | null;
 }) {
   return (
     <View style={styles.paymentTotalSummary}>
       <ReviewRow label="Subtotal" value={amount === null ? '—' : formatCurrency(amount)} />
-      <View style={styles.reviewRow}>
-        <Text style={styles.processingFeeLabel}>
-          {getProcessingFeeLabel(method, amount, convenienceFee)}
-        </Text>
-        <Text style={styles.processingFeeValue}>
-          {convenienceFee === null ? '—' : `+${formatCurrency(convenienceFee)}`}
-        </Text>
-      </View>
+      {!(processingFeeAbsorbed && convenienceFee === 0) ? (
+        <View style={styles.reviewRow}>
+          <Text style={styles.processingFeeLabel}>
+            {getProcessingFeeLabel(method, amount, convenienceFee)}
+          </Text>
+          <Text style={styles.processingFeeValue}>
+            {convenienceFee === null ? '—' : `+${formatCurrency(convenienceFee)}`}
+          </Text>
+        </View>
+      ) : null}
       <View style={styles.paymentTotalDivider} />
       <View style={styles.reviewRow}>
         <Text style={styles.paymentTotalLabel}>Total</Text>

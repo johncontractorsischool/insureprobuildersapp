@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import type { PaymentEligibility } from '@/types/payment';
 
@@ -8,6 +8,7 @@ import {
   buildFinancedPaymentEligibility,
   buildPaymentEligibility,
   buildPaymentTermOption,
+  buildSpecialRatePaymentEligibility,
 } from '@/tests/factories';
 
 const mockRouter = {
@@ -629,6 +630,275 @@ describe('PaymentScreen', () => {
         fireEvent.changeText(view.getByLabelText('Security Code'), '123');
       }
     }
+
+    describe('absorbed Special Rate Bond fees', () => {
+      function useSpecial(record = buildSpecialRatePaymentEligibility()) {
+        useRecord(record);
+        mockSubmitPayment.mockResolvedValue({
+          id: 'special-payment', demandId: record.demandId, paymentOptionId: null, termYears: null,
+          status: 'SUCCEEDED', amount: record.amountDue, purpose: record.purpose,
+          convenienceFee: 0, addOnConvenienceFee: 0, totalCharged: record.amountDue,
+          currency: 'USD', receiptId: 'special-receipt', completedAt: '2026-10-12T18:00:00.000Z',
+        });
+        return record;
+      }
+
+      function expectNoFeeCopy(view: ReturnType<typeof render>) {
+        expect(view.queryAllByText(/processing fee|convenience fee/i)).toHaveLength(0);
+        expect(view.queryAllByLabelText(/processing fee|convenience fee/i)).toHaveLength(0);
+      }
+
+      it.each(['CARD', 'ACH'] as const)('charges the quoted $139 via %s and retains receipt context after refresh', async (method) => {
+        useSpecial();
+        const view = render(<PaymentScreen />);
+        expectNoFeeCopy(view);
+        expect(view.getByRole('radio', { name: 'Credit Card' })).not.toBeDisabled();
+        expect(view.getByRole('radio', { name: 'Bank Account (ACH)' })).not.toBeDisabled();
+        fillInstrument(view, method);
+        fireEvent.press(view.getByText('Review Payment'));
+        const confirm = await view.findByRole('button', { name: 'Confirm Payment' });
+        expectNoFeeCopy(view);
+        expect(view.getByText(/for a total charge of \$139.00\./)).toBeTruthy();
+        fireEvent.press(confirm);
+        fireEvent.press(confirm);
+        await view.findByText('Payment successful');
+        expect(mockSubmitPayment).toHaveBeenCalledTimes(1);
+        expect(mockSubmitPayment.mock.calls[0][4]).toMatchObject({ amount: 139, paymentMethod: method, emailReceipt: true });
+        expect(mockSubmitPayment.mock.calls[0][4]).not.toHaveProperty('processingFeeAbsorbed');
+        mockUsePayments.mockReturnValue({ ...mockUsePayments(), paymentRecords: [], payableRecords: [] });
+        view.rerender(<PaymentScreen />);
+        expect(view.getByText('Payment successful')).toBeTruthy();
+        expect(view.getByText('special-receipt')).toBeTruthy();
+        expect(view.getAllByText('$139.00').length).toBeGreaterThan(0);
+        expectNoFeeCopy(view);
+      });
+
+      it.each([false, undefined])('keeps regular $139 pricing with flag %s', async (flag) => {
+        useRecord(buildSpecialRatePaymentEligibility({ processingFeeAbsorbed: flag, cardConvenienceFee: 4.17, cardTotalAmount: 143.17, achConvenienceFee: 3, achTotalAmount: 142 }));
+        const view = render(<PaymentScreen />);
+        expect(view.getByRole('radio', { name: 'Credit Card, 3% Processing Fee' })).toBeTruthy();
+        expect(view.getAllByText('$143.17').length).toBeGreaterThan(0);
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        await view.findByRole('button', { name: 'Confirm Payment' });
+        expect(view.getByText(/including the displayed convenience fee/)).toBeTruthy();
+      });
+
+      it.each(['CARD', 'ACH'] as const)('keeps null %s fees unavailable', async (method) => {
+        useSpecial(buildSpecialRatePaymentEligibility({ cardConvenienceFee: null, cardTotalAmount: null, achConvenienceFee: null, achTotalAmount: null }));
+        const view = render(<PaymentScreen />);
+        expect(view.getByRole('radio', { name: `${method === 'CARD' ? 'Credit Card' : 'Bank Account (ACH)'}, Unavailable` })).toBeDisabled();
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        await view.findByText(/Card payments are unavailable/);
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+      });
+
+      it.each(['positive fee', 'extra total'])('blocks contradictory absorbed preview: %s', async (variant) => {
+        useSpecial(buildSpecialRatePaymentEligibility({ cardConvenienceFee: variant === 'positive fee' ? 4 : 0, cardTotalAmount: 143 }));
+        const view = render(<PaymentScreen />);
+        if (variant === 'positive fee') expect(view.getByText('Card convenience fee')).toBeTruthy();
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        await view.findByText(/Payment pricing is invalid/);
+        expect(view.queryByRole('button', { name: 'Confirm Payment' })).toBeNull();
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+      });
+
+      it.each(['review', 'submit'])('invalidates a changed flag at %s even with equal prices', async (stage) => {
+        const record = useSpecial();
+        const view = render(<PaymentScreen />);
+        fillInstrument(view, 'CARD');
+        if (stage === 'submit') {
+          fireEvent.press(view.getByText('Review Payment'));
+          await view.findByRole('button', { name: 'Confirm Payment' });
+        }
+        mockGetPaymentEligibility.mockResolvedValue({ ...record, processingFeeAbsorbed: false });
+        fireEvent.press(view.getByRole('button', { name: stage === 'submit' ? 'Confirm Payment' : 'Review Payment' }));
+        await view.findByText(/The payment request changed/);
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+        expect(view.queryByRole('button', { name: 'Confirm Payment' })).toBeNull();
+      });
+
+      it.each([null, 4])('preserves actual receipt details when fee is %s', async (fee) => {
+        useSpecial();
+        mockSubmitPayment.mockResolvedValue({
+          ...await mockSubmitPayment(), convenienceFee: fee, totalCharged: fee === null ? null : 143,
+        });
+        mockSubmitPayment.mockClear();
+        const view = render(<PaymentScreen />);
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        fireEvent.press(await view.findByRole('button', { name: 'Confirm Payment' }));
+        await view.findByText('Payment successful');
+        if (fee === null) {
+          expect(view.queryByText('Total charged')).toBeNull();
+          expect(view.queryByText('Convenience fee')).toBeNull();
+        } else {
+          expect(view.getByText('Convenience fee')).toBeTruthy();
+          expect(view.getByText('$4.00')).toBeTruthy();
+          expect(view.getAllByText('$143.00').length).toBeGreaterThan(0);
+        }
+        expect(mockSubmitPayment).toHaveBeenCalledTimes(1);
+      });
+
+      it('uses multi-year term totals and resets review when switching terms', async () => {
+        const terms = [1, 3].map((years) => buildPaymentTermOption({
+          id: `special-${years}`, label: `${years} years`, termYears: years,
+          amount: years === 1 ? 139 : 330.25, cardConvenienceFee: 0, achConvenienceFee: 0,
+          cardTotalAmount: years === 1 ? 139 : 330.25, achTotalAmount: years === 1 ? 139 : 330.25,
+        }));
+        useSpecial(buildSpecialRatePaymentEligibility({ paymentMode: 'TERM_OPTIONS', termOptions: terms }));
+        const view = render(<PaymentScreen />);
+        expect(view.queryByText(/Your final total depends on the payment method/)).toBeNull();
+        fireEvent.press(view.getByRole('radio', { name: /1 years/ }));
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        await view.findByRole('button', { name: 'Confirm Payment' });
+        fireEvent.press(view.getByText('Edit Payment'));
+        fireEvent.press(view.getByRole('radio', { name: /3 years/ }));
+        expect(view.queryByRole('button', { name: 'Confirm Payment' })).toBeNull();
+        expectNoFeeCopy(view);
+        expect(view.getAllByText('$330.25').length).toBeGreaterThan(0);
+        fireEvent.press(view.getByText('Review Payment'));
+        fireEvent.press(await view.findByRole('button', { name: 'Confirm Payment' }));
+        await waitFor(() => expect(mockSubmitPayment).toHaveBeenCalledTimes(1));
+        expect(mockSubmitPayment.mock.calls[0][4]).toMatchObject({ paymentOptionId: 'special-3', emailReceipt: true });
+        expect(mockSubmitPayment.mock.calls[0][4]).not.toHaveProperty('amount');
+      });
+
+      function useInstallment(flag = true, includeChild = true) {
+        const child = buildSpecialRatePaymentEligibility({ demandId: 'installment-1', purpose: 'INSTALLMENT', processingFeeAbsorbed: flag });
+        const parent = buildPaymentEligibility({
+          demandId: 'plan-parent', paymentPlanId: 'plan-1', planPaymentChoice: 'INSTALLMENTS_ONLY',
+          processingFeeAbsorbed: !flag, purpose: 'PREMIUM_AUDIT',
+          installments: [{ id: child.demandId, installmentNumber: 1, amount: 139, dueDate: null, status: 'PUBLISHED',
+            cardConvenienceFee: 0, cardTotalAmount: 139, achConvenienceFee: 0, achTotalAmount: 139 }],
+        });
+        mockUsePayments.mockReturnValue({
+          paymentRecords: includeChild ? [parent, child] : [parent], payableRecords: [parent],
+          isLoadingPayments: false, paymentsError: null, refreshPaymentEligibility: mockRefreshPaymentEligibility,
+        });
+        mockGetPaymentEligibility.mockImplementation(async (_email, _account, demandId) => demandId === child.demandId ? child : parent);
+        return { parent, child };
+      }
+
+      it.each([true, false])('uses the installment demand flag %s instead of the parent flag', async (flag) => {
+        useInstallment(flag);
+        const view = render(<PaymentScreen />);
+        if (flag) expectNoFeeCopy(view);
+        else expect(view.getByText('Card convenience fee')).toBeTruthy();
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        fireEvent.press(await view.findByRole('button', { name: 'Confirm Payment' }));
+        await waitFor(() => expect(mockSubmitPayment).toHaveBeenCalledTimes(1));
+        expect(mockGetPaymentEligibility).toHaveBeenLastCalledWith('jane@example.com', 'account-1', 'installment-1');
+        expect(mockSubmitPayment.mock.calls[0][2]).toBe('installment-1');
+        expect(mockSubmitPayment.mock.calls[0][4]).toMatchObject({ amount: 139, purpose: 'INSTALLMENT' });
+      });
+
+      it('blocks an installment whose exact demand eligibility is missing', async () => {
+        useInstallment(true, false);
+        const view = render(<PaymentScreen />);
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        await view.findByText('Payment details are unavailable. Please refresh payment details.');
+        expect(mockGetPaymentEligibility).not.toHaveBeenCalled();
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+      });
+
+      it('rejects stale embedded installment prices against refreshed child pricing', async () => {
+        const { child } = useInstallment();
+        mockGetPaymentEligibility.mockResolvedValue({ ...child, amountDue: 140, cardTotalAmount: 140, achTotalAmount: 140 });
+        const view = render(<PaymentScreen />);
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        await view.findByText(/The payment request changed/);
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+      });
+
+      it('invalidates review when just the child flag changes in context', async () => {
+        const { parent, child } = useInstallment();
+        const view = render(<PaymentScreen />);
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        await view.findByRole('button', { name: 'Confirm Payment' });
+        mockUsePayments.mockReturnValue({ ...mockUsePayments(), paymentRecords: [parent, { ...child, processingFeeAbsorbed: false }] });
+        view.rerender(<PaymentScreen />);
+        expect(view.queryByRole('button', { name: 'Confirm Payment' })).toBeNull();
+        expect(view.getByText('Card convenience fee')).toBeTruthy();
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+      });
+
+      it.each(['eligibility', 'success'])('ignores a late %s response after changing accounts', async (stage) => {
+        const record = useSpecial();
+        const receipt = await mockSubmitPayment();
+        mockSubmitPayment.mockClear();
+        let resolveResponse!: (value: typeof record | typeof receipt) => void;
+        const pending = new Promise((resolve) => { resolveResponse = resolve; });
+        const view = render(<PaymentScreen />);
+        fillInstrument(view, 'CARD');
+        if (stage === 'eligibility') mockGetPaymentEligibility.mockReturnValueOnce(pending);
+        else mockSubmitPayment.mockReturnValueOnce(pending);
+        fireEvent.press(view.getByText('Review Payment'));
+        if (stage === 'success') {
+          fireEvent.press(await view.findByRole('button', { name: 'Confirm Payment' }));
+          await waitFor(() => expect(mockSubmitPayment).toHaveBeenCalledTimes(1));
+        }
+        mockUseAuth.mockReturnValue({ ...mockUseAuth(), customer: buildCustomer({ accountId: 'account-2' }) });
+        useRecord(buildPaymentEligibility({ accountId: 'account-2', demandId: 'demand-2' }));
+        view.rerender(<PaymentScreen />);
+        await act(async () => { resolveResponse(stage === 'eligibility' ? record : receipt); await pending; });
+        expect(view.queryByText('Payment successful')).toBeNull();
+        expect(view.queryByRole('button', { name: 'Confirm Payment' })).toBeNull();
+        expect(view.getByText('Card convenience fee')).toBeTruthy();
+        expect(view.getByLabelText('Card Number')).toHaveProp('value', '');
+        if (stage === 'eligibility') expect(mockSubmitPayment).not.toHaveBeenCalled();
+      });
+
+      it('resets receipt context for another account with a regular zero-fee payment', async () => {
+        useSpecial();
+        const view = render(<PaymentScreen />);
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        fireEvent.press(await view.findByRole('button', { name: 'Confirm Payment' }));
+        await view.findByText('Payment successful');
+        mockUseAuth.mockReturnValue({ ...mockUseAuth(), customer: { ...mockUseAuth().customer, accountId: 'account-2' } });
+        useSpecial(buildSpecialRatePaymentEligibility({ accountId: 'account-2', demandId: 'demand-2', processingFeeAbsorbed: false }));
+        view.rerender(<PaymentScreen />);
+        expect(view.queryByText('Payment successful')).toBeNull();
+        for (const [label, value] of [['First Name', 'Jane'], ['Last Name', 'Builder'], ['Address', '123 Main Street'], ['City', 'Los Angeles'], ['ZIP Code', '90001']]) {
+          fireEvent.changeText(view.getByLabelText(label), value);
+        }
+        fireEvent.press(view.getByLabelText('State'));
+        fireEvent.press(view.getByLabelText('California (CA)'));
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        fireEvent.press(await view.findByRole('button', { name: 'Confirm Payment' }));
+        await view.findByText('Payment successful');
+        expect(view.getByText('Convenience fee')).toBeTruthy();
+      });
+
+      it.each(['CARD', 'ACH'] as const)('preserves financed monthly terms and collects the server down payment via %s', async (method) => {
+        const record = useSpecial({ ...buildFinancedPaymentEligibility(), processingFeeAbsorbed: true,
+          cardConvenienceFee: 0, cardTotalAmount: 500, achConvenienceFee: 0, achTotalAmount: 500,
+          financedCardConvenienceFee: 0, financedCardTotalAmount: 100, financedAchConvenienceFee: 0, financedAchTotalAmount: 100,
+        });
+        const view = render(<PaymentScreen />);
+        expect(view.getByRole('radio', { name: 'Full Premium' })).toHaveProp('accessibilityHint', '$500.00 today.');
+        fireEvent.press(view.getByRole('radio', { name: 'Financed Premium' }));
+        expect(view.getByText('Then 10 monthly payments of $45.00')).toBeTruthy();
+        fillInstrument(view, method);
+        fireEvent.press(view.getByText('Review Payment'));
+        const confirm = await view.findByRole('button', { name: 'Confirm Payment' });
+        expectNoFeeCopy(view);
+        expect(view.getByText(/total charge of \$100.00\./)).toBeTruthy();
+        fireEvent.press(confirm);
+        await waitFor(() => expect(mockSubmitPayment).toHaveBeenCalledTimes(1));
+        expect(mockSubmitPayment.mock.calls[0][4]).toMatchObject({ premiumPaymentOption: 'FINANCED_PREMIUM', pricingVersion: record.pricingVersion, paymentMethod: method });
+        expect(mockSubmitPayment.mock.calls[0][4]).not.toHaveProperty('amount');
+      });
+    });
 
     it.each(['CARD', 'ACH'] as const)('collects only the down payment via %s using saved monthly pricing', async (method) => {
       const record = useRecord();

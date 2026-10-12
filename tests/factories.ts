@@ -136,6 +136,19 @@ export function buildPaymentEligibility(
   };
 }
 
+export function buildSpecialRatePaymentEligibility(
+  overrides: Partial<PaymentEligibility> = {}
+): PaymentEligibility {
+  return buildPaymentEligibility({
+    processingFeeAbsorbed: true,
+    lineOfBusiness: 'CONTRACTORS_BOND',
+    premium: 139, paidAmount: 0, amountDue: 139,
+    cardConvenienceFee: 0, cardTotalAmount: 139,
+    achConvenienceFee: 0, achTotalAmount: 139,
+    ...overrides,
+  });
+}
+
 export function buildFinancedPaymentEligibility() {
   return {
     ...buildPaymentEligibility({

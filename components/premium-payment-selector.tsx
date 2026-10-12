@@ -9,12 +9,13 @@ export function financingDescription(terms: PremiumPaymentTerms) {
   return `${formatCurrency(terms.downPayment)} down today, then ${terms.paymentCount} monthly ${terms.paymentCount === 1 ? 'payment' : 'payments'} of ${formatCurrency(terms.paymentAmount)}.`;
 }
 
-export function PremiumPaymentSelector({ fullAmount, financing, availableOptions, selected, disabled, onSelect }: {
+export function PremiumPaymentSelector({ fullAmount, financing, availableOptions, selected, disabled, processingFeeAbsorbed = false, onSelect }: {
   fullAmount: number;
   financing: PremiumPaymentTerms | null;
   availableOptions: PremiumPaymentOption[];
   selected: PremiumPaymentOption | null;
   disabled: boolean;
+  processingFeeAbsorbed?: boolean;
   onSelect: (choice: PremiumPaymentOption) => void;
 }) {
   const options: {
@@ -27,7 +28,7 @@ export function PremiumPaymentSelector({ fullAmount, financing, availableOptions
     {
       value: 'FULL_PREMIUM',
       label: 'Full Premium',
-      detail: `${formatCurrency(fullAmount)} today, plus processing fee.`,
+      detail: `${formatCurrency(fullAmount)} today${processingFeeAbsorbed ? '.' : ', plus processing fee.'}`,
       amount: fullAmount,
       amountLabel: 'Full premium today',
     },
@@ -77,7 +78,7 @@ export function PremiumPaymentSelector({ fullAmount, financing, availableOptions
                 <Text style={[styles.amount, isSelected && styles.selectedText]}>
                   {formatCurrency(option.amount)}
                 </Text>
-                <Text style={styles.fee}>+ processing fee</Text>
+                {!processingFeeAbsorbed ? <Text style={styles.fee}>+ processing fee</Text> : null}
               </View>
               <View style={[styles.optionFooter, isSelected && styles.selectedFooter]}>
                 <Ionicons
@@ -102,7 +103,9 @@ export function PremiumPaymentSelector({ fullAmount, financing, availableOptions
         <View style={styles.note}>
           <Ionicons name="information-circle-outline" size={18} color={theme.colors.textMuted} />
           <Text style={styles.noteText}>
-            With financing, only the down payment and processing fee are collected today.
+            {processingFeeAbsorbed
+              ? 'With financing, only the down payment is collected today.'
+              : 'With financing, only the down payment and processing fee are collected today.'}
             {' '}The finance company handles the agreement and remaining monthly payments.
           </Text>
         </View>

@@ -1,5 +1,41 @@
 # PBIA client payment visibility backend handoff
 
+## October 12, 2026: Special Rate Bond absorbed processing fees
+
+Shared iOS, Android, and web checkout consumes the optional top-level eligibility
+boolean `processingFeeAbsorbed`. Only `true` enables the special presentation;
+missing/false keeps regular payments unchanged and malformed values are rejected.
+PBIA determines program membership, including eligible multi-year and related
+issued-bond purchase demands. The app never infers eligibility from $139, a label,
+or a duration and never calculates a reduced Input1 principal.
+
+- Premium choices, card/ACH method labels, details, totals, review, authorization,
+  and accessibility text omit added-fee wording and confirmed zero-fee rows.
+  Server totals, cents, financing schedules, and offered choices remain intact.
+- Selected terms and financed down payments use their own fee fields. Installments
+  use embedded prices checked against their exact refreshed child demand, whose
+  flag controls presentation. Missing child eligibility blocks checkout.
+- Zero fees remain valid; null fees/totals keep a method unavailable. Contradictory
+  absorbed pricing requires refreshed valid pricing before review/confirmation.
+  A flag change invalidates review even when amounts match. Existing selection,
+  account, idempotency, submission-lock, and uncertain-outcome protections remain.
+- The success result retains local display context from the submitted eligibility;
+  the POST response is not expected to contain the flag. Only zero actual fees
+  are hidden. Actual positive fees and totals are displayed, while null details
+  remain unknown even after eligibility refresh removes the paid demand.
+- Requests keep their existing amount/option/version variants and
+  `emailReceipt: true`; they never submit the flag or subtract fees. Input1's
+  customer email may show its reduced principal and provider fee. There is no
+  receipt-template change, second receipt, new endpoint, environment variable,
+  direct Input1 integration, or mobile migration.
+
+Reference: AMS-PBIA `docs/api/insureprobuildersapp-special-rate-fees-handoff.md`
+(issue #986). That handoff reports backend changes on
+`codex/986-special-rate-bond-fees` as local and not confirmed deployed. Target API
+release readiness still needs verification; fixture coverage does not establish
+live charging, receipt delivery, or device/browser readiness. Do not use a live
+payment to validate this implementation.
+
 ## September 18, 2026: full and financed premium checkout
 
 The shared native/web checkout now supports `FULL_PREMIUM` and `FINANCED_PREMIUM`
@@ -25,7 +61,8 @@ retain their existing request path.
   Historical missing/null offers retain BOTH semantics; they are never rewritten
   to the new-record Full-only default. Monthly amounts remain exactly as saved.
 - The customer chooses premium structure independently from coverage duration
-  and card/ACH. Financed checkout collects only the down payment plus its fee.
+  and card/ACH. Regular financed checkout collects only the down payment plus its fee;
+  absorbed-fee demands collect the quoted down payment with no added fee.
   The finance company handles the agreement and later monthly payments; the app
   creates no recurring charge or installment schedule.
 - Versioned requests send `premiumPaymentOption` and the exact `pricingVersion`,

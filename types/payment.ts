@@ -59,6 +59,7 @@ export type PaymentInstallment = {
 };
 
 export type PaymentEligibility = PremiumPricingFields & {
+  processingFeeAbsorbed?: boolean;
   premiumPaymentOffer?: PremiumPaymentOffer | null;
   pricingVersion?: string;
   premiumPaymentOption?: PremiumPaymentOption | null;

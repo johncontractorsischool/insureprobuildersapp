@@ -171,6 +171,7 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
         (typeof record.planTotalAmount === 'number' && Number.isFinite(record.planTotalAmount) && record.planTotalAmount > 0)) &&
       installmentsAreValid);
   return (
+    (record.processingFeeAbsorbed === undefined || typeof record.processingFeeAbsorbed === 'boolean') &&
     (record.premiumPaymentOffer == null || isPremiumPaymentOffer(record.premiumPaymentOffer)) &&
     (record.pricingVersion === undefined || isPricingVersion(record.pricingVersion)) &&
     (record.premiumPaymentOption == null || isPremiumPaymentOption(record.premiumPaymentOption)) &&
