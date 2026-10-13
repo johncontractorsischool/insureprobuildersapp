@@ -2,9 +2,19 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 
 import { PaymentDueCard } from '@/components/payment-due-card';
-import { buildFinancedPaymentEligibility, buildPaymentTermOption } from '@/tests/factories';
+import { buildExternalFinancingEligibility, buildFinancedPaymentEligibility, buildPaymentTermOption } from '@/tests/factories';
 
 describe('premium payment due card', () => {
+  it('keeps external-only financing visible without inventing a down payment', () => {
+    const onMakePayment = jest.fn();
+    const view = render(<PaymentDueCard record={buildExternalFinancingEligibility()} onMakePayment={onMakePayment} />);
+    expect(view.queryByText('Pricing unavailable')).toBeNull();
+    expect(view.queryByText('Down Payment Due')).toBeNull();
+    expect(view.queryByText('$500.00')).toBeNull();
+    fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+    expect(onMakePayment).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the down payment for financed-only and still opens the existing checkout', () => {
     const record = { ...buildFinancedPaymentEligibility(), premiumPaymentOffer: 'FINANCED_PREMIUM_ONLY' as const };
     const onMakePayment = jest.fn();

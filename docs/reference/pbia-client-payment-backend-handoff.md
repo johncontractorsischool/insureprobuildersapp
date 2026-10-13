@@ -1,5 +1,58 @@
 # PBIA client payment visibility backend handoff
 
+## October 13, 2026: carrier/surety financing links (#984)
+
+The shared iOS, Android, and web checkout accepts the optional nullable root
+`externalFinancingUrl` in authenticated list/detail eligibility responses. Existing
+endpoints, bearer authentication, account headers, and environment settings remain
+unchanged. No carrier API, payment callback, or new dependency is involved.
+
+- A valid link enables external financing without local terms or financed fee
+  previews, only for versioned PREMIUM demands in FIXED or TERM_OPTIONS mode
+  outside PBIA installment plans. Full-only hides financing; Both initially
+  selects full payment; financed-only uses the carrier action. Null/omission
+  retain existing local behavior. Invalid URLs and unsupported combinations fail
+  validation instead of falling back to a local financed charge.
+- URLs are trimmed, bounded to 2,048 characters, and validated as HTTPS with a
+  hostname and no credentials, internal whitespace, or control characters. The
+  destination's path, query encoding, and fragment are preserved. The URL is
+  never added to payment payloads, logs, analytics, or error copy.
+- External financing takes precedence over retained local terms. The screen
+  hides payer/card/ACH fields, local monthly terms, fees, review, and confirmation.
+  The displayed amount is explicitly a **Quote premium**, not a down payment.
+  Coverage-term selection remains available. Selecting or changing an option
+  never opens a browser.
+- **Finance Premium** refreshes detail eligibility. Native then opens the saved
+  destination using expo-web-browser. Web presents **Open Carrier Website** for
+  a second explicit tap, preserving the browser gesture. Web readiness expires
+  after 30 seconds and is invalidated by changes to the selection/account or
+  refreshed record. Web tabs have no opener access and use no-referrer policy.
+  Duplicate launches are locked; opening failures show an explicit retry without
+  displaying raw browser errors or automatically retrying.
+- Selection and review comparisons include the exact external URL separately
+  from pricingVersion: quote-only edits can add, replace, or remove the URL
+  without changing the demand version. A changed destination requires a fresh
+  explicit action. Local review/submission handlers also guard the external
+  path. Browser navigation allocates no payment key and submits no payment.
+- Existing uncertain PBIA charge locks remain in force. Browser closure triggers
+  an eligibility refresh only; it never creates a success result, receipt,
+  installment plan, or paid status. Existing 400/409 recovery refreshes the
+  allowed actions, including backend rejection of stale local financing.
+- External-only account cards remain discoverable as carrier financing. Account
+  summary line items use a null amount and contribute nothing to PBIA collectible
+  totals. Both-option summaries retain their full-premium initial amount.
+
+Regression coverage uses fictional carrier URLs and mocked openers in the API,
+checkout, due-card, context, account-summary, and external-browser suites. Release
+checks still require the matching backend contract plus real browser and iOS/
+Android interaction checks; mocked navigation does not establish carrier outcome.
+The AMS handoff reports local work on `codex/984-carrier-financing-links`, and this
+implementation does not establish backend deployment or release installed apps.
+
+Reference: AMS-PBIA `docs/api/insureprobuildersapp-carrier-financing-links-handoff.md`.
+This section supersedes older assumptions that every financed choice collects a
+local down payment. Without an external link, those flows retain their behavior.
+
 ## October 12, 2026: Special Rate Bond absorbed processing fees
 
 Shared iOS, Android, and web checkout consumes the optional top-level eligibility

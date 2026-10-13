@@ -40,8 +40,9 @@ import {
   isValidAbaRoutingNumber,
   normalizeUsStateName,
 } from '@/utils/account-payment';
+import { openExternalBrowser } from '@/utils/external-browser';
 import { formatCurrency } from '@/utils/format';
-import { availablePremiumPaymentOptions, isFinancedOnlyDemand, isPremiumDemand, isPremiumPaymentTerms, paymentDemandAmount, premiumPricingSnapshot, supportsPremiumChoice } from '@/utils/premium-payment';
+import { availablePremiumPaymentOptions, hasExternalFinancing, isExternalFinancingOnly, isFinancedOnlyDemand, isPremiumDemand, isPremiumPaymentTerms, paymentDemandAmount, premiumPricingSnapshot, supportsPremiumChoice } from '@/utils/premium-payment';
 
 const PAYMENT_COUNTRY = 'United States Of America' as const;
 
@@ -67,6 +68,7 @@ function isRecordPayable(record: PaymentEligibility) {
 }
 
 function getRecordStatusDescription(record: PaymentEligibility) {
+  if (isExternalFinancingOnly(record)) return 'Complete financing on the carrier/surety website';
   if (record.paymentMode === 'TERM_OPTIONS') {
     return `${record.termOptions.length} term options available`;
   }
@@ -219,6 +221,10 @@ export default function PaymentScreen({
   const [isCheckingEligibility, setIsCheckingEligibility] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  const [isOpeningCarrier, setIsOpeningCarrier] = useState(false);
+  const [carrierError, setCarrierError] = useState('');
+  const [carrierReady, setCarrierReady] = useState<{ snapshot: string; expiresAt: number } | null>(null);
+  const carrierLockRef = useRef(false);
   const [successfulPayment, setSuccessfulPayment] = useState<(SuccessfulPayment & { processingFeeAbsorbed: boolean }) | null>(null);
   const [blockedRecordKey, setBlockedRecordKey] = useState<string | null>(null);
   const [isPaymentUnavailable, setIsPaymentUnavailable] = useState(false);
@@ -271,9 +277,12 @@ export default function PaymentScreen({
   const financing = hasPremiumChoice && premiumSource && selectedFullAmount !== null &&
     isPremiumPaymentTerms(premiumSource.financing, selectedFullAmount)
     ? premiumSource.financing : null;
-  const isFinanced = isPremium && premiumPaymentOption === 'FINANCED_PREMIUM';
-  const selectedPaymentAmount = hasInvalidPremiumSelection ? null : isFinanced ? financing?.downPayment ?? null : selectedFullAmount;
-  const selectedPurpose = isFinanced || (selectedRecord && isFinancedOnlyDemand(selectedRecord)) ? 'DOWN_PAYMENT' : selectedPaymentRecord?.purpose ?? selectedRecord?.purpose ?? 'PREMIUM';
+  const externalFinancingAvailable = Boolean(selectedRecord && hasExternalFinancing(selectedRecord));
+  const isExternalFinancing = externalFinancingAvailable &&
+    (premiumPaymentOption === 'FINANCED_PREMIUM' || Boolean(selectedRecord && isExternalFinancingOnly(selectedRecord)));
+  const isFinanced = isPremium && premiumPaymentOption === 'FINANCED_PREMIUM' && !isExternalFinancing;
+  const selectedPaymentAmount = hasInvalidPremiumSelection || isExternalFinancing ? null : isFinanced ? financing?.downPayment ?? null : selectedFullAmount;
+  const selectedPurpose = isFinanced || (!isExternalFinancing && selectedRecord && isFinancedOnlyDemand(selectedRecord)) ? 'DOWN_PAYMENT' : selectedPaymentRecord?.purpose ?? selectedRecord?.purpose ?? 'PREMIUM';
   const selectedCardConvenienceFee = isFinanced
     ? premiumSource?.financedCardConvenienceFee ?? null : selectedFeeSource?.cardConvenienceFee ?? null;
   const selectedCardTotalAmount = isFinanced
@@ -282,9 +291,9 @@ export default function PaymentScreen({
     ? premiumSource?.financedAchConvenienceFee ?? null : selectedFeeSource?.achConvenienceFee ?? null;
   const selectedAchTotalAmount = isFinanced
     ? premiumSource?.financedAchTotalAmount ?? null : selectedFeeSource?.achTotalAmount ?? null;
-  const selectedConvenienceFee = hasInvalidPremiumSelection ? null :
+  const selectedConvenienceFee = hasInvalidPremiumSelection || isExternalFinancing ? null :
     paymentMethod === 'CARD' ? selectedCardConvenienceFee : selectedAchConvenienceFee;
-  const selectedTotalAmount = hasInvalidPremiumSelection ? null :
+  const selectedTotalAmount = hasInvalidPremiumSelection || isExternalFinancing ? null :
     paymentMethod === 'CARD' ? selectedCardTotalAmount : selectedAchTotalAmount;
   const detectedCardType = detectCardType(cardNumber);
   const checkoutIdentity = `${accountId}|${userEmail}|${isAuthenticated}|${selectedRecordKey}`;
@@ -292,6 +301,8 @@ export default function PaymentScreen({
   activeCheckoutRef.current = checkoutIdentity;
   const selectionSnapshot = JSON.stringify([
     checkoutIdentity, selectedRecord?.pricingVersion, selectedRecord?.paymentMode, selectedRecord?.premiumPaymentOffer,
+    selectedRecord?.externalFinancingUrl ?? null, isExternalFinancing,
+    isLoadingPayments, paymentsError, isPaymentUnavailable, blockedRecordKey,
     selectedPaymentOptionId, selectedPlanChoice, selectedInstallmentId,
     premiumPaymentOption, paymentMethod, selectedPaymentAmount, selectedPurpose,
     selectedConvenienceFee, selectedTotalAmount, selectedPaymentRecord?.demandId, processingFeeAbsorbed,
@@ -301,6 +312,15 @@ export default function PaymentScreen({
   activeSelectionRef.current = selectionSnapshot;
 
   useEffect(() => {
+    setCarrierReady(null);
+  }, [selectionSnapshot]);
+
+  useEffect(() => {
+    setCarrierError('');
+  }, [checkoutIdentity, selectedPaymentOptionId, premiumPaymentOption]);
+
+  useEffect(() => {
+    setCarrierReady(null);
     setPremiumPaymentOption(selectedRecord
       ? availablePremiumPaymentOptions(selectedRecord, selectedTermOption?.id)[0] ?? null : null);
     setIsReviewing(false);
@@ -468,6 +488,7 @@ export default function PaymentScreen({
 
   const changePremiumChoice = (choice: PremiumPaymentOption) => {
     if (choice === premiumPaymentOption) return;
+    clearSensitiveFields();
     setPremiumPaymentOption(choice);
     resetReview();
   };
@@ -488,6 +509,7 @@ export default function PaymentScreen({
 
   const buildPaymentRequest = (): { request: SubmitPaymentRequest } | { error: string } => {
     if (!selectedRecord) return { error: 'Select a payment request.' };
+    if (isExternalFinancing) return { error: 'Complete financing on the carrier/surety website.' };
     if (hasInvalidPremiumSelection) {
       return { error: 'Premium pricing is unavailable. Refresh payment details or contact your agent.' };
     }
@@ -625,12 +647,14 @@ export default function PaymentScreen({
     const current = await getPaymentEligibility(userEmail, accountId, record.demandId);
     // Ignore a response for a checkout that changed while the request was in flight.
     if (activeSelectionRef.current !== selectionSnapshot) return current;
-    if (!isRecordPayable(current)) {
+    if (!isRecordPayable(current) || current.accountId !== accountId) {
       throw new PaymentApiError(404, 'This payment request is no longer available.');
     }
     let requestChanged =
       record.accountId !== current.accountId || record.demandId !== current.demandId ||
       record.paymentMode !== current.paymentMode || record.purpose !== current.purpose ||
+      record.paymentPlanId !== current.paymentPlanId ||
+      (record.externalFinancingUrl ?? null) !== (current.externalFinancingUrl ?? null) ||
       record.pricingVersion !== current.pricingVersion ||
       (record.processingFeeAbsorbed === true) !== (current.processingFeeAbsorbed === true) ||
       (record.premiumPaymentOffer ?? 'BOTH') !== (current.premiumPaymentOffer ?? 'BOTH');
@@ -666,7 +690,7 @@ export default function PaymentScreen({
         'The payment request changed. Please review the updated amount, purpose, and term options.'
       );
     }
-    if (processingFeeAbsorbed &&
+    if (!isExternalFinancing && processingFeeAbsorbed &&
       (selectedConvenienceFee !== 0 || !sameMoney(selectedTotalAmount, selectedPaymentAmount))) {
       await refreshPaymentEligibility();
       throw new PaymentApiError(422, 'Payment pricing is invalid. Please refresh payment details.');
@@ -674,8 +698,58 @@ export default function PaymentScreen({
     return current;
   };
 
+  const handleCarrierFinancing = async () => {
+    if (carrierLockRef.current || submissionLockRef.current || reviewLockRef.current ||
+      !isAuthenticated || !accountId || !userEmail || !selectedRecord || !isExternalFinancing ||
+      !selectedRecord.externalFinancingUrl || hasInvalidPremiumSelection || isPaymentUnavailable || isLoadingPayments || paymentsError) return;
+    if (blockedRecordKey === selectedRecord.demandId) {
+      setCarrierError('Please contact PBIA to verify the earlier payment attempt before continuing.');
+      return;
+    }
+    carrierLockRef.current = true;
+    setIsOpeningCarrier(true);
+    setCarrierError('');
+    let opening = false;
+    try {
+      // Web needs a fresh tap after asynchronous eligibility checks. The prepared
+      // action is short-lived and bound to the exact account, term, offer and URL.
+      if (Platform.OS === 'web' && carrierReady?.snapshot === selectionSnapshot && carrierReady.expiresAt > Date.now()) {
+        setCarrierReady(null);
+        opening = true;
+        await openExternalBrowser(selectedRecord.externalFinancingUrl);
+      } else {
+        setCarrierReady(null);
+        const current = await ensureRecordIsPayable(selectedRecord, selectedPaymentOptionId);
+        if (activeSelectionRef.current !== selectionSnapshot) return;
+        if (!hasExternalFinancing(current) ||
+          !availablePremiumPaymentOptions(current, selectedPaymentOptionId).includes('FINANCED_PREMIUM')) {
+          throw new PaymentApiError(400, 'Financing changed. Refresh payment details or contact your agent.');
+        }
+        if (Platform.OS === 'web') {
+          setCarrierReady({ snapshot: selectionSnapshot, expiresAt: Date.now() + 30_000 });
+          return;
+        }
+        opening = true;
+        await openExternalBrowser(current.externalFinancingUrl!);
+      }
+      if (activeCheckoutRef.current === checkoutIdentity) await refreshPaymentEligibility();
+    } catch (error) {
+      if (activeCheckoutRef.current !== checkoutIdentity) return;
+      setCarrierReady(null);
+      if (!opening && error instanceof PaymentApiError && error.status === 404) await refreshPaymentEligibility();
+      if (!opening && error instanceof PaymentApiError && error.status === 503) setIsPaymentUnavailable(true);
+      // Browser errors may include signed URLs. Never display or log their details.
+      setCarrierError(opening
+        ? 'We could not open the carrier website. Please try again. No PBIA payment was submitted.'
+        : 'Financing details could not be verified or have changed. Refresh payment details and try again, or contact your agent.');
+    } finally {
+      carrierLockRef.current = false;
+      setIsOpeningCarrier(false);
+    }
+  };
+
   const handleReviewPayment = async () => {
-    if (reviewLockRef.current || submissionLockRef.current) return;
+    if (isExternalFinancing || carrierLockRef.current || reviewLockRef.current || submissionLockRef.current) return;
     const result = buildPaymentRequest();
     if ('error' in result || !selectedRecord || !selectedPaymentRecord) {
       setFormError('error' in result ? result.error : 'Select a payment request.');
@@ -707,7 +781,7 @@ export default function PaymentScreen({
   };
 
   const handleSubmitPayment = async () => {
-    if (submissionLockRef.current || reviewLockRef.current) return;
+    if (isExternalFinancing || carrierLockRef.current || submissionLockRef.current || reviewLockRef.current) return;
     if (!isReviewing || reviewedSelectionRef.current !== selectionSnapshot) {
       setIsReviewing(false);
       setFormError('Payment details changed. Please review the payment again.');
@@ -905,13 +979,13 @@ export default function PaymentScreen({
       <View style={styles.balanceIcon}>
         <Ionicons name="wallet-outline" size={22} color={theme.colors.primary} />
       </View>
-      <Text style={styles.balanceLabel}>{isFinanced ? 'Down Payment Due Today' : 'Amount Due'}</Text>
+      <Text style={styles.balanceLabel}>{isExternalFinancing ? 'Quote premium' : isFinanced ? 'Down Payment Due Today' : 'Amount Due'}</Text>
       <Text
         numberOfLines={2}
         style={[styles.balanceValue, !isDesktopLayout ? styles.mobileBalanceValue : null]}>
         {selectedRecord.paymentMode === 'TERM_OPTIONS' && !selectedTermOption
           ? 'Select a term'
-          : selectedPaymentAmount === null ? 'Pricing unavailable' : formatCurrency(selectedPaymentAmount)}
+          : isExternalFinancing ? formatCurrency(selectedFullAmount!) : selectedPaymentAmount === null ? 'Pricing unavailable' : formatCurrency(selectedPaymentAmount)}
       </Text>
       <Text style={styles.balanceRecord}>{buildPaymentRecordLabel(selectedRecord)}</Text>
       <View style={styles.balanceDivider} />
@@ -926,7 +1000,7 @@ export default function PaymentScreen({
       ) : null}
       <ReviewRow
         label="Purpose"
-        value={getPaymentPurposeLabel(selectedPurpose)}
+        value={isExternalFinancing ? 'Carrier financing' : getPaymentPurposeLabel(selectedPurpose)}
       />
       {availablePremiumOptions.length === 1 && isFinanced && financing ? (
         <Text style={styles.cardSubtitle}>
@@ -991,7 +1065,7 @@ export default function PaymentScreen({
                     key={getRecordKey(record)}
                     record={record}
                     selected={getRecordKey(record) === selectedRecordKey}
-                    disabled={!recordIsPayable || isReviewing || isSubmitting || isCheckingEligibility}
+                    disabled={!recordIsPayable || isReviewing || isSubmitting || isCheckingEligibility || isOpeningCarrier}
                     onPress={() => setSelectedRecordKey(getRecordKey(record))}
                   />
                 );
@@ -1006,12 +1080,14 @@ export default function PaymentScreen({
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Payment Details</Text>
                 <Text style={styles.cardSubtitle}>
-                  Required fields are sent securely to PBIA for Input1 processing.
+                  {isExternalFinancing ? 'Complete financing on the carrier/surety website.' : 'Required fields are sent securely to PBIA for Input1 processing.'}
                 </Text>
               </View>
 
               <View style={styles.demandDetails}>
-                {selectedRecord.paymentMode === 'FIXED' && !isInstallmentSelection ? (
+                {isExternalFinancing ? (
+                  <ReviewRow label="Quote premium" value={selectedFullAmount === null ? 'Select a term below' : formatCurrency(selectedFullAmount)} />
+                ) : selectedRecord.paymentMode === 'FIXED' && !isInstallmentSelection ? (
                   <ReviewRow label={isFinanced ? "Down payment today" : "Amount"} value={selectedPaymentAmount === null ? 'Pricing unavailable' : formatCurrency(selectedPaymentAmount)} />
                 ) : (
                   <ReviewRow
@@ -1025,7 +1101,7 @@ export default function PaymentScreen({
                 )}
                 <ReviewRow
                   label="Purpose"
-                  value={getPaymentPurposeLabel(selectedPurpose)}
+                  value={isExternalFinancing ? 'Carrier financing' : getPaymentPurposeLabel(selectedPurpose)}
                 />
                 <ReviewRow
                   label="Due date"
@@ -1042,9 +1118,10 @@ export default function PaymentScreen({
               {selectedRecord.paymentMode === 'TERM_OPTIONS' ? (
                 <TermOptionSelector
                   processingFeeAbsorbed={processingFeeAbsorbed}
+                  externalFinancing={isExternalFinancing}
                   options={selectedRecord.termOptions}
                   selectedOptionId={selectedPaymentOptionId}
-                  disabled={isReviewing || isSubmitting || isCheckingEligibility}
+                  disabled={isReviewing || isSubmitting || isCheckingEligibility || isOpeningCarrier}
                   onSelect={changePaymentTerm}
                 />
               ) : null}
@@ -1063,9 +1140,10 @@ export default function PaymentScreen({
                   processingFeeAbsorbed={processingFeeAbsorbed}
                   fullAmount={selectedFullAmount}
                   financing={financing}
+                  externalFinancing={externalFinancingAvailable}
                   availableOptions={availablePremiumOptions}
                   selected={premiumPaymentOption}
-                  disabled={isReviewing || isSubmitting || isCheckingEligibility}
+                  disabled={isReviewing || isSubmitting || isCheckingEligibility || isOpeningCarrier}
                   onSelect={changePremiumChoice}
                 />
               ) : null}
@@ -1075,12 +1153,36 @@ export default function PaymentScreen({
                   record={selectedRecord}
                   selectedChoice={selectedPlanChoice}
                   selectedInstallmentId={selectedInstallmentId}
-                  disabled={isReviewing || isSubmitting || isCheckingEligibility}
+                  disabled={isReviewing || isSubmitting || isCheckingEligibility || isOpeningCarrier}
                   onChoice={changePlanChoice}
                   onInstallment={changeInstallment}
                 />
               ) : null}
 
+              {isExternalFinancing ? (
+                <View style={styles.formSection}>
+                  <Text style={styles.sectionTitle}>Carrier Financing</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Complete financing on the carrier/surety website. Tap Finance Premium to continue.
+                    The carrier provides the financing agreement, pricing, and payment outcome.
+                  </Text>
+                  {carrierReady?.snapshot === selectionSnapshot ? (
+                    <Text style={styles.cardSubtitle}>Financing details checked. Tap Open Carrier Website to continue in a new tab.</Text>
+                  ) : null}
+                  {blockedRecordKey === selectedRecord.demandId ? (
+                    <Text accessibilityRole="alert" style={styles.errorText}>Please contact PBIA to verify the earlier payment attempt before continuing.</Text>
+                  ) : null}
+                  {carrierError ? <Text accessibilityRole="alert" style={styles.errorText}>{carrierError}</Text> : null}
+                  <AppButton
+                    label={carrierReady?.snapshot === selectionSnapshot ? 'Open Carrier Website' : carrierError ? 'Retry Finance Premium' : 'Finance Premium'}
+                    onPress={() => void handleCarrierFinancing()}
+                    loading={isOpeningCarrier}
+                    disabled={hasInvalidPremiumSelection || isPaymentUnavailable || blockedRecordKey === selectedRecord.demandId || isCheckingEligibility || isSubmitting}
+                  />
+                  <AppButton label="Refresh Payment Details" variant="secondary" disabled={isOpeningCarrier}
+                    onPress={() => { setCarrierReady(null); void refreshPaymentEligibility(); }} />
+                </View>
+              ) : (<>
               <View style={styles.formSection}>
                 <Text style={styles.sectionTitle}>Payer Information</Text>
                 <View style={isDesktopLayout ? styles.twoColumnFields : styles.optionList}>
@@ -1138,7 +1240,7 @@ export default function PaymentScreen({
                   amount={selectedPaymentAmount}
                   cardFee={selectedCardConvenienceFee}
                   achFee={selectedAchConvenienceFee}
-                  disabled={isReviewing || isSubmitting || isCheckingEligibility}
+                  disabled={isReviewing || isSubmitting || isCheckingEligibility || isOpeningCarrier}
                   onSelect={changePaymentMethod}
                 />
 
@@ -1211,7 +1313,7 @@ export default function PaymentScreen({
                         { value: 'Savings', label: 'Savings' },
                       ]}
                       selected={achBankAccountType}
-                      disabled={isReviewing || isSubmitting || isCheckingEligibility}
+                      disabled={isReviewing || isSubmitting || isCheckingEligibility || isOpeningCarrier}
                       onSelect={(value) => {
                         setAchBankAccountType(value as AchBankAccountType);
                         resetReview();
@@ -1224,7 +1326,7 @@ export default function PaymentScreen({
                         { value: 'Personal', label: 'Personal' },
                       ]}
                       selected={achAccountType}
-                      disabled={isReviewing || isSubmitting || isCheckingEligibility}
+                      disabled={isReviewing || isSubmitting || isCheckingEligibility || isOpeningCarrier}
                       onSelect={(value) => {
                         setAchAccountType(value as AchAccountType);
                         resetReview();
@@ -1323,7 +1425,7 @@ export default function PaymentScreen({
                   ) : null}
                   <ReviewRow
                     label="Purpose"
-                    value={getPaymentPurposeLabel(selectedPurpose)}
+                    value={isExternalFinancing ? 'Carrier financing' : getPaymentPurposeLabel(selectedPurpose)}
                   />
                   <ReviewRow
                     label="Method"
@@ -1359,6 +1461,7 @@ export default function PaymentScreen({
                   }
                 />
               )}
+              </>)}
             </View>
           ) : (
             <View style={styles.statusNotice}>
@@ -1404,7 +1507,7 @@ function RecordOption({
         <Text style={styles.recordMeta}>{getRecordStatusDescription(record)}</Text>
       </View>
       <Text style={styles.recordAmount}>
-        {amount === null
+        {isExternalFinancingOnly(record) ? 'Carrier financing' : amount === null
           ? 'Pricing unavailable'
           : record.paymentMode === 'TERM_OPTIONS'
             ? `From ${formatCurrency(amount)}`
@@ -1419,12 +1522,14 @@ function RecordOption({
 
 function TermOptionSelector({
   processingFeeAbsorbed,
+  externalFinancing = false,
   options,
   selectedOptionId,
   disabled,
   onSelect,
 }: {
   processingFeeAbsorbed: boolean;
+  externalFinancing?: boolean;
   options: PaymentTermOption[];
   selectedOptionId: string;
   disabled: boolean;
@@ -1435,7 +1540,7 @@ function TermOptionSelector({
       <View style={styles.cardHeader}>
         <Text style={styles.sectionTitle}>Choose your coverage term</Text>
         <Text style={styles.cardSubtitle}>
-          {processingFeeAbsorbed
+          {externalFinancing ? 'Select a coverage term. Amounts shown are quote premiums; the carrier provides financing terms.' : processingFeeAbsorbed
             ? 'Select one option. Your total is the quoted price for the selected term.'
             : 'Select one option. Your final total depends on the payment method.'}
         </Text>

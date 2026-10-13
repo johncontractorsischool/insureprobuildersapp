@@ -1,5 +1,38 @@
 import type { PaymentEligibility, PaymentTermOption, PremiumPaymentOffer, PremiumPaymentOption, PremiumPaymentTerms, PremiumPricingFields } from '@/types/payment';
 
+/** Validate without serializing: signed carrier URLs must retain their exact encoding. */
+export function isExternalFinancingUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 2048 || /\s/.test(normalized) ||
+    [...normalized].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) return false;
+  try {
+    const url = new URL(normalized);
+    return url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+export function hasValidExternalFinancing(record: Partial<PaymentEligibility>) {
+  return record.externalFinancingUrl == null || (
+    isExternalFinancingUrl(record.externalFinancingUrl) &&
+    record.purpose === 'PREMIUM' && record.paymentPlanId == null &&
+    (record.paymentMode === 'FIXED' || record.paymentMode === 'TERM_OPTIONS') &&
+    isPricingVersion(record.pricingVersion) &&
+    (record.premiumPaymentOffer == null || isPremiumPaymentOffer(record.premiumPaymentOffer))
+  );
+}
+
+export function hasExternalFinancing(record: PaymentEligibility) {
+  return record.externalFinancingUrl != null && hasValidExternalFinancing(record) &&
+    record.premiumPaymentOffer !== 'FULL_PREMIUM_ONLY';
+}
+
+export function isExternalFinancingOnly(record: PaymentEligibility) {
+  return hasExternalFinancing(record) && record.premiumPaymentOffer === 'FINANCED_PREMIUM_ONLY';
+}
+
 export function isPremiumPaymentOffer(value: unknown): value is PremiumPaymentOffer {
   return value === 'FULL_PREMIUM_ONLY' || value === 'FINANCED_PREMIUM_ONLY' || value === 'BOTH';
 }
@@ -68,6 +101,7 @@ export function availablePremiumPaymentOptions(
   record: PaymentEligibility,
   paymentOptionId?: string
 ): PremiumPaymentOption[] {
+  if (!hasValidExternalFinancing(record)) return [];
   if (!isPremiumDemand(record)) return ['FULL_PREMIUM'];
   // Historical offers retain BOTH semantics; the new-record default is server-owned.
   const offer = record.premiumPaymentOffer ?? 'BOTH';
@@ -82,7 +116,7 @@ export function availablePremiumPaymentOptions(
   if (source.financing != null && !validFinancing) return [];
   const options: PremiumPaymentOption[] = [];
   if (offer !== 'FINANCED_PREMIUM_ONLY') options.push('FULL_PREMIUM');
-  if (offer !== 'FULL_PREMIUM_ONLY' && validFinancing && supportsPremiumChoice(record)) {
+  if (offer !== 'FULL_PREMIUM_ONLY' && (validFinancing || hasExternalFinancing(record)) && supportsPremiumChoice(record)) {
     options.push('FINANCED_PREMIUM');
   }
   return options;
@@ -90,6 +124,7 @@ export function availablePremiumPaymentOptions(
 
 /** Initial payable amount, excluding processing fees and future finance-company payments. */
 export function paymentDemandAmount(record: PaymentEligibility): number | null {
+  if (isExternalFinancingOnly(record)) return null;
   if (!isPremiumDemand(record)) {
     return record.paymentMode === 'TERM_OPTIONS'
       ? (record.termOptions.length ? Math.min(...record.termOptions.map((option) => option.amount)) : null)

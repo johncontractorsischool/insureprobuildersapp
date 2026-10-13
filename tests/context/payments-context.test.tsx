@@ -2,7 +2,7 @@ import React, { PropsWithChildren } from 'react';
 import { renderHook, waitFor } from '@testing-library/react-native';
 
 import { PaymentsProvider, usePayments } from '@/context/payments-context';
-import { buildFinancedPaymentEligibility, buildPaymentEligibility } from '@/tests/factories';
+import { buildExternalFinancingEligibility, buildFinancedPaymentEligibility, buildPaymentEligibility } from '@/tests/factories';
 import { buildCustomer } from '@/tests/factories';
 
 const mockUseAuth = jest.fn();
@@ -33,6 +33,15 @@ function wrapper({ children }: PropsWithChildren) {
 }
 
 describe('PaymentsProvider', () => {
+  it('retains one external-only demand in the account without local financing terms', async () => {
+    mockUseAuth.mockReturnValue({ isAuthenticated: true, userEmail: 'jane@example.com', customer: buildCustomer({ accountId: 'account-1' }) });
+    const record = buildExternalFinancingEligibility();
+    mockListPaymentEligibility.mockResolvedValueOnce({ data: [record], page: 1, pageSize: 50, total: 1, totalPages: 1 });
+    const { result } = renderHook(() => usePayments(), { wrapper });
+    await waitFor(() => expect(result.current.isLoadingPayments).toBe(false));
+    expect(result.current.payableRecords).toEqual([record]);
+  });
+
   it('loads every eligibility page with the signed-in email and exposes only payable records', async () => {
     mockUseAuth.mockReturnValue({
       isAuthenticated: true,

@@ -1,4 +1,4 @@
-import { buildFinancedPaymentEligibility, buildPaymentEligibility } from '@/tests/factories';
+import { buildExternalFinancingEligibility, buildFinancedPaymentEligibility, buildPaymentEligibility } from '@/tests/factories';
 import {
   buildAccountPaymentSummary,
   formatLineOfBusiness,
@@ -8,6 +8,12 @@ import {
 } from '@/utils/account-payment';
 
 describe('account payment utilities', () => {
+  it('keeps carrier financing in the summary without adding an unknown charge', () => {
+    const summary = buildAccountPaymentSummary([buildExternalFinancingEligibility()]);
+    expect(summary?.totalOutstanding).toBe(0);
+    expect(summary?.lineItems).toEqual([expect.objectContaining({ amount: null, label: expect.stringContaining('Carrier financing') })]);
+  });
+
   it('formats customer-facing policy type labels with a safe fallback', () => {
     expect(formatLineOfBusiness('CONTRACTOR_LICENSE_BOND')).toBe('Contractors License Bond');
     expect(formatLineOfBusiness('WORKERS_COMP')).toBe('Workers Compensation');

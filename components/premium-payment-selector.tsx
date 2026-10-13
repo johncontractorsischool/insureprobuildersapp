@@ -9,20 +9,21 @@ export function financingDescription(terms: PremiumPaymentTerms) {
   return `${formatCurrency(terms.downPayment)} down today, then ${terms.paymentCount} monthly ${terms.paymentCount === 1 ? 'payment' : 'payments'} of ${formatCurrency(terms.paymentAmount)}.`;
 }
 
-export function PremiumPaymentSelector({ fullAmount, financing, availableOptions, selected, disabled, processingFeeAbsorbed = false, onSelect }: {
+export function PremiumPaymentSelector({ fullAmount, financing, availableOptions, selected, disabled, processingFeeAbsorbed = false, externalFinancing = false, onSelect }: {
   fullAmount: number;
   financing: PremiumPaymentTerms | null;
   availableOptions: PremiumPaymentOption[];
   selected: PremiumPaymentOption | null;
   disabled: boolean;
   processingFeeAbsorbed?: boolean;
+  externalFinancing?: boolean;
   onSelect: (choice: PremiumPaymentOption) => void;
 }) {
   const options: {
     value: PremiumPaymentOption;
     label: string;
     detail: string;
-    amount: number;
+    amount: number | null;
     amountLabel: string;
   }[] = [
     {
@@ -32,12 +33,12 @@ export function PremiumPaymentSelector({ fullAmount, financing, availableOptions
       amount: fullAmount,
       amountLabel: 'Full premium today',
     },
-    ...(financing ? [{
+    ...(financing || externalFinancing ? [{
       value: 'FINANCED_PREMIUM' as const,
       label: 'Financed Premium',
-      detail: financingDescription(financing),
-      amount: financing.downPayment,
-      amountLabel: 'Down payment today',
+      detail: externalFinancing ? 'Complete financing on the carrier/surety website.' : financingDescription(financing!),
+      amount: externalFinancing ? null : financing!.downPayment,
+      amountLabel: externalFinancing ? 'Carrier financing' : 'Down payment today',
     }] : []),
   ];
 
@@ -76,9 +77,9 @@ export function PremiumPaymentSelector({ fullAmount, financing, availableOptions
               <View style={styles.priceBlock}>
                 <Text style={styles.amountLabel}>{option.amountLabel}</Text>
                 <Text style={[styles.amount, isSelected && styles.selectedText]}>
-                  {formatCurrency(option.amount)}
+                  {option.amount === null ? 'Continue with carrier' : formatCurrency(option.amount)}
                 </Text>
-                {!processingFeeAbsorbed ? <Text style={styles.fee}>+ processing fee</Text> : null}
+                {option.amount !== null && !processingFeeAbsorbed ? <Text style={styles.fee}>+ processing fee</Text> : null}
               </View>
               <View style={[styles.optionFooter, isSelected && styles.selectedFooter]}>
                 <Ionicons
@@ -87,7 +88,7 @@ export function PremiumPaymentSelector({ fullAmount, financing, availableOptions
                   color={isSelected ? theme.colors.primary : theme.colors.textMuted}
                 />
                 <Text style={styles.schedule}>
-                  {option.value === 'FINANCED_PREMIUM' && financing ? (
+                  {option.value === 'FINANCED_PREMIUM' && externalFinancing ? 'Complete financing on the carrier/surety website.' : option.value === 'FINANCED_PREMIUM' && financing ? (
                     <>
                       Then {financing.paymentCount} monthly {financing.paymentCount === 1 ? 'payment' : 'payments'} of{' '}
                       <Text style={styles.monthlyAmount}>{formatCurrency(financing.paymentAmount)}</Text>
@@ -99,7 +100,7 @@ export function PremiumPaymentSelector({ fullAmount, financing, availableOptions
           );
         })}
       </View>
-      {financing && availableOptions.includes('FINANCED_PREMIUM') ? (
+      {!externalFinancing && financing && availableOptions.includes('FINANCED_PREMIUM') ? (
         <View style={styles.note}>
           <Ionicons name="information-circle-outline" size={18} color={theme.colors.textMuted} />
           <Text style={styles.noteText}>

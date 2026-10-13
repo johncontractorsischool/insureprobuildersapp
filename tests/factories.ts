@@ -198,3 +198,15 @@ export function buildPolicyFileEntry(overrides: Partial<PolicyFileEntry> = {}): 
     ...overrides,
   };
 }
+
+export function buildExternalFinancingEligibility(overrides: Partial<PaymentEligibility> = {}): PaymentEligibility {
+  return {
+    ...buildFinancedPaymentEligibility(),
+    premiumPaymentOffer: 'FINANCED_PREMIUM_ONLY',
+    externalFinancingUrl: 'https://carrier.example/Finance?Quote=AbC%2F123&token=x%2By#agreement',
+    financing: null,
+    financedCardConvenienceFee: null, financedCardTotalAmount: null,
+    financedAchConvenienceFee: null, financedAchTotalAmount: null,
+    ...overrides,
+  };
+}

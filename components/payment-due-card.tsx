@@ -5,7 +5,7 @@ import { theme } from '@/constants/theme';
 import type { PaymentEligibility } from '@/types/payment';
 import { formatLineOfBusiness, getPaymentPurposeLabel } from '@/utils/account-payment';
 import { formatCurrency } from '@/utils/format';
-import { isFinancedOnlyDemand, paymentDemandAmount } from '@/utils/premium-payment';
+import { isExternalFinancingOnly, isFinancedOnlyDemand, paymentDemandAmount } from '@/utils/premium-payment';
 
 type PaymentDueCardProps = {
   record: PaymentEligibility;
@@ -33,15 +33,16 @@ export function PaymentDueCard({
   const hasTermOptions = record.paymentMode === 'TERM_OPTIONS';
   const hasInstallmentPlan = Boolean(record.paymentPlanId);
   const startingAmount = paymentDemandAmount(record);
+  const externalOnly = isExternalFinancingOnly(record);
   const financedOnly = isFinancedOnlyDemand(record);
-  const amountDescription = startingAmount === null
+  const amountDescription = externalOnly ? 'Complete financing on the carrier/surety website' : startingAmount === null
     ? 'Pricing unavailable'
     : hasTermOptions
       ? `Term options starting at ${formatCurrency(startingAmount)}`
       : hasInstallmentPlan
         ? `${record.installments.length} installment options or pay in full`
         : `${financedOnly ? 'Down payment due' : 'Amount due'} ${formatCurrency(startingAmount)}`;
-  const actionLabel = startingAmount === null ? 'Review Details'
+  const actionLabel = externalOnly ? 'Finance Premium' : startingAmount === null ? 'Review Details'
     : hasTermOptions ? 'Choose Term & Pay' : hasInstallmentPlan ? 'Choose Payment' : 'Pay Now';
 
   return (
@@ -71,10 +72,10 @@ export function PaymentDueCard({
 
       <View style={[styles.amountBlock, isDesktopLayout ? styles.desktopAmountBlock : null]}>
         <Text style={styles.amountLabel}>
-          {financedOnly ? 'Down Payment Due' : hasTermOptions ? 'Term Options' : hasInstallmentPlan ? 'Full or Installments' : 'Amount Due'}
+          {externalOnly ? 'Carrier Financing' : financedOnly ? 'Down Payment Due' : hasTermOptions ? 'Term Options' : hasInstallmentPlan ? 'Full or Installments' : 'Amount Due'}
         </Text>
         <Text style={styles.amountValue}>
-          {startingAmount === null ? 'Pricing unavailable' : hasTermOptions ? `From ${formatCurrency(startingAmount)}` : formatCurrency(startingAmount)}
+          {externalOnly ? 'With carrier' : startingAmount === null ? 'Pricing unavailable' : hasTermOptions ? `From ${formatCurrency(startingAmount)}` : formatCurrency(startingAmount)}
         </Text>
       </View>
 
@@ -82,7 +83,7 @@ export function PaymentDueCard({
         <View style={styles.lineItem}>
           <Text style={styles.lineItemLabel}>{hasTermOptions ? 'Options' : 'Payment'}</Text>
           <Text style={styles.lineItemValue}>
-            {hasTermOptions
+            {externalOnly ? 'Complete on carrier website' : hasTermOptions
               ? `${record.termOptions.length} terms available`
               : hasInstallmentPlan
                 ? `${record.installments.length} scheduled payments`

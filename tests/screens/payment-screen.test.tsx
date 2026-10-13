@@ -1,15 +1,19 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import type { PaymentEligibility } from '@/types/payment';
 
 import {
+  buildExternalFinancingEligibility,
   buildCustomer,
   buildFinancedPaymentEligibility,
   buildPaymentEligibility,
   buildPaymentTermOption,
   buildSpecialRatePaymentEligibility,
 } from '@/tests/factories';
+
+const mockOpenBrowser = jest.fn();
+jest.mock('@/utils/external-browser', () => ({ openExternalBrowser: (...args: unknown[]) => mockOpenBrowser(...args) }));
 
 const mockRouter = {
   push: jest.fn(),
@@ -75,6 +79,7 @@ const PaymentScreen = require('@/app/payment').default;
 describe('PaymentScreen', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    mockOpenBrowser.mockResolvedValue(undefined);
     mockPreventScreenCapture.mockResolvedValue(undefined);
     mockAllowScreenCapture.mockResolvedValue(undefined);
     mockEnableAppSwitcherProtection.mockResolvedValue(undefined);
@@ -630,6 +635,205 @@ describe('PaymentScreen', () => {
         fireEvent.changeText(view.getByLabelText('Security Code'), '123');
       }
     }
+
+    describe('external carrier financing', () => {
+      it('opens only on explicit tap, without payment fields, POST, key, or success state', async () => {
+        const record = useRecord(buildExternalFinancingEligibility());
+        const view = render(<PaymentScreen />);
+        expect(view.queryByLabelText('Card Number')).toBeNull();
+        expect(view.queryByText('Bank Account (ACH)')).toBeNull();
+        expect(view.queryByText('Review Payment')).toBeNull();
+        expect(view.queryByText('Down Payment Due Today')).toBeNull();
+        expect(view.queryByText('Pricing unavailable')).toBeNull();
+        expect(view.queryAllByText(/convenience fee|processing fee|Card total/i)).toHaveLength(0);
+        expect(mockOpenBrowser).not.toHaveBeenCalled();
+        fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+        await waitFor(() => expect(mockOpenBrowser).toHaveBeenCalledWith(record.externalFinancingUrl));
+        expect(mockOpenBrowser).toHaveBeenCalledTimes(1);
+        expect(mockGetPaymentEligibility).toHaveBeenCalled();
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+        expect(mockRandomUUID).not.toHaveBeenCalled();
+        expect(view.queryByText('Payment successful')).toBeNull();
+      });
+
+      it('defaults BOTH to full and external financing takes precedence over retained local terms', async () => {
+        useRecord(buildExternalFinancingEligibility({ ...buildFinancedPaymentEligibility(), premiumPaymentOffer: 'BOTH' }));
+        const view = render(<PaymentScreen />);
+        expect(view.getByLabelText('Card Number')).toBeTruthy();
+        fireEvent.press(view.getByRole('radio', { name: 'Financed Premium' }));
+        expect(view.queryByLabelText('Card Number')).toBeNull();
+        expect(view.queryByText(/10 monthly/)).toBeNull();
+        expect(view.queryByText('Review Payment')).toBeNull();
+        expect(mockOpenBrowser).not.toHaveBeenCalled();
+        fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+        await waitFor(() => expect(mockOpenBrowser).toHaveBeenCalledTimes(1));
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+      });
+
+      it.each(['BOTH', 'FULL_PREMIUM_ONLY'] as const)('preserves full checkout with an external URL for %s', async (offer) => {
+        useRecord(buildExternalFinancingEligibility({ premiumPaymentOffer: offer }));
+        const view = render(<PaymentScreen />);
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        fireEvent.press(await view.findByRole('button', { name: 'Confirm Payment' }));
+        await waitFor(() => expect(mockSubmitPayment).toHaveBeenCalledTimes(1));
+        expect(mockSubmitPayment.mock.calls[0][4]).toMatchObject({ premiumPaymentOption: 'FULL_PREMIUM' });
+        expect(mockSubmitPayment.mock.calls[0][4]).not.toHaveProperty('externalFinancingUrl');
+        expect(mockOpenBrowser).not.toHaveBeenCalled();
+      });
+
+      it.each(['BOTH', 'FINANCED_PREMIUM_ONLY'] as const)('keeps term changes independent of carrier navigation for %s', async (offer) => {
+        const record = useRecord(buildExternalFinancingEligibility({
+          premiumPaymentOffer: offer, paymentMode: 'TERM_OPTIONS',
+          termOptions: [buildPaymentTermOption(), buildPaymentTermOption({ id: 'term-2', termYears: 2, label: '2 years', amount: 500 })],
+        }));
+        const view = render(<PaymentScreen />);
+        if (offer === 'FINANCED_PREMIUM_ONLY') {
+          expect(view.queryByLabelText('Card Number')).toBeNull();
+          fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+          expect(mockGetPaymentEligibility).not.toHaveBeenCalled();
+        }
+        fireEvent.press(view.getByRole('radio', { name: '1 year, $139.00' }));
+        if (offer === 'BOTH') fireEvent.press(view.getByRole('radio', { name: 'Financed Premium' }));
+        expect(view.queryByLabelText('Card Number')).toBeNull();
+        fireEvent.press(view.getByRole('radio', { name: '2 years, $500.00' }));
+        expect(mockOpenBrowser).not.toHaveBeenCalled();
+        if (offer === 'BOTH') {
+          expect(view.getByRole('radio', { name: 'Full Premium' })).toHaveProp('accessibilityState', expect.objectContaining({ checked: true }));
+          fireEvent.press(view.getByRole('radio', { name: 'Financed Premium' }));
+        }
+        fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+        await waitFor(() => expect(mockOpenBrowser).toHaveBeenCalledWith(record.externalFinancingUrl));
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+      });
+
+      it('does not open an in-flight link after the account changes', async () => {
+        const record = useRecord(buildExternalFinancingEligibility());
+        let resolve!: (record: PaymentEligibility) => void;
+        mockGetPaymentEligibility.mockReturnValue(new Promise((done) => { resolve = done; }));
+        const view = render(<PaymentScreen />);
+        fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+        mockUseAuth.mockReturnValue({ ...mockUseAuth(), customer: buildCustomer({ accountId: 'account-2' }) });
+        useRecord(buildExternalFinancingEligibility({ accountId: 'account-2', demandId: 'demand-2' }));
+        view.rerender(<PaymentScreen />);
+        await act(async () => resolve(record));
+        expect(mockOpenBrowser).not.toHaveBeenCalled();
+      });
+
+      it('restores local financing only after removal and a fresh review', async () => {
+        useRecord(buildExternalFinancingEligibility());
+        const view = render(<PaymentScreen />);
+        const local = { ...buildFinancedPaymentEligibility(), premiumPaymentOffer: 'FINANCED_PREMIUM_ONLY' as const, externalFinancingUrl: null };
+        useRecord(local);
+        view.rerender(<PaymentScreen />);
+        expect(view.queryByText('Finance Premium')).toBeNull();
+        expect(view.queryByRole('button', { name: 'Confirm Payment' })).toBeNull();
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        await view.findByRole('button', { name: 'Confirm Payment' });
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+        expect(mockOpenBrowser).not.toHaveBeenCalled();
+      });
+
+      it('hides external financing when only full premium is offered', () => {
+        useRecord(buildExternalFinancingEligibility({ premiumPaymentOffer: 'FULL_PREMIUM_ONLY' }));
+        const view = render(<PaymentScreen />);
+        expect(view.queryByText('Finance Premium')).toBeNull();
+        expect(view.getByLabelText('Card Number')).toBeTruthy();
+      });
+
+      it('allows an explicit retry on browser failure without leaking the URL or submitting', async () => {
+        const record = useRecord(buildExternalFinancingEligibility());
+        mockOpenBrowser.mockRejectedValueOnce(new Error(record.externalFinancingUrl!));
+        const view = render(<PaymentScreen />);
+        fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+        const retry = await view.findByRole('button', { name: 'Retry Finance Premium' });
+        expect(view.queryByText(record.externalFinancingUrl!)).toBeNull();
+        expect(mockOpenBrowser).toHaveBeenCalledTimes(1);
+        fireEvent.press(retry);
+        await waitFor(() => expect(mockOpenBrowser).toHaveBeenCalledTimes(2));
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+      });
+
+      it('blocks concurrent taps while checking and opening', async () => {
+        const record = useRecord(buildExternalFinancingEligibility());
+        let resolve!: (record: PaymentEligibility) => void;
+        mockGetPaymentEligibility.mockReturnValue(new Promise((done) => { resolve = done; }));
+        const view = render(<PaymentScreen />);
+        const button = view.getByRole('button', { name: 'Finance Premium' });
+        fireEvent.press(button);
+        fireEvent.press(button);
+        expect(mockGetPaymentEligibility).toHaveBeenCalledTimes(1);
+        await act(async () => resolve(record));
+        expect(mockOpenBrowser).toHaveBeenCalledTimes(1);
+      });
+
+      it.each([null, 'https://carrier.example/replaced'])('does not open a changed URL %s with the same pricing version', async (url) => {
+        const record = useRecord(buildExternalFinancingEligibility());
+        const view = render(<PaymentScreen />);
+        mockGetPaymentEligibility.mockResolvedValue({ ...record, externalFinancingUrl: url });
+        fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+        await view.findByRole('alert');
+        expect(mockOpenBrowser).not.toHaveBeenCalled();
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+      });
+
+      it('invalidates a local financed review when a URL appears without a version change', async () => {
+        const record = useRecord();
+        const view = render(<PaymentScreen />);
+        fireEvent.press(view.getByRole('radio', { name: 'Financed Premium' }));
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        const confirm = await view.findByRole('button', { name: 'Confirm Payment' });
+        mockGetPaymentEligibility.mockResolvedValue({ ...record, externalFinancingUrl: 'https://carrier.example/finance' });
+        fireEvent.press(confirm);
+        await view.findByRole('alert');
+        expect(mockSubmitPayment).not.toHaveBeenCalled();
+        expect(mockRandomUUID).not.toHaveBeenCalled();
+      });
+
+      it.each([401, 404, 503])('does not open when eligibility fails with %s', async (status) => {
+        useRecord(buildExternalFinancingEligibility());
+        const { PaymentApiError } = require('@/services/payment-api');
+        mockGetPaymentEligibility.mockRejectedValue(new PaymentApiError(status, 'Unavailable'));
+        const view = render(<PaymentScreen />);
+        fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+        await view.findByRole('alert');
+        expect(mockOpenBrowser).not.toHaveBeenCalled();
+      });
+
+      it('preserves an uncertain PBIA charge lock when external financing becomes available', async () => {
+        const record = useRecord();
+        mockSubmitPayment.mockRejectedValue(new Error('Network lost'));
+        const view = render(<PaymentScreen />);
+        fillInstrument(view, 'CARD');
+        fireEvent.press(view.getByText('Review Payment'));
+        fireEvent.press(await view.findByRole('button', { name: 'Confirm Payment' }));
+        await view.findByText(/could not confirm your payment/);
+        useRecord(buildExternalFinancingEligibility({ demandId: record.demandId }));
+        view.rerender(<PaymentScreen />);
+        fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+        expect(mockOpenBrowser).not.toHaveBeenCalled();
+        expect(mockSubmitPayment).toHaveBeenCalledTimes(1);
+      });
+
+      it('requires a second explicit web tap after refreshing eligibility', async () => {
+        const originalOS = Platform.OS;
+        Object.defineProperty(Platform, 'OS', { configurable: true, value: 'web' });
+        try {
+          const record = useRecord(buildExternalFinancingEligibility());
+          const view = render(<PaymentScreen />);
+          fireEvent.press(view.getByRole('button', { name: 'Finance Premium' }));
+          const open = await view.findByRole('button', { name: 'Open Carrier Website' });
+          expect(mockOpenBrowser).not.toHaveBeenCalled();
+          fireEvent.press(open);
+          await waitFor(() => expect(mockOpenBrowser).toHaveBeenCalledWith(record.externalFinancingUrl));
+          expect(mockSubmitPayment).not.toHaveBeenCalled();
+        } finally {
+          Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOS });
+        }
+      });
+    });
 
     describe('absorbed Special Rate Bond fees', () => {
       function useSpecial(record = buildSpecialRatePaymentEligibility()) {

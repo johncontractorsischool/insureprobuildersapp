@@ -1,10 +1,10 @@
 import type { PaymentEligibility, PaymentPurpose } from '@/types/payment';
-import { paymentDemandAmount } from '@/utils/premium-payment';
+import { isExternalFinancingOnly, paymentDemandAmount } from '@/utils/premium-payment';
 
 export type AccountPaymentLineItem = {
   id: string;
   label: string;
-  amount: number;
+  amount: number | null;
 };
 
 export type AccountPaymentSummary = {
@@ -82,8 +82,13 @@ export function buildAccountPaymentSummary(
   );
   if (payableRecords.length === 0) return null;
 
-  const lineItems = payableRecords.flatMap((record) => {
+  const lineItems: AccountPaymentLineItem[] = payableRecords.flatMap((record): AccountPaymentLineItem[] => {
     const amount = paymentDemandAmount(record);
+    if (isExternalFinancingOnly(record)) return [{
+      id: record.demandId,
+      label: `${buildPaymentRecordLabel(record)} • Carrier financing`,
+      amount: null,
+    }];
     if (amount === null || amount <= 0) return [];
     return [{
       id: record.demandId,
@@ -97,7 +102,7 @@ export function buildAccountPaymentSummary(
 
   return {
     totalOutstanding:
-      Math.round(lineItems.reduce((total, lineItem) => total + lineItem.amount, 0) * 100) / 100,
+      Math.round(lineItems.reduce((total, lineItem) => total + (lineItem.amount ?? 0), 0) * 100) / 100,
     lineItems,
   };
 }

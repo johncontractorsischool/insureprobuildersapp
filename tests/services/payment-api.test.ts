@@ -4,7 +4,7 @@ import {
   listPaymentEligibility,
   submitPayment,
 } from '@/services/payment-api';
-import { buildFinancedPaymentEligibility, buildSpecialRatePaymentEligibility, buildPaymentEligibility, buildPaymentTermOption } from '@/tests/factories';
+import { buildExternalFinancingEligibility, buildFinancedPaymentEligibility, buildSpecialRatePaymentEligibility, buildPaymentEligibility, buildPaymentTermOption } from '@/tests/factories';
 
 const ORIGINAL_PAYMENT_BASE_URL = process.env.EXPO_PUBLIC_PBIA_API_BASE_URL;
 const mockGetSession = jest.fn();
@@ -31,6 +31,31 @@ describe('payment API', () => {
 
   afterAll(() => {
     process.env.EXPO_PUBLIC_PBIA_API_BASE_URL = ORIGINAL_PAYMENT_BASE_URL;
+  });
+
+  it.each([null, undefined, '  https://carrier.example/Finance?x=AbC%2Fy#agreement  '])('preserves normalized external URL %s in list and detail', async (url) => {
+    const record = buildExternalFinancingEligibility({ externalFinancingUrl: url });
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [record], page: 1, pageSize: 50, total: 1, totalPages: 1 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => record });
+    expect((await listPaymentEligibility('jane@example.com', 'account-1')).data[0].externalFinancingUrl).toBe(url?.trim() ?? url);
+    expect((await getPaymentEligibility('jane@example.com', 'account-1', record.demandId)).externalFinancingUrl).toBe(url?.trim() ?? url);
+  });
+
+  it.each(['', ' ', 42, {}, 'http://carrier.example', 'javascript:alert(1)', 'data:text/plain,test', 'file:///tmp/test',
+    'https://user:password@carrier.example', 'https://carrier.example/a b', 'https://carrier.example/a\nb',
+    'https://carrier.example/a\u007fb', 'https://carrier.example/' + 'a'.repeat(2048)])('rejects unsafe external URL %j in list and detail', async (url) => {
+    const record = { ...buildExternalFinancingEligibility(), externalFinancingUrl: url };
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [record], page: 1, pageSize: 50, total: 1, totalPages: 1 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => record });
+    await expect(listPaymentEligibility('jane@example.com', 'account-1')).rejects.toBeInstanceOf(PaymentApiError);
+    await expect(getPaymentEligibility('jane@example.com', 'account-1', record.demandId)).rejects.toBeInstanceOf(PaymentApiError);
+  });
+
+  it.each([{ purpose: 'OTHER' }, { pricingVersion: undefined }, { paymentPlanId: 'plan-1' }, { paymentMode: 'INSTALLMENTS' }])('rejects unsupported external financing metadata %j', async (overrides) => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ ...buildExternalFinancingEligibility(), ...overrides }) });
+    await expect(getPaymentEligibility('jane@example.com', 'account-1', 'demand-1')).rejects.toBeInstanceOf(PaymentApiError);
   });
 
   it.each([true, false, undefined])('preserves absorbed-fee flag %s through list and detail normalization', async (flag) => {

@@ -1,6 +1,6 @@
 import { resolveApiBaseUrl } from '@/services/api-base-url';
 import { getSupabaseClient } from '@/services/supabase';
-import { hasValidFullPremiumFees, hasValidPremiumPricing, isPaymentMoney, isPremiumPaymentOffer, isPremiumPaymentOption, isPricingVersion } from '@/utils/premium-payment';
+import { hasValidExternalFinancing, hasValidFullPremiumFees, hasValidPremiumPricing, isPaymentMoney, isPremiumPaymentOffer, isPremiumPaymentOption, isPricingVersion } from '@/utils/premium-payment';
 import type {
   PaymentEligibility,
   PaymentEligibilityList,
@@ -172,6 +172,7 @@ function isPaymentEligibility(value: unknown): value is PaymentEligibility {
       installmentsAreValid);
   return (
     (record.processingFeeAbsorbed === undefined || typeof record.processingFeeAbsorbed === 'boolean') &&
+    hasValidExternalFinancing(record) &&
     (record.premiumPaymentOffer == null || isPremiumPaymentOffer(record.premiumPaymentOffer)) &&
     (record.pricingVersion === undefined || isPricingVersion(record.pricingVersion)) &&
     (record.premiumPaymentOption == null || isPremiumPaymentOption(record.premiumPaymentOption)) &&
@@ -240,6 +241,7 @@ function normalizePaymentEligibility(value: unknown): PaymentEligibility | null 
 
   const record = value as Partial<PaymentEligibility>;
   if (
+    !hasValidExternalFinancing(record) ||
     (record.premiumPaymentOffer != null && !isPremiumPaymentOffer(record.premiumPaymentOffer)) ||
     (record.pricingVersion !== undefined && !isPricingVersion(record.pricingVersion)) ||
     (record.premiumPaymentOption != null && !isPremiumPaymentOption(record.premiumPaymentOption)) ||
@@ -255,6 +257,7 @@ function normalizePaymentEligibility(value: unknown): PaymentEligibility | null 
   }
   const normalized = {
     ...record,
+    ...(typeof record.externalFinancingUrl === 'string' ? { externalFinancingUrl: record.externalFinancingUrl.trim() } : {}),
     // Payment demands created before installment support do not include plan
     // metadata. Treat those records as standalone demands while preserving
     // strict validation for every field the server did provide.
