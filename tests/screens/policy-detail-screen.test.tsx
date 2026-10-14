@@ -58,6 +58,25 @@ describe('PolicyDetailScreen', () => {
     });
   });
 
+  it.each(['missing', 'pending', 'quote'])('does not reveal a stale %s policy ID', async (kind) => {
+    mockUsePolicies.mockReturnValue({ ...mockUsePolicies(), policies: kind === 'missing' ? [] : [
+      buildPolicy({ id: 'policy-1', ...(kind === 'pending' ? { status: 'Pending' as const } : { recordType: 'QUOTE' as const }) }),
+    ] });
+    const view = render(<PolicyDetailScreen />);
+    expect(view.getByText('Policy not found')).toBeTruthy();
+    expect(view.queryByText('Browse Policy Files')).toBeNull();
+    expect(mockFetchPolicyCoverages).not.toHaveBeenCalled();
+  });
+
+  it('removes a cached policy after the coverage endpoint denies access', async () => {
+    const { PbiaApiError } = require('@/services/pbia-client');
+    mockFetchPolicyCoverages.mockRejectedValueOnce(new PbiaApiError(404, 'Policy not found'));
+    const view = render(<PolicyDetailScreen />);
+    await view.findByText('Policy not found');
+    expect(view.queryByText('Browse Policy Files')).toBeNull();
+    expect(view.queryByText(/WC-1001/)).toBeNull();
+  });
+
   it('renders coverage details and a browse policy files action without inline documents or billing', async () => {
     mockFetchPolicyCoverages.mockResolvedValue([
       {

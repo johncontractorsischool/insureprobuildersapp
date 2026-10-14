@@ -12,6 +12,8 @@ import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { usePolicies } from '@/context/policies-context';
 import { fetchPolicyCoverages, type PolicyCoverageGroup } from '@/services/policy-coverages-api';
+import { PbiaApiError } from '@/services/pbia-client';
+import { isActivePolicy } from '@/utils/policy-coverage';
 import type { PolicyStatus } from '@/types/policy';
 import { formatCurrency, formatDate } from '@/utils/format';
 
@@ -55,8 +57,10 @@ export default function PolicyDetailScreen({
   const isDesktopWebLayout = Platform.OS === 'web' && isDesktopLayout;
   const { isAuthenticated, customer, userEmail } = useAuth();
   const { policies, isLoadingPolicies, policiesError, refreshPolicies } = usePolicies();
-  const policy = policies.find((item) => item.id === id);
+  const policy = policies.find((item) => item.id === id && isActivePolicy(item));
   const accountId = customer?.accountId?.trim() || customer?.databaseId?.trim() || '';
+  const policyScope = JSON.stringify([accountId, userEmail, id]);
+  const [unavailableScope, setUnavailableScope] = useState<string | null>(null);
   const [coverageGroups, setCoverageGroups] = useState<PolicyCoverageGroup[]>([]);
   const [isLoadingPolicyCoverages, setIsLoadingPolicyCoverages] = useState(false);
   const [policyCoveragesError, setPolicyCoveragesError] = useState<string | null>(null);
@@ -82,9 +86,13 @@ export default function PolicyDetailScreen({
         const nextCoverageGroups = await fetchPolicyCoverages(userEmail, accountId, policy.id);
         if (!isMounted) return;
         setCoverageGroups(nextCoverageGroups);
+        setUnavailableScope(null);
       } catch (error) {
         if (!isMounted) return;
         setCoverageGroups([]);
+        if (error instanceof PbiaApiError && (error.status === 404 || error.status === 403)) {
+          setUnavailableScope(policyScope);
+        }
         setPolicyCoveragesError(toPolicyCoveragesError(error));
       } finally {
         if (isMounted) {
@@ -98,7 +106,7 @@ export default function PolicyDetailScreen({
     return () => {
       isMounted = false;
     };
-  }, [accountId, policy, userEmail]);
+  }, [accountId, policy, policyScope, userEmail]);
 
   if (isLoadingPolicies) {
     return (
@@ -124,7 +132,7 @@ export default function PolicyDetailScreen({
     );
   }
 
-  if (!policy) {
+  if (!policy || unavailableScope === policyScope) {
     return (
       <View style={styles.emptyWrap}>
         <EmptyState

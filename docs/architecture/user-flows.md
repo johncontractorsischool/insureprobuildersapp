@@ -65,7 +65,7 @@
 ## 6. Agent-Published Payment Flow
 
 1. `PaymentsProvider` calls `GET /client/payment-eligibility?accountId={accountId}` after authentication and follows every pagination page.
-2. PBIA returns only visible `PUBLISHED` payment demands. An empty list means no payment is currently due.
+2. Signed-in PBIA eligibility returns only visible `PUBLISHED` demands for owned active policies. An empty list is valid, including when the customer has a separately emailed quote payment link. The app never creates a demand from a policy premium. Standalone signed quote links retain their own eligibility and checkout rules; they are not gated on membership in My Account and paying a quote does not make it appear here.
 3. The dashboard renders one **Payment Due** card per returned `demandId`, including the exact amount, due date, purpose, and optional agent message.
 4. The payment screen reloads `GET /client/payment-eligibility/{demandId}` with `X-Client-Account-Id` before review and again before submission.
 5. The amount and purpose are agent-authored and cannot be changed by the client. Regular card/ACH reviews display PBIA's server-calculated fee preview and total (regular ACH currently uses a fixed $3.00 fee). Only server eligibility `processingFeeAbsorbed: true` enables Special Rate Bond checkout with no added-fee wording or zero-fee rows, including screen-reader labels. Eligibility is never inferred from $139 or a product label. Each term, financed down payment, or installment uses its own API prices and the exact demand's flag. Zero fees are available; missing/null previews block the method. Contradictory absorbed-fee pricing blocks confirmation, and a changed flag requires a fresh review.
@@ -75,26 +75,28 @@
 ## 7. Policies Flow
 
 1. `PoliciesProvider` loads policies once the user is authenticated and `customer.accountId` exists.
-2. `fetchPoliciesByAccount(email, accountId)` hits `GET /client/policies` and follows all pagination pages.
-3. The service normalizes API records into the shared `Policy` shape.
-4. `app/(tabs)/policies.tsx` renders filter chips for `All`, `Active`, `Pending`, and `Lapsed`.
-5. Selecting a card routes to `/policy/[id]`.
+2. `fetchPoliciesByAccount(email, accountId)` uses authenticated `GET /client/policies` and follows all pagination pages. Before mapping, it accepts only owned records with `recordType: POLICY` and normalized `status: ACTIVE`. The server status is authoritative; device dates do not change eligibility.
+3. The shared native/web Policies screen groups each policy ID exactly once using raw `lineOfBusiness`, falling back to `productName` only when the raw value is missing. LLC Bond appears under **LLC Employee/Worker Bond**, separately from **CLB Bond**. Carrier, company, and policy-number text cannot determine coverage. Unknown active coverage remains visible under a readable source label or **Other Policies**.
+4. All five standard coverage types remain visible: Workers Compensation, LLC Employee/Worker Bond, CLB Bond, General Liability, and Commercial Auto. Types with active policies show their policy cards; types without active policies show **No Active Policy on File** and **Request a Quote**. LLC quote requests use the existing Bond Request form; CLB uses Contractor Bond Quote. Other active coverage types are also retained. Desktop coverage status and quick quote actions mirror these sections, and counts/premiums describe only displayed active policies.
+5. Zero active policies shows the five coverage quote cards. Refresh remains available. Loading and API errors remain separate; errors offer Retry rather than showing missing-coverage cards.
+6. Successful refresh replaces the collection. Account changes clear the previous collection immediately; late responses from an old account or an older refresh cannot restore it.
+7. Selecting a card routes to `/policy/[id]`.
 
 ## 8. Policy Detail and File Flow
 
-1. `app/policy/[id].tsx` resolves the selected policy from `PoliciesProvider`.
+1. `app/policy/[id].tsx` resolves an active policy from `PoliciesProvider`; a missing, inactive, or quote ID shows **Policy not found**.
 2. It requests coverage data from `GET /client/policies/:policyId/coverages` using the selected account id.
-3. The screen shows the PBIA coverage groups and policy summary.
+3. The screen shows the PBIA coverage groups and policy summary. A 404/403 hides the cached policy and its file action, showing **Policy not found** instead.
 4. "Browse policy files" routes to `/policy-files` with `accountId`, `policyId`, and `policyNumber`.
 
 ## 9. Policy Files Browser Flow
 
 1. `app/policy-files/index.tsx` derives the PBIA account id from route params first, then auth context.
-2. Account-level loads use `GET /client/documents`; policy-level loads use `GET /client/policies/:policyId/documents`.
+2. Account-level loads use `GET /client/documents`; policy-level loads use `GET /client/policies/:policyId/documents`. Hidden policy failures never fall back to account-level documents.
 3. Folder traversal supplies `folderId` to the same scoped endpoint.
-4. All pagination pages are combined before rendering.
-5. The current PBIA response exposes document metadata but no download URL, so the screen reports that download is unavailable.
-6. Pull-to-refresh reloads the current document scope.
+4. All pagination pages are combined before rendering. Account/route changes clear previous files, and stale responses cannot replace the current scope.
+5. Where PBIA supplies no download URL, the screen reports that download is unavailable.
+6. Pull-to-refresh reloads the current document scope. Failed loads or refreshes clear cached files and show a retryable error, including when a policy is no longer accessible.
 
 ## 10. Company Detail Flow
 

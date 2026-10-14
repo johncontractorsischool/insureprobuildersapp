@@ -68,6 +68,7 @@ export function buildCustomerLookupRecord(
 export function buildPolicy(overrides: Partial<Policy> = {}): Policy {
   return {
     id: 'policy-1',
+    recordType: 'POLICY',
     productName: 'General Liability',
     status: 'Active',
     policyNumber: 'GL-1001',

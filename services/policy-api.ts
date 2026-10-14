@@ -1,5 +1,6 @@
 import { buildClientQuery, pbiaRequest } from '@/services/pbia-client';
 import type { Policy, PolicyStatus } from '@/types/policy';
+import { isActivePolicy } from '@/utils/policy-coverage';
 
 type ClientPolicyRecord = {
   id: string;
@@ -132,5 +133,5 @@ export async function fetchPoliciesByAccount(
   if (!policies.every(isClientPolicyRecord)) {
     throw new Error('Unexpected PBIA policy response format.');
   }
-  return policies.map(mapPolicyRecord);
+  return policies.filter((record) => record.accountId === normalizedAccountId && isActivePolicy(record)).map(mapPolicyRecord);
 }

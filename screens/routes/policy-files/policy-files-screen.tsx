@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { EmptyState } from '@/components/empty-state';
@@ -98,11 +98,6 @@ export default function PolicyFilesScreen() {
     policyNumber?: string | string[];
   }>();
   const { customer, userEmail } = useAuth();
-  const [files, setFiles] = useState<PolicyFileEntry[]>([]);
-  const [isLoadingInitial, setIsLoadingInitial] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const accountId = useMemo(() => {
     const fromParams = readSearchParam(accountIdParam).trim();
     if (fromParams) return fromParams;
@@ -111,78 +106,67 @@ export default function PolicyFilesScreen() {
   const selectedPolicyId = useMemo(() => readSearchParam(policyId).trim(), [policyId]);
   const selectedPolicyNumber = useMemo(() => readSearchParam(policyNumber).trim(), [policyNumber]);
 
-  const loadFiles = useCallback(async () => {
+  const scope = JSON.stringify([
+    accountId, customer?.accountId, customer?.databaseId, userEmail, selectedPolicyId, selectedPolicyNumber,
+  ]);
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const requestId = useRef(0);
+  const [snapshot, setSnapshot] = useState({
+    scope,
+    files: [] as PolicyFileEntry[],
+    isLoadingInitial: true,
+    isRefreshing: false,
+    error: null as string | null,
+  });
+  const files = snapshot.scope === scope ? snapshot.files : [];
+  const isLoadingInitial = snapshot.scope !== scope || snapshot.isLoadingInitial;
+  const isRefreshing = snapshot.scope === scope && snapshot.isRefreshing;
+  const error = snapshot.scope === scope ? snapshot.error : null;
+
+  const loadFiles = useCallback(async (refresh = false) => {
+    const request = ++requestId.current;
+    const isCurrent = () => request === requestId.current && scope === currentScope.current;
+    const empty = {
+      scope, files: [] as PolicyFileEntry[], isLoadingInitial: false, isRefreshing: false,
+      error: null as string | null,
+    };
     if (!accountId || !userEmail) {
-      setFiles([]);
-      setError('No PBIA account id is available for this account.');
-      setIsLoadingInitial(false);
+      setSnapshot({ ...empty, error: 'No PBIA account id is available for this account.' });
       return;
     }
-
-    setError(null);
-
-    const rootResponse = selectedPolicyId
-      ? await fetchClientPolicyDocuments(userEmail, {
-          accountId,
-          policyId: selectedPolicyId,
-        })
-      : await fetchClientDocuments(userEmail, { accountId });
-
-    const visibleFiles = await collectVisibleFilesFromEntries({
-      entries: rootResponse.data,
-      clientEmail: userEmail,
-      accountId,
-      selectedPolicyId,
-      selectedPolicyNumber,
-      visitedFolderIds: new Set<string>(),
-    });
-
-    setFiles(visibleFiles);
-  }, [accountId, selectedPolicyId, selectedPolicyNumber, userEmail]);
+    setSnapshot((previous) => ({
+      ...empty,
+      files: refresh && previous.scope === scope ? previous.files : [],
+      isLoadingInitial: !refresh,
+      isRefreshing: refresh,
+    }));
+    try {
+      const rootResponse = selectedPolicyId
+        ? await fetchClientPolicyDocuments(userEmail, { accountId, policyId: selectedPolicyId })
+        : await fetchClientDocuments(userEmail, { accountId });
+      if (!isCurrent()) return;
+      const visibleFiles = await collectVisibleFilesFromEntries({
+        entries: rootResponse.data,
+        clientEmail: userEmail,
+        accountId,
+        selectedPolicyId,
+        selectedPolicyNumber,
+        visitedFolderIds: new Set<string>(),
+      });
+      if (isCurrent()) setSnapshot({ ...empty, files: visibleFiles });
+    } catch (nextError) {
+      // A failed refresh must not leave documents from a now-inaccessible policy available.
+      if (isCurrent()) setSnapshot({ ...empty, error: toUserFacingError(nextError) });
+    }
+  }, [accountId, scope, selectedPolicyId, selectedPolicyNumber, userEmail]);
 
   useEffect(() => {
-    let isMounted = true;
-
-    const hydrateFiles = async () => {
-      setIsLoadingInitial(true);
-      try {
-        await loadFiles();
-      } catch (nextError) {
-        if (!isMounted) return;
-        setFiles([]);
-        setError(toUserFacingError(nextError));
-      } finally {
-        if (isMounted) {
-          setIsLoadingInitial(false);
-        }
-      }
-    };
-
-    void hydrateFiles();
-
-    return () => {
-      isMounted = false;
-    };
+    void loadFiles();
+    return () => { requestId.current += 1; };
   }, [loadFiles]);
 
-  const refreshFiles = useCallback(async () => {
-    if (!accountId || !userEmail) return;
-
-    setIsRefreshing(true);
-    setError(null);
-    try {
-      await loadFiles();
-    } catch (nextError) {
-      const message = toUserFacingError(nextError);
-      if (files.length === 0) {
-        setError(message);
-      } else {
-        Alert.alert('Unable to refresh', message);
-      }
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [accountId, files.length, loadFiles, userEmail]);
+  const refreshFiles = useCallback(() => loadFiles(true), [loadFiles]);
 
   const handleFilePress = useCallback(async (item: PolicyFileEntry) => {
     const fileUrl = getFileUrl(item);

@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -28,56 +29,51 @@ function toUserFacingError(error: unknown) {
 
 export function PoliciesProvider({ children }: PropsWithChildren) {
   const { isAuthenticated, customer, userEmail } = useAuth();
-  const [policies, setPolicies] = useState<Policy[]>([]);
-  const [isLoadingPolicies, setIsLoadingPolicies] = useState(false);
-  const [policiesError, setPoliciesError] = useState<string | null>(null);
-
-  const accountId = useMemo(
-    () => customer?.accountId?.trim() || customer?.databaseId?.trim() || '',
-    [customer?.accountId, customer?.databaseId]
-  );
+  const accountId = customer?.accountId?.trim() || customer?.databaseId?.trim() || '';
+  const scope = JSON.stringify([isAuthenticated, accountId, userEmail]);
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const requestId = useRef(0);
+  const [snapshot, setSnapshot] = useState({
+    scope,
+    policies: [] as Policy[],
+    isLoadingPolicies: false,
+    policiesError: null as string | null,
+  });
 
   const refreshPolicies = useCallback(async () => {
+    const request = ++requestId.current;
+    const isCurrent = () => request === requestId.current && scope === currentScope.current;
+    const empty = { scope, policies: [] as Policy[], isLoadingPolicies: false, policiesError: null };
     if (!isAuthenticated) {
-      setPolicies([]);
-      setPoliciesError(null);
-      setIsLoadingPolicies(false);
+      setSnapshot(empty);
       return;
     }
-
     if (!accountId || !userEmail) {
-      setPolicies([]);
-      setPoliciesError('No PBIA account id is available for this account.');
-      setIsLoadingPolicies(false);
+      setSnapshot({ ...empty, policiesError: 'No PBIA account id is available for this account.' });
       return;
     }
 
-    setIsLoadingPolicies(true);
-    setPoliciesError(null);
+    setSnapshot({ ...empty, isLoadingPolicies: true });
     try {
-      const fetched = await fetchPoliciesByAccount(userEmail, accountId);
-      setPolicies(fetched);
+      const policies = await fetchPoliciesByAccount(userEmail, accountId);
+      if (isCurrent()) setSnapshot({ ...empty, policies });
     } catch (error) {
-      setPolicies([]);
-      setPoliciesError(toUserFacingError(error));
-    } finally {
-      setIsLoadingPolicies(false);
+      if (isCurrent()) setSnapshot({ ...empty, policiesError: toUserFacingError(error) });
     }
-  }, [accountId, isAuthenticated, userEmail]);
+  }, [accountId, isAuthenticated, scope, userEmail]);
 
   useEffect(() => {
     void refreshPolicies();
+    return () => { requestId.current += 1; };
   }, [refreshPolicies]);
 
-  const value = useMemo<PoliciesContextValue>(
-    () => ({
-      policies,
-      isLoadingPolicies,
-      policiesError,
-      refreshPolicies,
-    }),
-    [isLoadingPolicies, policies, policiesError, refreshPolicies]
-  );
+  const value = useMemo<PoliciesContextValue>(() => ({
+    policies: snapshot.scope === scope ? snapshot.policies : [],
+    isLoadingPolicies: snapshot.scope === scope ? snapshot.isLoadingPolicies : isAuthenticated,
+    policiesError: snapshot.scope === scope ? snapshot.policiesError : null,
+    refreshPolicies,
+  }), [isAuthenticated, refreshPolicies, scope, snapshot]);
 
   return <PoliciesContext.Provider value={value}>{children}</PoliciesContext.Provider>;
 }

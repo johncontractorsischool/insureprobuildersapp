@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AppButton } from '@/components/app-button';
 import { ContactUsMenu } from '@/components/contact-us-menu';
 import { EmptyState } from '@/components/empty-state';
 import { PolicyCard } from '@/components/policy-card';
@@ -19,15 +20,13 @@ import { usePbiaFormUrl } from '@/hooks/use-pbia-form-url';
 import { Policy } from '@/types/policy';
 import { openInAppBrowser } from '@/utils/external-actions';
 import { formatCurrency } from '@/utils/format';
-
-type CoverageSectionKey = 'workers-comp' | 'clb-bond' | 'general-liability' | 'commercial-auto';
+import { groupActivePolicies } from '@/utils/policy-coverage';
 
 type CoverageSectionConfig = {
-  key: CoverageSectionKey;
+  key: string;
   title: string;
-  formSlug: PbiaFormSlug;
-  keywords: readonly string[];
-  quoteDescription: string;
+  formSlug?: PbiaFormSlug;
+  quoteDescription?: string;
 };
 
 type CoverageSectionModel = CoverageSectionConfig & {
@@ -38,8 +37,6 @@ type CoverageSectionModel = CoverageSectionConfig & {
 type DesktopSummary = {
   totalPolicies: number;
   activeCount: number;
-  pendingCount: number;
-  lapsedCount: number;
   totalMonthlyPremium: number;
   coveredLineCount: number;
   missingLineCount: number;
@@ -50,44 +47,33 @@ const COVERAGE_SECTIONS: readonly CoverageSectionConfig[] = [
     key: 'workers-comp',
     title: 'Workers Compensation',
     formSlug: 'workers-comp',
-    keywords: ['workers compensation', 'workers comp', 'worker compensation', 'worker comp'],
     quoteDescription: 'Request a quote for workers compensation insurance.',
+  },
+  {
+    key: 'llc-bond',
+    title: 'LLC Employee/Worker Bond',
+    formSlug: 'bond-request',
+    quoteDescription: 'Request a quote for LLC employee/worker bond coverage.',
   },
   {
     key: 'clb-bond',
     title: 'CLB Bond',
     formSlug: 'bond-quote',
-    keywords: ['bond', 'contractor bond', 'license bond', 'surety bond', 'cslb bond', 'clb bond'],
     quoteDescription: 'Request a quote for contractor bond coverage.',
   },
   {
     key: 'general-liability',
     title: 'General Liability',
     formSlug: 'general-liability',
-    keywords: ['general liability', 'general liab', 'cgl'],
     quoteDescription: 'Request a quote for general liability insurance.',
   },
   {
     key: 'commercial-auto',
     title: 'Commercial Auto',
     formSlug: 'commercial-auto',
-    keywords: ['commercial auto', 'commercial automobile', 'business auto', 'auto liability'],
     quoteDescription: 'Request a quote for commercial auto insurance.',
   },
 ] as const;
-
-function normalizeForMatch(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function buildPolicyMatchText(policy: Policy) {
-  const coverageSummaryValues = policy.coverageSummary.map((item) => item.value).join(' ');
-  return normalizeForMatch([policy.productName, policy.insuredItem, coverageSummaryValues].join(' '));
-}
 
 type PoliciesScreenProps = {
   includeTabBarPadding?: boolean;
@@ -210,23 +196,20 @@ export default function PoliciesScreen({
   const { buildUrl: buildPbiaUrl } = usePbiaFormUrl();
 
   const coverageSections = useMemo<CoverageSectionModel[]>(() => {
-    const policiesWithMatchText = policies.map((policy) => ({
-      policy,
-      matchText: buildPolicyMatchText(policy),
-    }));
-
-    return COVERAGE_SECTIONS.map((section) => {
-      const normalizedKeywords = section.keywords.map((keyword) => normalizeForMatch(keyword));
-      const matchedPolicies = policiesWithMatchText
-        .filter(({ matchText }) => normalizedKeywords.some((keyword) => matchText.includes(keyword)))
-        .map(({ policy }) => policy);
-
-      return {
-        ...section,
-        matchedPolicies,
-        isOwned: matchedPolicies.length > 0,
-      };
-    });
+    const grouped = groupActivePolicies(policies);
+    const configuredKeys = new Set(COVERAGE_SECTIONS.map((section) => section.key));
+    return [
+      ...COVERAGE_SECTIONS.map((section) => {
+        const matchedPolicies = grouped.find((group) => group.key === section.key)?.policies ?? [];
+        return { ...section, matchedPolicies, isOwned: matchedPolicies.length > 0 };
+      }),
+      ...grouped.filter((group) => !configuredKeys.has(group.key)).map((group) => ({
+        key: group.key,
+        title: group.title,
+        matchedPolicies: group.policies,
+        isOwned: true,
+      })),
+    ];
   }, [policies]);
 
   const ownedSections = useMemo(
@@ -239,28 +222,18 @@ export default function PoliciesScreen({
   );
 
   const desktopSummary = useMemo<DesktopSummary>(() => {
-    let activeCount = 0;
-    let pendingCount = 0;
-    let lapsedCount = 0;
-    let totalMonthlyPremium = 0;
-
-    for (const policy of policies) {
-      if (policy.status === 'Active') activeCount += 1;
-      if (policy.status === 'Pending') pendingCount += 1;
-      if (policy.status === 'Lapsed') lapsedCount += 1;
-      totalMonthlyPremium += policy.premium ?? policy.premiumMonthly;
-    }
-
+    const activePolicies = ownedSections.flatMap((section) => section.matchedPolicies);
     return {
-      totalPolicies: policies.length,
-      activeCount,
-      pendingCount,
-      lapsedCount,
-      totalMonthlyPremium,
+      totalPolicies: activePolicies.length,
+      activeCount: activePolicies.length,
+      totalMonthlyPremium: activePolicies.reduce(
+        (total, policy) => total + (policy.premium ?? policy.premiumMonthly),
+        0
+      ),
       coveredLineCount: ownedSections.length,
       missingLineCount: missingSections.length,
     };
-  }, [missingSections.length, ownedSections.length, policies]);
+  }, [missingSections.length, ownedSections]);
 
   const handlePolicyPress = (policyId: string) => {
     router.push({
@@ -269,7 +242,8 @@ export default function PoliciesScreen({
     });
   };
 
-  const handleQuotePress = async (slug: PbiaFormSlug, policy?: Policy) => {
+  const handleQuotePress = async (slug?: PbiaFormSlug, policy?: Policy) => {
+    if (!slug) return;
     if (Platform.OS !== 'web') {
       const form = findPbiaFormBySlug(slug);
       if (!form) {
@@ -298,21 +272,15 @@ export default function PoliciesScreen({
     return (
       <View
         key={section.key}
+        testID={`coverage-${section.key}`}
         style={[styles.sectionBlock, isDesktopLayout ? styles.desktopSectionPanel : null]}>
-        <Text style={styles.sectionTitle}>{section.title}</Text>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>{section.title}</Text>
         <View style={styles.sectionContent}>
           {section.matchedPolicies.map((policy) => (
             <PolicyCard
               key={`${section.key}-${policy.id}`}
               policy={policy}
               onPress={() => handlePolicyPress(policy.id)}
-              onRequestQuote={
-                policy.status === 'Lapsed'
-                  ? () => {
-                      void handleQuotePress(section.formSlug, policy);
-                    }
-                  : undefined
-              }
             />
           ))}
         </View>
@@ -324,12 +292,14 @@ export default function PoliciesScreen({
     return (
       <View
         key={section.key}
+        testID={`coverage-${section.key}`}
         style={[styles.sectionBlock, isDesktopLayout ? styles.desktopSectionPanel : null]}>
-        <Text style={styles.sectionTitle}>{section.title}</Text>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>{section.title}</Text>
         <View style={styles.quoteCard}>
-          <Text style={styles.quoteCardTitle}>No Policy on File</Text>
+          <Text style={styles.quoteCardTitle}>No Active Policy on File</Text>
           <Text style={styles.quoteCardDescription}>{section.quoteDescription}</Text>
           <Pressable
+            accessibilityRole="button"
             onPress={() => void handleQuotePress(section.formSlug)}
             style={({ pressed }) => [styles.quoteButton, pressed ? styles.quoteButtonPressed : null]}>
             <Text style={styles.quoteButtonText}>Request a Quote</Text>
@@ -375,6 +345,7 @@ export default function PoliciesScreen({
         <ContactUsMenu />
       </View>
       <SectionHeader title="Policies" />
+      <AppButton label="Refresh" variant="secondary" onPress={() => void refreshPolicies()} />
 
       {isDesktopLayout ? (
         // Desktop uses a stable split shell so policies stay readable while summary/actions are always visible.
@@ -385,11 +356,11 @@ export default function PoliciesScreen({
           </View>
 
           <View style={styles.desktopSideColumn}>
-            <View style={styles.desktopRailCard}>
+            <View testID="active-policy-summary" style={styles.desktopRailCard}>
               <Text style={styles.desktopRailTitle}>Coverage Summary</Text>
               <View style={styles.desktopSummaryGrid}>
                 <View style={styles.desktopSummaryItem}>
-                  <Text style={styles.desktopSummaryLabel}>Policies on file</Text>
+                  <Text style={styles.desktopSummaryLabel}>Active policies</Text>
                   <Text style={styles.desktopSummaryValue}>{desktopSummary.totalPolicies}</Text>
                 </View>
                 <View style={styles.desktopSummaryItem}>
@@ -427,7 +398,7 @@ export default function PoliciesScreen({
                             styles.desktopStatusBadgeText,
                             isOwned ? styles.desktopStatusBadgeTextOwned : styles.desktopStatusBadgeTextMissing,
                           ]}>
-                          {isOwned ? 'On file' : 'Quote needed'}
+                          {isOwned ? 'Active policy on file' : 'No active policy'}
                         </Text>
                       </View>
                     </View>
@@ -437,8 +408,6 @@ export default function PoliciesScreen({
 
               <View style={styles.desktopStatusTotals}>
                 <Text style={styles.desktopStatusTotalText}>Active: {desktopSummary.activeCount}</Text>
-                <Text style={styles.desktopStatusTotalText}>Pending: {desktopSummary.pendingCount}</Text>
-                <Text style={styles.desktopStatusTotalText}>Lapsed: {desktopSummary.lapsedCount}</Text>
               </View>
             </View>
 
@@ -450,8 +419,9 @@ export default function PoliciesScreen({
                   {missingSections.map((section) => (
                     <Pressable
                       key={`quick-${section.key}`}
+                      accessibilityRole="button"
                       onPress={() => void handleQuotePress(section.formSlug)}
-                    style={({ pressed }) => [
+                      style={({ pressed }) => [
                         styles.desktopQuickAction,
                         pressed ? styles.desktopQuickActionPressed : null,
                       ]}>

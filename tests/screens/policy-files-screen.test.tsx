@@ -1,6 +1,7 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
+import { FlatList } from 'react-native';
 import PolicyFilesScreen from '@/app/policy-files';
 import { buildCustomer, buildPolicyFileEntry } from '@/tests/factories';
 
@@ -14,7 +15,7 @@ const mockUseLocalSearchParams = jest.fn(() => ({}));
 const mockUseAuth = jest.fn();
 const mockFetchClientPolicyDocuments = jest.fn();
 const mockFetchClientDocuments = jest.fn();
-const mockOpenInAppBrowser = jest.fn(() => Promise.resolve({ ok: true }));
+const mockOpenInAppBrowser = jest.fn((..._args: unknown[]) => Promise.resolve({ ok: true }));
 
 jest.mock('expo-router', () => ({
   __esModule: true,
@@ -43,6 +44,40 @@ describe('PolicyFilesScreen', () => {
       policyId: 'policy-1',
       policyNumber: 'GL-1001',
     });
+  });
+
+  it('shows unavailable for a hidden policy without falling back to account documents', async () => {
+    const { PbiaApiError } = require('@/services/pbia-client');
+    mockFetchClientPolicyDocuments.mockRejectedValueOnce(new PbiaApiError(404, 'Policy not found'));
+    const view = render(<PolicyFilesScreen />);
+    await view.findByText('Unable to load policy files');
+    expect(mockFetchClientDocuments).not.toHaveBeenCalled();
+    expect(mockOpenInAppBrowser).not.toHaveBeenCalled();
+  });
+
+  it('clears previously visible documents when refresh reports a hidden policy', async () => {
+    const { PbiaApiError } = require('@/services/pbia-client');
+    mockFetchClientPolicyDocuments.mockResolvedValueOnce({ data: [buildPolicyFileEntry({ name: 'Declarations.pdf' })] })
+      .mockRejectedValueOnce(new PbiaApiError(404, 'Policy not found'));
+    const view = render(<PolicyFilesScreen />);
+    await view.findByText('Declarations.pdf');
+    await act(async () => view.UNSAFE_getByType(FlatList).props.onRefresh());
+    await view.findByText('Unable to load policy files');
+    expect(view.queryByText('Declarations.pdf')).toBeNull();
+    expect(mockFetchClientDocuments).not.toHaveBeenCalled();
+  });
+
+  it('does not restore files after their route has changed', async () => {
+    let resolve!: (value: { data: ReturnType<typeof buildPolicyFileEntry>[] }) => void;
+    mockFetchClientPolicyDocuments.mockReturnValueOnce(new Promise((done) => { resolve = done; }))
+      .mockResolvedValueOnce({ data: [buildPolicyFileEntry({ policyId: 'policy-2', name: 'Current-policy.pdf' })] });
+    const view = render(<PolicyFilesScreen />);
+    mockUseLocalSearchParams.mockReturnValue({ accountId: 'account-1', policyId: 'policy-2' });
+    view.rerender(<PolicyFilesScreen />);
+    await view.findByText('Current-policy.pdf');
+    await act(async () => resolve({ data: [buildPolicyFileEntry({ name: 'Old-policy.pdf' })] }));
+    expect(view.queryByText('Old-policy.pdf')).toBeNull();
+    expect(view.getByText('Current-policy.pdf')).toBeTruthy();
   });
 
   it('loads policy files, resolves folders in the background, and only shows visible files', async () => {
