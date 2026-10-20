@@ -184,6 +184,9 @@ export function buildPaymentTermOption(
 export function buildPolicyFileEntry(overrides: Partial<PolicyFileEntry> = {}): PolicyFileEntry {
   return {
     databaseId: 'file-1',
+    documentKey: 'pbia:file-1',
+    source: 'PBIA',
+    openStatus: 'AVAILABLE',
     insuredId: 'insured-db-1',
     policyId: 'policy-1',
     policyNumber: 'GL-1001',

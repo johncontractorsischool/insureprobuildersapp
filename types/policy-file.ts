@@ -2,6 +2,9 @@ export type PolicyFileOrFolder = 'File' | 'Folder';
 
 export type PolicyFileEntry = {
   databaseId: string;
+  documentKey: string;
+  source: 'PBIA' | 'MOMENTUM';
+  openStatus: 'AVAILABLE' | 'UNAVAILABLE';
   insuredId: string | null;
   policyId: string | null;
   policyNumber: string | null;
@@ -21,7 +24,12 @@ export type PolicyFileEntry = {
 };
 
 export type PolicyFilesListResponse = {
-  status: number;
   data: PolicyFileEntry[];
-  message: string | null;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  partial: boolean;
+  totalScope: 'ALL_SOURCES' | 'AVAILABLE_SOURCES';
+  sources: { pbia: 'AVAILABLE'; momentum: 'AVAILABLE' | 'UNAVAILABLE' };
 };

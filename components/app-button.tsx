@@ -7,6 +7,8 @@ type AppButtonProps = {
   onPress: () => void;
   disabled?: boolean;
   loading?: boolean;
+  size?: 'default' | 'compact';
+  accessibilityLabel?: string;
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
 };
 
@@ -42,6 +44,8 @@ export function AppButton({
   onPress,
   disabled = false,
   loading = false,
+  size = 'default',
+  accessibilityLabel,
   variant = 'primary',
 }: AppButtonProps) {
   const config = variantStyles[variant];
@@ -50,17 +54,26 @@ export function AppButton({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       onPress={onPress}
       disabled={isDisabled}
       style={({ pressed }) => [
         styles.button,
+        size === 'compact' ? styles.compactButton : null,
         { backgroundColor: config.backgroundColor, borderColor: config.borderColor },
         pressed && !isDisabled ? styles.pressed : null,
         isDisabled ? styles.disabled : null,
       ]}>
       <View style={styles.content}>
         {loading ? <ActivityIndicator color={config.spinner} size="small" /> : null}
-        <Text style={[styles.label, { color: config.textColor }]}>{label}</Text>
+        <Text
+          style={[
+            styles.label,
+            size === 'compact' ? styles.compactLabel : null,
+            { color: config.textColor },
+          ]}>
+          {label}
+        </Text>
       </View>
     </Pressable>
   );
@@ -80,6 +93,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing.xs,
+  },
+  compactButton: {
+    minHeight: 44,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: theme.radius.sm,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  compactLabel: {
+    ...theme.typography.bodySmall,
+    fontWeight: '700',
   },
   label: {
     ...theme.typography.body,

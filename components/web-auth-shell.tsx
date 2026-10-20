@@ -89,14 +89,12 @@ function WebAuthSidebar() {
 export function WebAuthShell({ children }: PropsWithChildren) {
   const isDesktopLayout = useIsDesktopWebLayout();
 
-  if (!isDesktopLayout) {
-    return <>{children}</>;
-  }
-
+  // Keep the route at the same tree position so resizing does not reset its state.
   return (
-    <ScreenContainerSettingsProvider maxContentWidth={DESKTOP_MAX_CONTENT_WIDTH}>
+    <ScreenContainerSettingsProvider
+      maxContentWidth={isDesktopLayout ? DESKTOP_MAX_CONTENT_WIDTH : undefined}>
       <View style={styles.shell}>
-        <WebAuthSidebar />
+        {isDesktopLayout ? <WebAuthSidebar /> : null}
         <View style={styles.content}>{children}</View>
       </View>
     </ScreenContainerSettingsProvider>

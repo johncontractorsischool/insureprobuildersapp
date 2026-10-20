@@ -1,284 +1,225 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AppButton } from '@/components/app-button';
 import { EmptyState } from '@/components/empty-state';
 import { LoadingState } from '@/components/loading-state';
 import { ScreenContainer } from '@/components/screen-container';
 import { SectionHeader } from '@/components/section-header';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import {
-  fetchClientDocuments,
-  fetchClientPolicyDocuments,
-} from '@/services/policy-files-api';
-import { PolicyFileEntry } from '@/types/policy-file';
-import { openInAppBrowser } from '@/utils/external-actions';
+import { usePolicyDocuments } from '@/hooks/use-policy-documents';
+import type { PolicyFileEntry } from '@/types/policy-file';
+import { DocumentViewer } from '@/components/document-viewer';
 import { formatIsoDateTime } from '@/utils/format';
-import {
-  hasVisiblePolicyDocumentName,
-  matchesSelectedPolicyFile,
-  sortPolicyFilesNewestFirst,
-} from '@/utils/policy-files';
+import { sameExternalId } from '@/utils/policy-files';
 
-function toUserFacingError(error: unknown) {
-  if (error instanceof Error && error.message) return error.message;
-  return 'Unable to load policy files right now.';
+function param(value: string | string[] | undefined) {
+  return (Array.isArray(value) ? (value[0] ?? '') : (value ?? '')).trim();
 }
 
-function readSearchParam(value: string | string[] | undefined) {
-  if (Array.isArray(value)) return value[0] ?? '';
-  return value ?? '';
-}
-
-function getFileUrl(item: PolicyFileEntry) {
-  return item.fileUrl ?? item.downloadUrl ?? item.url;
-}
-
-async function collectVisibleFilesFromEntries({
-  entries,
-  clientEmail,
-  accountId,
-  selectedPolicyId,
-  selectedPolicyNumber,
-  visitedFolderIds,
-}: {
-  entries: PolicyFileEntry[];
-  clientEmail: string;
-  accountId: string;
-  selectedPolicyId: string;
-  selectedPolicyNumber: string;
-  visitedFolderIds: Set<string>;
-}): Promise<PolicyFileEntry[]> {
-  const visibleFiles = entries.filter(
-    (entry) =>
-      entry.fileOrFolder === 'File' &&
-      hasVisiblePolicyDocumentName(entry.name) &&
-      matchesSelectedPolicyFile(entry, selectedPolicyId, selectedPolicyNumber)
-  );
-
-  const nestedFiles = await Promise.all(
-    entries
-      .filter((entry) => entry.fileOrFolder === 'Folder')
-      .map(async (entry) => {
-        const folderId = entry.databaseId.trim();
-        const folderPolicyId = entry.policyId?.trim() || selectedPolicyId;
-        if (!folderId || !accountId || visitedFolderIds.has(folderId)) {
-          return [];
-        }
-
-        visitedFolderIds.add(folderId);
-        const response = folderPolicyId
-          ? await fetchClientPolicyDocuments(clientEmail, {
-              accountId,
-              policyId: folderPolicyId,
-              folderId,
-            })
-          : await fetchClientDocuments(clientEmail, { accountId, folderId });
-
-        return collectVisibleFilesFromEntries({
-          entries: response.data,
-          clientEmail,
-          accountId,
-          selectedPolicyId: folderPolicyId,
-          selectedPolicyNumber,
-          visitedFolderIds,
-        });
-      })
-  );
-
-  return sortPolicyFilesNewestFirst([...visibleFiles, ...nestedFiles.flat()]);
-}
+type Folder = { id: string; name: string; policyId: string };
 
 export default function PolicyFilesScreen() {
-  const { accountId: accountIdParam, policyId, policyNumber } = useLocalSearchParams<{
+  const params = useLocalSearchParams<{
     accountId?: string | string[];
     policyId?: string | string[];
     policyNumber?: string | string[];
   }>();
   const { customer, userEmail } = useAuth();
-  const accountId = useMemo(() => {
-    const fromParams = readSearchParam(accountIdParam).trim();
-    if (fromParams) return fromParams;
-    return customer?.accountId?.trim() || customer?.databaseId?.trim() || '';
-  }, [accountIdParam, customer?.accountId, customer?.databaseId]);
-  const selectedPolicyId = useMemo(() => readSearchParam(policyId).trim(), [policyId]);
-  const selectedPolicyNumber = useMemo(() => readSearchParam(policyNumber).trim(), [policyNumber]);
-
-  const scope = JSON.stringify([
-    accountId, customer?.accountId, customer?.databaseId, userEmail, selectedPolicyId, selectedPolicyNumber,
-  ]);
-  const currentScope = useRef(scope);
-  currentScope.current = scope;
-  const requestId = useRef(0);
-  const [snapshot, setSnapshot] = useState({
-    scope,
-    files: [] as PolicyFileEntry[],
-    isLoadingInitial: true,
-    isRefreshing: false,
-    error: null as string | null,
+  const accountId = customer?.accountId?.trim() || customer?.databaseId?.trim() || '';
+  const routeAccount = param(params.accountId);
+  const policyId = param(params.policyId);
+  const policyNumber = param(params.policyNumber);
+  const scopeError =
+    routeAccount && !sameExternalId(routeAccount, accountId)
+      ? 'The selected account changed. Return to Policies and select your policy again.'
+      : null;
+  const rootScope = JSON.stringify([accountId, userEmail, routeAccount, policyId, policyNumber]);
+  const [navigation, setNavigation] = useState<{ scope: string; folders: Folder[] }>({
+    scope: rootScope,
+    folders: [],
   });
-  const files = snapshot.scope === scope ? snapshot.files : [];
-  const isLoadingInitial = snapshot.scope !== scope || snapshot.isLoadingInitial;
-  const isRefreshing = snapshot.scope === scope && snapshot.isRefreshing;
-  const error = snapshot.scope === scope ? snapshot.error : null;
-
-  const loadFiles = useCallback(async (refresh = false) => {
-    const request = ++requestId.current;
-    const isCurrent = () => request === requestId.current && scope === currentScope.current;
-    const empty = {
-      scope, files: [] as PolicyFileEntry[], isLoadingInitial: false, isRefreshing: false,
-      error: null as string | null,
-    };
-    if (!accountId || !userEmail) {
-      setSnapshot({ ...empty, error: 'No PBIA account id is available for this account.' });
-      return;
-    }
-    setSnapshot((previous) => ({
-      ...empty,
-      files: refresh && previous.scope === scope ? previous.files : [],
-      isLoadingInitial: !refresh,
-      isRefreshing: refresh,
-    }));
-    try {
-      const rootResponse = selectedPolicyId
-        ? await fetchClientPolicyDocuments(userEmail, { accountId, policyId: selectedPolicyId })
-        : await fetchClientDocuments(userEmail, { accountId });
-      if (!isCurrent()) return;
-      const visibleFiles = await collectVisibleFilesFromEntries({
-        entries: rootResponse.data,
-        clientEmail: userEmail,
-        accountId,
-        selectedPolicyId,
-        selectedPolicyNumber,
-        visitedFolderIds: new Set<string>(),
-      });
-      if (isCurrent()) setSnapshot({ ...empty, files: visibleFiles });
-    } catch (nextError) {
-      // A failed refresh must not leave documents from a now-inaccessible policy available.
-      if (isCurrent()) setSnapshot({ ...empty, error: toUserFacingError(nextError) });
-    }
-  }, [accountId, scope, selectedPolicyId, selectedPolicyNumber, userEmail]);
-
-  useEffect(() => {
-    void loadFiles();
-    return () => { requestId.current += 1; };
-  }, [loadFiles]);
-
-  const refreshFiles = useCallback(() => loadFiles(true), [loadFiles]);
-
-  const handleFilePress = useCallback(async (item: PolicyFileEntry) => {
-    const fileUrl = getFileUrl(item);
-    if (!fileUrl) {
-      Alert.alert('Download unavailable', 'Document download is not available from the PBIA API yet.');
-      return;
-    }
-
-    const result = await openInAppBrowser(fileUrl, 'File link is not available.');
-    if (!result.ok) {
-      Alert.alert('Unable to open file', result.message ?? 'File link is not available.');
-    }
-  }, []);
+  const folders = navigation.scope === rootScope ? navigation.folders : [];
+  const folder = folders[folders.length - 1];
+  const documents = usePolicyDocuments({
+    accountId,
+    policyId: policyId || folder?.policyId || '',
+    policyNumber,
+    folderId: folder?.id,
+    userEmail,
+    scopeError,
+  });
+  const [selected, setSelected] = useState<{ scope: string; file: PolicyFileEntry } | null>(null);
+  const closeViewer = useCallback(() => setSelected(null), []);
+  useFocusEffect(useCallback(() => closeViewer, [closeViewer, documents.scope]));
+  const selectedFile =
+    selected?.scope === documents.scope && !documents.error ? selected.file : null;
+  const refresh = () => {
+    closeViewer();
+    void documents.refresh();
+  };
 
   const renderRow = ({ item }: { item: PolicyFileEntry }) => {
-    const createdAtLabel = formatIsoDateTime(item.createDate);
-
+    const isFolder = item.fileOrFolder === 'Folder';
+    const available = isFolder || item.openStatus === 'AVAILABLE';
     return (
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${item.name}, ${isFolder ? 'folder' : available ? 'open document' : 'opening unavailable'}`}
+        disabled={!available || selectedFile !== null}
         onPress={() => {
-          void handleFilePress(item);
+          if (isFolder) {
+            if (folders.some((entry) => sameExternalId(entry.id, item.databaseId))) return;
+            closeViewer();
+            setNavigation({
+              scope: rootScope,
+              folders: [
+                ...folders,
+                {
+                  id: item.databaseId,
+                  name: item.name,
+                  policyId: policyId || item.policyId || folder?.policyId || '',
+                },
+              ],
+            });
+          } else {
+            setSelected({ scope: documents.scope, file: item });
+          }
         }}
         style={({ pressed }) => [styles.itemCard, pressed ? styles.pressed : null]}>
         <View style={styles.itemTop}>
           <View style={styles.itemIconWrap}>
-            <Ionicons name="document-text-outline" size={20} color={theme.colors.primary} />
+            <Ionicons
+              name={isFolder ? 'folder-outline' : 'document-text-outline'}
+              size={20}
+              color={theme.colors.primary}
+            />
           </View>
           <View style={styles.itemCopy}>
             <Text style={styles.itemName}>{item.name}</Text>
-            {item.policyNumber ? <Text style={styles.itemMeta}>Policy #: {item.policyNumber}</Text> : null}
-            <Text style={styles.itemMeta}>By: {item.creatorName ?? 'Unknown'}</Text>
-            <Text style={styles.itemMeta}>Created: {createdAtLabel}</Text>
+            <Text style={styles.itemMeta}>
+              {item.source === 'PBIA' ? 'PBIA' : 'Historical document'}
+            </Text>
+            {item.createDate ? (
+              <Text style={styles.itemMeta}>Created: {formatIsoDateTime(item.createDate)}</Text>
+            ) : null}
+            <Text style={styles.itemMeta}>
+              {isFolder ? 'Open folder' : available ? 'Open document' : 'Opening unavailable'}
+            </Text>
           </View>
-          <Ionicons name="document-attach-outline" size={18} color={theme.colors.textSubtle} />
+          <Ionicons
+            name={isFolder ? 'chevron-forward' : 'document-attach-outline'}
+            size={18}
+            color={theme.colors.textSubtle}
+          />
         </View>
       </Pressable>
     );
   };
 
-  if (!accountId || !userEmail) {
-    return (
-      <ScreenContainer>
-        <EmptyState
-          icon="warning-outline"
-          title="Missing account id"
-          description="We could not find a PBIA account id to load documents for this account."
-        />
-      </ScreenContainer>
-    );
-  }
-
-  if (isLoadingInitial) {
-    return (
-      <ScreenContainer>
-        <LoadingState title="Loading policy files" description="Retrieving available policy documents." />
-      </ScreenContainer>
-    );
-  }
-
-  if (error && files.length === 0) {
-    return (
-      <ScreenContainer>
-        <EmptyState
-          icon="warning-outline"
-          title="Unable to load policy files"
-          description={error}
-          actionLabel="Retry"
-          onAction={() => {
-            void refreshFiles();
-          }}
-        />
-      </ScreenContainer>
-    );
-  }
-
   return (
     <ScreenContainer scroll={false}>
+      {selectedFile && userEmail ? (
+        <DocumentViewer
+          file={selectedFile}
+          accountId={accountId}
+          policyId={policyId || selectedFile.policyId || undefined}
+          userEmail={userEmail}
+          onClose={closeViewer}
+          onAccessDenied={() => {
+            closeViewer();
+            documents.invalidate(
+              'This document or policy is no longer available. Refresh to check access.'
+            );
+          }}
+        />
+      ) : null}
       <SectionHeader
         title="Documents"
         subtitle={
-          selectedPolicyNumber
-            ? `Available documents for policy ${selectedPolicyNumber}`
-            : 'Available policy documents'
+          folder
+            ? `Folder: ${folder.name}`
+            : policyNumber
+              ? `Available documents for policy ${policyNumber}`
+              : 'Available policy documents'
         }
       />
-
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-      <View style={styles.listCard}>
-        <FlatList
-          data={files}
-          keyExtractor={(item) => item.databaseId}
-          renderItem={renderRow}
-          onRefresh={() => {
-            void refreshFiles();
+      {folder ? (
+        <AppButton
+          label={folders.length === 1 ? 'Back to documents' : 'Back to previous folder'}
+          variant="ghost"
+          onPress={() => {
+            closeViewer();
+            setNavigation({ scope: rootScope, folders: folders.slice(0, -1) });
           }}
-          refreshing={isRefreshing}
-          contentContainerStyle={files.length === 0 ? styles.emptyListContent : styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <EmptyState
-              icon="document-text-outline"
-              title="No documents available"
-              description="There are no visible policy documents available for this policy yet."
-              actionLabel="Refresh"
-              onAction={() => {
-                void refreshFiles();
-              }}
-            />
-          }
         />
-      </View>
+      ) : null}
+      <AppButton
+        label="Refresh"
+        variant="secondary"
+        onPress={refresh}
+        loading={documents.loading === 'refresh'}
+      />
+      {documents.partial ? (
+        <Text accessibilityRole="alert" style={styles.errorText}>
+          Historical files are temporarily unavailable. Showing available saved documents. Refresh
+          to try again.
+        </Text>
+      ) : null}
+      {documents.loading === 'initial' || documents.loading === 'refresh' ? (
+        <LoadingState
+          title="Loading policy files"
+          description="Retrieving available policy documents."
+        />
+      ) : documents.error ? (
+        <EmptyState
+          icon="warning-outline"
+          title="Unable to load policy files"
+          description={documents.error}
+          actionLabel="Retry"
+          onAction={refresh}
+        />
+      ) : (
+        <View style={styles.listCard}>
+          <FlatList
+            data={documents.files}
+            keyExtractor={(item) => item.documentKey}
+            renderItem={renderRow}
+            onRefresh={refresh}
+            refreshing={false}
+            contentContainerStyle={styles.listContent}
+            ListEmptyComponent={
+              documents.partial ? null : (
+                <EmptyState
+                  icon="document-text-outline"
+                  title="No documents available"
+                  description="There are no documents available in this view."
+                />
+              )
+            }
+            ListFooterComponent={
+              <View>
+                {documents.moreError ? (
+                  <Text accessibilityRole="alert" style={styles.errorText}>
+                    {documents.moreError}
+                  </Text>
+                ) : null}
+                {documents.page < documents.totalPages ? (
+                  <AppButton
+                    label={documents.moreError ? 'Retry load more' : 'Load more'}
+                    variant="secondary"
+                    loading={documents.loading === 'more'}
+                    onPress={documents.loadMore}
+                  />
+                ) : null}
+              </View>
+            }
+          />
+        </View>
+      )}
     </ScreenContainer>
   );
 }
